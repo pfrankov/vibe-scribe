@@ -6,6 +6,139 @@
 //
 
 import SwiftUI
+import AVFoundation // Import AVFoundation
+
+// --- Audio Player Logic --- 
+
+class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published var isPlaying = false
+    @Published var currentTime: TimeInterval = 0.0
+    @Published var duration: TimeInterval = 0.0
+    @Published var player: AVAudioPlayer?
+    
+    private var timer: Timer?
+    private var displayLink: CADisplayLink? // Alternative timer for smoother UI updates
+    var wasPlayingBeforeScrub = false
+
+    func setupPlayer(url: URL) {
+        do {
+            // Stop existing player/timer if any
+            stopAndCleanup()
+            
+            // AVAudioSession configuration removed (not available/needed on macOS for basic playback)
+            // try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            // try AVAudioSession.sharedInstance().setActive(true)
+            
+            player = try AVAudioPlayer(contentsOf: url)
+            player?.delegate = self
+            player?.prepareToPlay()
+            duration = player?.duration ?? 0.0
+            currentTime = 0.0 // Reset time
+            print("Audio player setup complete. Duration: \(duration)")
+        } catch {
+            print("Error setting up audio player: \(error.localizedDescription)")
+            player = nil
+            duration = 0.0
+            currentTime = 0.0
+        }
+    }
+
+    func togglePlayPause() {
+        guard let player = player else { return }
+        
+        if player.isPlaying {
+            player.pause()
+            isPlaying = false
+            stopTimer()
+        } else {
+            player.play()
+            isPlaying = true
+            startTimer()
+        }
+    }
+
+    func seek(to time: TimeInterval) {
+        guard let player = player else { return }
+        player.currentTime = max(0, min(time, duration)) // Clamp value
+        self.currentTime = player.currentTime // Update published value immediately
+        if !isPlaying && wasPlayingBeforeScrub {
+             // If paused due to scrubbing, resume playback after seeking
+             player.play()
+             isPlaying = true
+             startTimer()
+             wasPlayingBeforeScrub = false // Reset flag
+         }
+    }
+    
+    // Call this when user starts dragging the slider
+    func scrubbingStarted() {
+         guard let player = player else { return }
+         wasPlayingBeforeScrub = player.isPlaying
+         if isPlaying {
+             player.pause()
+             isPlaying = false
+             stopTimer()
+         }
+     }
+
+    func stopAndCleanup() {
+        player?.stop()
+        stopTimer()
+        player = nil
+        isPlaying = false
+        currentTime = 0.0
+        duration = 0.0
+        wasPlayingBeforeScrub = false
+        // Deactivate audio session if needed (removed as unavailable)
+        // try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        print("Player stopped and cleaned up")
+    }
+
+    private func startTimer() {
+        stopTimer() // Ensure no duplicates
+        // Use CADisplayLink for smoother UI updates tied to screen refresh rate (Removed - unavailable)
+        // displayLink = CADisplayLink(target: self, selector: #selector(updateProgress))
+        // displayLink?.add(to: .current, forMode: .common)
+        
+        // Use standard Timer
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.updateProgress()
+        }
+    }
+
+    private func stopTimer() {
+        // displayLink?.invalidate()
+        // displayLink = nil
+        timer?.invalidate()
+        timer = nil
+    }
+
+    @objc private func updateProgress() {
+        guard let player = player else { return }
+        // Only update if playing and time has actually changed
+        if player.isPlaying && self.currentTime != player.currentTime {
+            self.currentTime = player.currentTime
+        }
+    }
+    
+    // MARK: - AVAudioPlayerDelegate Methods
+    
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        print("Playback finished. Success: \(flag)")
+        isPlaying = false
+        stopTimer()
+        // Reset progress to the beginning
+        self.currentTime = 0.0
+        player.currentTime = 0.0
+    }
+    
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        print("Audio player decode error: \(error?.localizedDescription ?? "Unknown error")")
+        isPlaying = false
+        stopTimer()
+        // Handle error appropriately
+    }
+}
 
 // Define a simple structure for a record
 struct Record: Identifiable, Hashable {
@@ -39,38 +172,58 @@ struct ContentView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Picker for top navigation
-            Picker("View", selection: $selectedTab) {
-                Text("Records").tag(0) // Using simple text as Label in Picker tag is not standard
-                Text("Settings").tag(1)
+        // Main container with adjusted spacing
+        VStack(spacing: 0) { // Remove default VStack spacing, manage manually
+
+            // Custom Tab Bar Area
+            HStack(spacing: 0) { // No spacing between buttons
+                TabBarButton(title: "Records", isSelected: selectedTab == 0) {
+                    selectedTab = 0
+                }
+                TabBarButton(title: "Settings", isSelected: selectedTab == 1) {
+                    selectedTab = 1
+                }
             }
-            .pickerStyle(SegmentedPickerStyle())
-            .padding(.horizontal)
-            .padding(.top, 10) // Add slight top padding
-            .padding(.bottom, 5) // Add padding below picker
+            .padding(.horizontal) // Padding for the whole tab bar
+            .padding(.top, 10)    // Padding above the tab bar
+            .padding(.bottom, 5) // Space between tabs and divider
 
             Divider()
+                .padding(.horizontal) // Keep divider padding
 
-            // Content based on selection
-            if selectedTab == 0 {
-                RecordsListView(records: records, selectedRecord: $selectedRecord)
-            } else {
-                SettingsView()
-            }
-
-            // Divider is removed from here as it's above the Quit button now
-
-            // Quit button
-            HStack {
-                Spacer()
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
+            // Content Area with Animation
+            ZStack { // Use ZStack for smooth transitions
+                if selectedTab == 0 {
+                    RecordsListView(records: records, selectedRecord: $selectedRecord)
+                        .transition(.opacity) // Fade transition
+                } else {
+                    SettingsView()
+                        .transition(.opacity) // Fade transition
                 }
-                .padding([.horizontal, .bottom]) // Adjusted padding
             }
-            .padding(.top, 5) // Add padding above the Quit button area
-            .background(Color(NSColor.windowBackgroundColor)) // Ensure background matches window
+            .animation(.easeInOut(duration: 0.2), value: selectedTab) // Apply animation to content switching
+            .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure content fills space
+
+            // Footer Area
+            VStack(spacing: 0) { // Use VStack for Divider + Button row
+                Divider()
+                    .padding(.horizontal) // Match top divider padding
+
+                // Quit button row
+                HStack {
+                    Spacer() // Push button to the right
+                    Button("Quit") {
+                        NSApplication.shared.terminate(nil)
+                    }
+                    // Add specific padding for the button if needed, or rely on HStack padding
+                    // .padding(.trailing)
+                }
+                .padding(.vertical, 10) // Padding for the quit button row
+                .padding(.horizontal)    // Horizontal padding for the row
+                .background(Color(NSColor.windowBackgroundColor)) // Ensure background matches window
+            }
+            // Ensure Footer doesn't absorb extra space meant for content
+            .layoutPriority(0) // Lower priority than the content ZStack
         }
         // Using .sheet to present the detail view modally
         .sheet(item: $selectedRecord) { record in
@@ -78,8 +231,28 @@ struct ContentView: View {
                 // Set a minimum frame for the sheet
                 .frame(minWidth: 400, minHeight: 450)
         }
-        // Ensure the main VStack takes up available space
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// --- Helper View for Tab Bar Button ---
+struct TabBarButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .fontWeight(isSelected ? .semibold : .regular) // Highlight selected
+                .frame(maxWidth: .infinity) // Make button take available width
+                .padding(.vertical, 8) // Vertical padding inside button
+                .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear) // Subtle background for selected
+                .contentShape(Rectangle()) // Ensure whole area is tappable
+        }
+        .buttonStyle(PlainButtonStyle()) // Remove default button chrome
+        .foregroundColor(isSelected ? .accentColor : .primary) // Text color change
+        .cornerRadius(6) // Slightly rounded corners for the background
+        .animation(.easeInOut(duration: 0.15), value: isSelected) // Animate selection change
     }
 }
 
@@ -130,7 +303,7 @@ struct RecordRow: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 4) { // Added spacing for clarity
                 Text(record.name).font(.headline)
                 HStack {
                     Text(record.date, style: .date)
@@ -143,25 +316,36 @@ struct RecordRow: View {
             Spacer()
             if record.hasTranscription {
                 Image(systemName: "text.bubble.fill")
-                    .foregroundColor(.blue)
+                    .foregroundColor(.accentColor) // Use accent color for more style
+                    .imageScale(.large) // Slightly larger icon
                     .help("Transcription available")
             } else {
                 Image(systemName: "text.bubble")
-                    .foregroundColor(.gray)
+                    .foregroundColor(.secondary) // Use secondary color
+                    .imageScale(.large) // Slightly larger icon
                     .help("Transcription pending")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8) // Increased vertical padding
     }
 }
 
 // Separate view for Settings
 struct SettingsView: View {
     var body: some View {
-        VStack {
-            Text("Settings content would go here")
-                .foregroundColor(.gray)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 15) { // Added spacing
+            Spacer() // Push content to center
+            Image(systemName: "gear.circle") // Placeholder Icon
+                .font(.system(size: 50))
+                .foregroundColor(.secondary)
+            Text("Settings")
+                .font(.title2)
+                .foregroundColor(.secondary)
+            Text("Application settings will be available here.")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Spacer() // Push content to center
         }
         .padding() // Add padding to the content
         // Ensure SettingsView fills the space
@@ -169,16 +353,23 @@ struct SettingsView: View {
     }
 }
 
-// Detail view for a single record (remains largely the same)
+// Detail view for a single record - Refactored to use AudioPlayerManager
 struct RecordDetailView: View {
     let record: Record
-    @Environment(\.dismiss) var dismiss // Environment value to dismiss the sheet
+    @Environment(\.dismiss) var dismiss
+    @StateObject private var playerManager = AudioPlayerManager()
+    @State private var currentSliderValue: Double = 0.0 // Separate state for live slider value
+
+    // Computed property for transcription text for easier access
+    private var transcriptionText: String {
+        record.hasTranscription ? "This is the placeholder for the transcription text. It would appear here once the audio is processed...\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua." : "Transcription not available yet."
+    }
 
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 12) {
             // Header with Title and Close button
             HStack {
-                Text(record.name).font(.title2)
+                Text(record.name).font(.title2).bold() // Make title bolder
                 Spacer()
                 Button {
                     dismiss()
@@ -189,39 +380,133 @@ struct RecordDetailView: View {
                 }
                 .buttonStyle(PlainButtonStyle()) // Remove button chrome
             }
-            .padding(.bottom)
+            // .padding(.bottom) // Use spacing from VStack
             
-            // Play Button
-            Button {
-                // Action for playing audio (to be implemented)
-                print("Play button clicked for \(record.name)")
-            } label: {
-                Label("Play Recording", systemImage: "play.circle")
+            // --- Audio Player UI --- 
+            VStack {
+                HStack {
+                    // Play/Pause Button
+                    Button {
+                        playerManager.togglePlayPause()
+                    } label: {
+                        Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title2)
+                            .frame(width: 30)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Progress Slider
+                    Slider(value: $currentSliderValue, in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0)) { editing in // Use currentSliderValue for live binding
+                        if editing {
+                            playerManager.scrubbingStarted()
+                        } else {
+                            playerManager.seek(to: currentSliderValue)
+                        }
+                    }
+                    // Use the newer onChange signature
+                    .onChange(of: playerManager.currentTime) { oldValue, newValue in // Updated signature
+                         // Update slider position when player time changes externally (not during scrubbing)
+                         if !playerManager.isPlaying && !playerManager.wasPlayingBeforeScrub { // A bit simplified logic, might need refinement
+                             currentSliderValue = newValue // Use newValue here
+                         }
+                     }
+
+                    
+                    // Time Label
+                    Text("\(formatTime(currentSliderValue)) / \(formatTime(playerManager.duration))") // Display slider time / total duration
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(width: 80, alignment: .trailing)
+                }
+                .padding(.vertical, 5)
             }
-            .padding(.bottom, 5)
+            .disabled(playerManager.player == nil) // Disable based on manager state
             
-            // Duration Info
-            Text("Duration: \(formatDuration(record.duration))")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            Divider()
             
-            Divider().padding(.vertical, 5)
+            // Transcription Header with Copy Button
+            HStack {
+                Text("Transcription") // Removed colon for cleaner look
+                    .font(.headline)
+                Spacer()
+                Button {
+                    copyTranscription()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .help("Copy Transcription")
+                .buttonStyle(PlainButtonStyle())
+                // Disable button if no transcription
+                .disabled(!record.hasTranscription)
+            }
             
-            Text("Transcription:")
-                .font(.headline)
-            
+            // Revert back to Text for performance and no blinking cursor
+            // Keep ScrollView for potentially long transcriptions
             ScrollView {
-                Text(record.hasTranscription ? "This is the placeholder for the transcription text. It would appear here once the audio is processed...\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua." : "Transcription not available yet.")
+                Text(transcriptionText)
                     .foregroundColor(record.hasTranscription ? .primary : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading) // Ensure text aligns left
+                    // Enable text selection
+                    .textSelection(.enabled)
+                    // Explicitly change cursor on hover
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.iBeam.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                    // Add padding within the ScrollView for the Text
+                    .padding(5)
             }
             .frame(maxHeight: .infinity) // Allow scroll view to expand
-            .border(Color.gray.opacity(0.5))
+            // Removed background, cornerRadius, and border from TextEditor/ScrollView
+
+            // --- Transcribe Button (Always visible) --- 
+            Button {
+                // Action to start transcription (placeholder)
+                print("Start transcription for \(record.name)")
+                // In a real app, you'd trigger the transcription process here
+                // and update the record's state eventually.
+            } label: {
+                Label("Transcribe", systemImage: "sparkles")
+            }
+            .buttonStyle(.bordered) // Apply standard bordered style
+            .frame(maxWidth: .infinity, alignment: .center) // Center the button
+            .padding(.top, 5) // Add some space above the button
             
-            Spacer() // Pushes content to the top, but ScrollView now expands
+            // No need for Spacer() if ScrollView uses maxHeight: .infinity
         }
-        .padding()
-        // Removed navigationTitle as it's presented in a sheet
+        .padding() // Overall padding for the sheet content
+        .onAppear {
+            // IMPORTANT: Update file name if needed
+            guard let url = Bundle.main.url(forResource: "sample.m4a", withExtension: nil) else {
+                print("Error: Audio file not found in onAppear.")
+                return
+            }
+            playerManager.setupPlayer(url: url)
+             // Initialize slider value
+             currentSliderValue = playerManager.currentTime
+        }
+        .onDisappear {
+            playerManager.stopAndCleanup()
+        }
+    }
+
+    // --- Helper Functions --- 
+    
+    private func copyTranscription() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(transcriptionText, forType: .string)
+        print("Transcription copied to clipboard.")
+    }
+    
+    // Helper to format time like MM:SS
+    private func formatTime(_ time: TimeInterval) -> String {
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 }
 
