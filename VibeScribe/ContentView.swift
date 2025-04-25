@@ -7,6 +7,10 @@
 
 import SwiftUI
 import AVFoundation // Import AVFoundation
+#if os(macOS)
+import AVKit // Make sure we have AVKit for AVCaptureDevice on macOS
+import Foundation // For Process
+#endif
 
 // --- Audio Player Logic --- 
 
@@ -17,17 +21,12 @@ class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var player: AVAudioPlayer?
     
     private var timer: Timer?
-    private var displayLink: CADisplayLink? // Alternative timer for smoother UI updates
     var wasPlayingBeforeScrub = false
 
     func setupPlayer(url: URL) {
         do {
             // Stop existing player/timer if any
             stopAndCleanup()
-            
-            // AVAudioSession configuration removed (not available/needed on macOS for basic playback)
-            // try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            // try AVAudioSession.sharedInstance().setActive(true)
             
             player = try AVAudioPlayer(contentsOf: url)
             player?.delegate = self
@@ -89,16 +88,11 @@ class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         currentTime = 0.0
         duration = 0.0
         wasPlayingBeforeScrub = false
-        // Deactivate audio session if needed (removed as unavailable)
-        // try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         print("Player stopped and cleaned up")
     }
 
     private func startTimer() {
         stopTimer() // Ensure no duplicates
-        // Use CADisplayLink for smoother UI updates tied to screen refresh rate (Removed - unavailable)
-        // displayLink = CADisplayLink(target: self, selector: #selector(updateProgress))
-        // displayLink?.add(to: .current, forMode: .common)
         
         // Use standard Timer
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -107,8 +101,6 @@ class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private func stopTimer() {
-        // displayLink?.invalidate()
-        // displayLink = nil
         timer?.invalidate()
         timer = nil
     }
@@ -229,18 +221,19 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         #endif
         
         do {
-            let recordingSettings = [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44100,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            // --- Updated Recording Settings to use AAC (more compatible) ---
+            let recordingSettings: [String: Any] = [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),   // Changed to AAC format 
+                AVSampleRateKey: 44100,                     // Standard rate
+                AVNumberOfChannelsKey: 1,                   // Mono
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue // For AAC
             ]
 
-            // Create a unique file name
+            // Create a unique file name with .m4a extension
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
             let dateString = dateFormatter.string(from: Date())
-            let fileName = "recording_\(dateString).m4a"
+            let fileName = "recording_\(dateString).m4a" // Changed extension back to m4a
             audioFileURL = getRecordingsDirectory().appendingPathComponent(fileName)
 
             guard let url = audioFileURL else {
@@ -275,22 +268,47 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         }
     }
 
+    // Most minimal possible implementation
     func startRecording() {
-        error = nil // Clear previous errors
+        // Check if already recording
         if audioRecorder?.isRecording == true {
             print("Already recording.")
             return
         }
 
-        if setupRecorder() {
-            audioRecorder?.record()
-            isRecording = true
-            startTimer()
-            print("Recording started.")
-        } else {
-            print("Failed to start recording due to setup error.")
-            // Error state is already set in setupRecorder
+        // Clear previous error
+        self.error = nil
+        
+        print("Attempting to start recording...") // Updated log message
+
+        // Setup the recorder
+        if !setupRecorder() {
+            // Error should already be set by setupRecorder()
+            print("Failed to setup recorder.")
+            isRecording = false // Ensure state is correct
+            return
+        }
+
+        // Recorder should be non-nil if setupRecorder returned true
+        guard let recorder = audioRecorder else {
+            print("Error: Recorder is nil after successful setup.")
+            self.error = NSError(domain: "AudioRecorderError", code: 6, userInfo: [NSLocalizedDescriptionKey: "Internal error: Recorder became nil."])
             isRecording = false
+            return
+        }
+
+        // Attempt to start recording
+        if recorder.record() {
+            isRecording = true
+            startTimer() // Start updating recordingTime
+            print("Recording started successfully.")
+        } else {
+            // Recording failed to start, even though setup was successful
+            print("Error: recorder.record() returned false.")
+            self.error = NSError(domain: "AudioRecorderError", code: 7, userInfo: [NSLocalizedDescriptionKey: "Failed to start recording after setup."])
+            isRecording = false
+            // Clean up recorder instance if start failed? Maybe not necessary here, handled by stop/cancel.
+            // audioRecorder = nil 
         }
     }
 
@@ -724,7 +742,7 @@ struct RecordDetailView: View {
     let record: Record
     @Environment(\.dismiss) var dismiss
     @StateObject private var playerManager = AudioPlayerManager()
-    @State private var currentSliderValue: Double = 0.0 // Separate state for live slider value
+    @State private var isEditingSlider = false // Track if user is scrubbing
 
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
@@ -761,25 +779,27 @@ struct RecordDetailView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     
-                    // Progress Slider
-                    Slider(value: $currentSliderValue, in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0)) { editing in // Use currentSliderValue for live binding
-                        if editing {
-                            playerManager.scrubbingStarted()
-                        } else {
-                            playerManager.seek(to: currentSliderValue)
+                    // Progress Slider - Updated Logic
+                    Slider(
+                        value: $playerManager.currentTime, // Bind directly to player's current time for display
+                        in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
+                        onEditingChanged: { editing in
+                            isEditingSlider = editing // Track scrubbing state
+                            if editing {
+                                playerManager.scrubbingStarted() // Tell manager scrubbing started
+                            } else {
+                                // Seek when scrubbing ends (using the current value from playerManager)
+                                playerManager.seek(to: playerManager.currentTime)
+                            }
                         }
-                    }
-                    // Use the newer onChange signature
-                    .onChange(of: playerManager.currentTime) { oldValue, newValue in // Updated signature
-                         // Update slider position when player time changes externally (not during scrubbing)
-                         if !playerManager.isPlaying && !playerManager.wasPlayingBeforeScrub { // A bit simplified logic, might need refinement
-                             currentSliderValue = newValue // Use newValue here
-                         }
-                     }
+                    )
+                    // Remove the complex onChange modifier, direct binding handles updates when not editing
+                    // .onChange(of: playerManager.currentTime) { oldValue, newValue in ... }
 
-                    
+
                     // Time Label
-                    Text("\(formatTime(currentSliderValue)) / \(formatTime(playerManager.duration))") // Display slider time / total duration
+                    // Display player's current time / total duration
+                    Text("\(formatTime(playerManager.currentTime)) / \(formatTime(playerManager.duration))")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .frame(width: 80, alignment: .trailing)
@@ -845,33 +865,24 @@ struct RecordDetailView: View {
         }
         .padding() // Overall padding for the sheet content
         .onAppear {
-            // Determine the URL to load
-            let urlToLoad: URL?
-            if let fileURL = record.fileURL {
-                // Check if the file exists before trying to load
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    urlToLoad = fileURL
-                    print("Loading audio from record.fileURL: \(fileURL.path)")
-                } else {
-                    print("Error: File specified in record.fileURL does not exist: \(fileURL.path)")
-                    urlToLoad = Bundle.main.url(forResource: "sample.m4a", withExtension: nil)
-                    print("Falling back to sample.m4a")
-                }
-            } else {
-                // Fallback to sample audio if no fileURL provided
-                urlToLoad = Bundle.main.url(forResource: "sample.m4a", withExtension: nil)
-                print("No fileURL in record, loading sample.m4a")
+            // --- Refined File Loading Logic ---
+            guard let fileURL = record.fileURL else {
+                print("Error: Record '\(record.name)' has no associated fileURL.")
+                // Optionally disable player controls or show UI error
+                // For now, we just prevent player setup
+                return // Exit early
             }
 
-            guard let url = urlToLoad else {
-                print("Error: Audio file could not be determined or found.")
-                // Optionally show an error message to the user
-                return
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                print("Error: Audio file for record '\(record.name)' not found at path: \(fileURL.path)")
+                // Optionally disable player controls or show UI error
+                return // Exit early
             }
-            
-            playerManager.setupPlayer(url: url)
-            // Initialize slider value
-            currentSliderValue = playerManager.currentTime
+
+            print("Loading audio from: \(fileURL.path)")
+            playerManager.setupPlayer(url: fileURL)
+            // No need to initialize currentSliderValue here anymore
+            // currentSliderValue = playerManager.currentTime
         }
         .onDisappear {
             playerManager.stopAndCleanup()
