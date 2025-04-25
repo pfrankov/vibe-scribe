@@ -4,5 +4,9 @@
 <dict>
     <key>LSUIElement</key>
     <true/>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>VibeScribe needs access to the microphone to record audio.</string>
 </dict>
 </plist> 
