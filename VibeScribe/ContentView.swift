@@ -172,6 +172,7 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     @Published var isRecording = false
     @Published var recordingTime: TimeInterval = 0.0
     @Published var error: Error? = nil // To report errors
+    @Published var audioLevels: [Float] = Array(repeating: 0.0, count: 10) // Array to store audio levels for visualization
 
     private var audioRecorder: AVAudioRecorder?
     private var timer: Timer?
@@ -387,6 +388,9 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
                 return
             }
             self.recordingTime = recorder.currentTime
+            
+            // Update audio levels for visualization
+            self.updateAudioLevels()
         }
     }
 
@@ -395,6 +399,24 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         timer = nil
     }
     
+    // New function to update audio levels
+    private func updateAudioLevels() {
+        guard let recorder = audioRecorder, isRecording else { return }
+        
+        recorder.updateMeters() // Update the meters
+        
+        // Get the power of the audio signal (in decibels)
+        let power = recorder.averagePower(forChannel: 0)
+        
+        // Convert from decibels (-160...0) to a value (0...1)
+        // Typical voice is around -10 to -30 dB, so we normalize for a better visual
+        let normalizedValue = min(1.0, max(0.0, (power + 50) / 50))
+        
+        // Add new value to the end and remove the oldest one
+        audioLevels.removeFirst()
+        audioLevels.append(Float(normalizedValue))
+    }
+
     // MARK: - AVAudioRecorderDelegate Methods
     
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
@@ -906,6 +928,27 @@ struct RecordDetailView: View {
     }
 }
 
+// --- Audio Wave Visualization --- 
+struct AudioWaveView: View {
+    var levels: [Float]
+    var activeColor: Color = .red
+    var inactiveColor: Color = .secondary
+    var isActive: Bool = true
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<levels.count, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(isActive ? activeColor : inactiveColor)
+                    .frame(width: 8, height: CGFloat(levels[index] * 60) + 5) // Min height of 5, max of 65
+                    .animation(.easeOut(duration: 0.2), value: levels[index])
+            }
+        }
+        .frame(height: 65) // Match the height used by the mic icon
+        .padding()
+    }
+}
+
 // --- Updated Recording View --- 
 struct RecordingView: View {
     @Environment(\.dismiss) var dismiss
@@ -927,12 +970,21 @@ struct RecordingView: View {
                 .monospacedDigit() // Ensures stable width
                 .padding(.bottom)
 
-            // Microphone icon indicates state
-            Image(systemName: recorderManager.isRecording ? "mic.fill" : "mic.slash.fill") // Use slash when not recording or error
-                .font(.system(size: 60))
-                // Color indication: red when recording, orange on error, secondary otherwise
-                .foregroundColor(recorderManager.isRecording ? .red : (recorderManager.error != nil ? .orange : .secondary))
-                .padding()
+            // Replace microphone icon with audio wave visualization when recording
+            if recorderManager.isRecording {
+                // Аудио волна во время записи
+                AudioWaveView(
+                    levels: recorderManager.audioLevels,
+                    activeColor: .red,
+                    isActive: true
+                )
+            } else {
+                // Иконка микрофона когда не записываем
+                Image(systemName: "mic.slash.fill") 
+                    .font(.system(size: 60))
+                    .foregroundColor(recorderManager.error != nil ? .orange : .secondary)
+                    .padding()
+            }
 
             // Display error message if any
             if let error = recorderManager.error {
