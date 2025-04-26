@@ -917,8 +917,8 @@ struct RecordingView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            // Title reflects recorder state
-            Text(recorderManager.isRecording ? "Recording..." : "Ready to Record")
+            // Title reflects recorder state more dynamically
+            Text(recorderManager.isRecording ? "Recording..." : recorderManager.error == nil ? "Preparing..." : "Error") // Updated title logic
                 .font(.title)
 
             // Display recording time
@@ -928,9 +928,10 @@ struct RecordingView: View {
                 .padding(.bottom)
 
             // Microphone icon indicates state
-            Image(systemName: recorderManager.isRecording ? "mic.fill" : "mic") // Used 'mic' instead of 'mic.slash'
+            Image(systemName: recorderManager.isRecording ? "mic.fill" : "mic.slash.fill") // Use slash when not recording or error
                 .font(.system(size: 60))
-                .foregroundColor(recorderManager.isRecording ? .red : .secondary)
+                // Color indication: red when recording, orange on error, secondary otherwise
+                .foregroundColor(recorderManager.isRecording ? .red : (recorderManager.error != nil ? .orange : .secondary))
                 .padding()
 
             // Display error message if any
@@ -943,47 +944,58 @@ struct RecordingView: View {
             }
 
             HStack {
-                // Start/Stop Button
-                Button(recorderManager.isRecording ? "Stop" : "Start Recording") {
-                    if recorderManager.isRecording {
-                        // Stop recording and call completion handler
-                        if let result = recorderManager.stopRecording() {
-                             onComplete(result.url, result.duration)
-                         } else {
-                             // Handle error if stopRecording failed (error is likely already set in manager)
-                             onComplete(nil, nil)
-                         }
-                        dismiss() // Dismiss the sheet after stopping
-                    } else {
-                        // Start recording
-                        recorderManager.startRecording()
-                    }
+                // --- Updated Button Logic ---
+                // The main button is now always "Stop" but disabled until recording actually starts
+                Button("Stop") {
+                    // Stop recording and call completion handler
+                    if let result = recorderManager.stopRecording() {
+                         onComplete(result.url, result.duration)
+                     } else {
+                         // Handle error if stopRecording failed (error is likely already set in manager)
+                         onComplete(nil, nil)
+                     }
+                    dismiss() // Dismiss the sheet after stopping
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .tint(recorderManager.isRecording ? .red : .accentColor)
-                .disabled(recorderManager.isRecording && recorderManager.recordingTime < 0.5) // Prevent accidental double-tap stop
+                .tint(.red) // Always red as it's the "Stop" action
+                // Disable Stop button if not recording OR if recording time is too short (prevents accidental taps) OR if there's an error
+                .disabled(!recorderManager.isRecording || recorderManager.recordingTime < 0.5 || recorderManager.error != nil)
 
-                // Cancel Button (only shown when recording)
-                if recorderManager.isRecording {
-                    Button("Cancel") {
+                // Cancel Button (Always visible, but primary action changes)
+                // If recording: Cancels the recording
+                // If not recording (e.g., during setup or error): Closes the sheet
+                Button(recorderManager.isRecording ? "Cancel" : "Close") {
+                    if recorderManager.isRecording {
                         recorderManager.cancelRecording()
                         onComplete(nil, nil) // Indicate cancellation
-                        dismiss() // Close the sheet
+                    } else {
+                        // If not recording (e.g., failed to start), just close the sheet
+                        onComplete(nil, nil) 
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    dismiss() // Close the sheet
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
             Spacer() // Push controls up
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            // --- Start recording automatically when the view appears ---
+            print("RecordingView appeared. Attempting to start recording.")
+            recorderManager.startRecording()
+        }
         .onDisappear {
             // Ensure recording is stopped/cancelled if the view disappears unexpectedly
+            // This might happen if the user closes the window or the app quits
             if recorderManager.isRecording {
                 print("RecordingView disappeared while recording. Cancelling.")
-                recorderManager.cancelRecording()
+                // We call cancel which also cleans up the file
+                recorderManager.cancelRecording() 
+                // We might want to inform the caller, but onComplete might not be valid anymore
+                // onComplete(nil, nil) // Be cautious calling this here
             }
         }
     }

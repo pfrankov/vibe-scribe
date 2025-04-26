@@ -10,9 +10,22 @@
 		8DC158442DAC281A00BECEAC /* VibeScribe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VibeScribe.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		8D7ECC832DBD4F6B007CC80F /* Exceptions for "VibeScribe" folder in "VibeScribe" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 8DC158432DAC281A00BECEAC /* VibeScribe */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8DC158462DAC281A00BECEAC /* VibeScribe */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				8D7ECC832DBD4F6B007CC80F /* Exceptions for "VibeScribe" folder in "VibeScribe" target */,
+			);
 			path = VibeScribe;
 			sourceTree = "<group>";
 		};
