@@ -7,29 +7,45 @@
 
 import SwiftUI
 import AppKit
+import SwiftData
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    var modelContainer: ModelContainer?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Create the SwiftUI view for the popover
-        let contentView = ContentView()
-        
-        // Create the popover
-        let popover = NSPopover()
-        popover.contentSize = NSSize(width: 600, height: 500)
-        popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: contentView)
-        self.popover = popover
-        
-        // Create the status item
-        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: "VibeScribe")
-            button.action = #selector(togglePopover)
+        do {
+            let schema = Schema([
+                Record.self,
+            ])
+            let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            print("SwiftData ModelContainer initialized successfully.")
+            
+            guard let container = modelContainer else {
+                fatalError("ModelContainer is nil after initialization")
+            }
+            
+            let contentView = ContentView()
+                .modelContainer(container)
+
+            let popover = NSPopover()
+            popover.contentSize = NSSize(width: 600, height: 500)
+            popover.behavior = .transient
+            popover.contentViewController = NSHostingController(rootView: contentView)
+            self.popover = popover
+            
+            let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            if let button = statusItem.button {
+                button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "VibeScribe")
+                button.action = #selector(togglePopover)
+            }
+            self.statusItem = statusItem
+            
+        } catch {
+            fatalError("Could not create ModelContainer: \(error)")
         }
-        self.statusItem = statusItem
     }
     
     @objc func togglePopover() {

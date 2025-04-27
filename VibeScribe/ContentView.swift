@@ -7,10 +7,39 @@
 
 import SwiftUI
 import AVFoundation // Import AVFoundation
+import SwiftData // <<< Import SwiftData
 #if os(macOS)
 import AVKit // Make sure we have AVKit for AVCaptureDevice on macOS
 import Foundation // For Process
 #endif
+
+// --- SwiftData Model ---
+@Model
+final class Record: Identifiable {
+    var id: UUID
+    var name: String
+    var fileURL: URL?
+    var date: Date
+    var duration: TimeInterval
+    var hasTranscription: Bool
+
+    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false) {
+        self.id = id
+        self.name = name
+        self.fileURL = fileURL // Store the URL object
+        self.date = date
+        self.duration = duration
+        self.hasTranscription = hasTranscription
+    }
+}
+
+// Helper to format duration (Keep outside the model)
+func formatDuration(_ duration: TimeInterval) -> String {
+    let formatter = DateComponentsFormatter()
+    formatter.allowedUnits = [.minute, .second]
+    formatter.unitsStyle = .abbreviated
+    return formatter.string(from: duration) ?? "0s"
+}
 
 // --- Audio Player Logic --- 
 
@@ -117,54 +146,34 @@ class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         print("Playback finished. Success: \(flag)")
-        isPlaying = false
-        stopTimer()
-        // Reset progress to the beginning
-        self.currentTime = 0.0
-        player.currentTime = 0.0
+        // Ensure UI updates on main thread if delegate methods aren't guaranteed
+        DispatchQueue.main.async {
+            self.isPlaying = false
+            self.stopTimer()
+            // Reset progress to the beginning
+            self.currentTime = 0.0
+            player.currentTime = 0.0 // Ensure player time resets too
+        }
     }
     
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         print("Audio player decode error: \(error?.localizedDescription ?? "Unknown error")")
-        isPlaying = false
-        stopTimer()
-        // Handle error appropriately
+        // Ensure UI updates on main thread
+        DispatchQueue.main.async {
+            self.isPlaying = false
+            self.stopTimer()
+            // Handle error appropriately - maybe show an alert
+        }
     }
 }
 
 // Define a simple structure for a record
-struct Record: Identifiable, Hashable {
-    let id: UUID
-    let name: String
-    let fileURL: URL? // URL to the actual audio file
-    // Add sample date and duration for UI display (can be replaced with real data later)
-    let date: Date
-    let duration: TimeInterval // Will be determined after recording
-    let hasTranscription: Bool // Will be false initially
-
-    // Initializer for existing sample data (without fileURL)
-    init(id: UUID = UUID(), name: String, date: Date = Date(), duration: TimeInterval = Double.random(in: 30...300), hasTranscription: Bool = Bool.random(), fileURL: URL? = nil) {
-        self.id = id
-        self.name = name
-        self.date = date
-        self.duration = duration
-        self.hasTranscription = hasTranscription
-        self.fileURL = fileURL
-    }
-
-    // Convenience initializer for newly created recordings
-    init(name: String, fileURL: URL, duration: TimeInterval) {
-        self.init(name: name, date: Date(), duration: duration, hasTranscription: false, fileURL: fileURL)
-    }
-}
+// <<< THIS STRUCT IS NOW REPLACED BY THE @Model CLASS Record ABOVE >>>
+// struct Record: Identifiable, Hashable { ... }
 
 // Helper to format duration
-func formatDuration(_ duration: TimeInterval) -> String {
-    let formatter = DateComponentsFormatter()
-    formatter.allowedUnits = [.minute, .second]
-    formatter.unitsStyle = .abbreviated
-    return formatter.string(from: duration) ?? "0s"
-}
+// <<< THIS IS NOW DEFINED NEAR THE @Model Record CLASS ABOVE >>>
+// func formatDuration(_ duration: TimeInterval) -> String { ... }
 
 // --- Audio Recorder Logic --- 
 
@@ -420,43 +429,49 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     // MARK: - AVAudioRecorderDelegate Methods
     
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        if !flag {
-            print("Recording finished unsuccessfully.")
-            // This might happen due to interruption or error. Stop timer etc.
-            stopTimer()
-            isRecording = false
-            recordingTime = 0.0
-            self.error = NSError(domain: "AudioRecorderError", code: 4, userInfo: [NSLocalizedDescriptionKey: "Recording did not finish successfully."])
+        // Update state on main thread
+        DispatchQueue.main.async {
+            if !flag {
+                print("Recording finished unsuccessfully.")
+                // This might happen due to interruption or error. Stop timer etc.
+                self.stopTimer()
+                self.isRecording = false
+                self.recordingTime = 0.0
+                self.error = NSError(domain: "AudioRecorderError", code: 4, userInfo: [NSLocalizedDescriptionKey: "Recording did not finish successfully."])
+                
+                #if os(iOS)
+                // Deactivate session on iOS
+                do {
+                    try AVAudioSession.sharedInstance().setActive(false)
+                    print("Audio session deactivated after unsuccessful recording.")
+                } catch {
+                    print("Error deactivating audio session: \(error.localizedDescription)")
+                }
+                #endif
+            }
+            // Note: We handle successful completion within stopRecording()
+        }
+    }
+
+    func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+        print("Audio recorder encode error: \(error?.localizedDescription ?? "Unknown error")")
+        // Update state on main thread
+        DispatchQueue.main.async {
+            self.stopTimer()
+            self.isRecording = false
+            self.recordingTime = 0.0
+            self.error = error ?? NSError(domain: "AudioRecorderError", code: 5, userInfo: [NSLocalizedDescriptionKey: "Encoding error occurred."])
             
             #if os(iOS)
             // Deactivate session on iOS
             do {
                 try AVAudioSession.sharedInstance().setActive(false)
-                print("Audio session deactivated after unsuccessful recording.")
+                print("Audio session deactivated after encode error.")
             } catch {
                 print("Error deactivating audio session: \(error.localizedDescription)")
             }
             #endif
         }
-        // Note: We handle successful completion within stopRecording()
-    }
-
-    func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        print("Audio recorder encode error: \(error?.localizedDescription ?? "Unknown error")")
-        stopTimer()
-        isRecording = false
-        recordingTime = 0.0
-        self.error = error ?? NSError(domain: "AudioRecorderError", code: 5, userInfo: [NSLocalizedDescriptionKey: "Encoding error occurred."])
-        
-        #if os(iOS)
-        // Deactivate session on iOS
-        do {
-            try AVAudioSession.sharedInstance().setActive(false)
-            print("Audio session deactivated after encode error.")
-        } catch {
-            print("Error deactivating audio session: \(error.localizedDescription)")
-        }
-        #endif
     }
     
     deinit {
@@ -470,18 +485,13 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
 }
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext // <<< Inject ModelContext
     @State private var selectedTab = 0
     @State private var selectedRecord: Record? = nil // State to manage which detail view to show
     @State private var isShowingRecordingSheet = false // State for the recording sheet
 
-    // Sample data for the list - Now with explicit initializers
-    @State private var records = [
-        Record(name: "Meeting Notes 2024-04-21", duration: 125, hasTranscription: true),
-        Record(name: "Idea Brainstorm", duration: 280, hasTranscription: false),
-        Record(name: "Lecture Recording", duration: 45, hasTranscription: false),
-        Record(name: "Quick Memo", duration: 190, hasTranscription: true),
-        Record(name: "Project Update", duration: 65, hasTranscription: false)
-    ]
+    // <<< Fetch records from SwiftData, sorted by date descending >>>
+    @Query(sort: \Record.date, order: .reverse) private var records: [Record]
 
     // Date formatter for default recording names
     private var recordingNameFormatter: DateFormatter = {
@@ -515,7 +525,7 @@ struct ContentView: View {
             ZStack { // Use ZStack for smooth transitions
                 if selectedTab == 0 {
                     RecordsListView(
-                        records: $records,
+                        records: records,
                         selectedRecord: $selectedRecord,
                         showRecordingSheet: $isShowingRecordingSheet,
                         onDelete: deleteRecord
@@ -557,23 +567,10 @@ struct ContentView: View {
         }
         // Sheet for Recording
         .sheet(isPresented: $isShowingRecordingSheet) {
-            // Updated closure signature
-            RecordingView { savedURL, duration in
-                isShowingRecordingSheet = false // Dismiss sheet
-                guard let url = savedURL else { 
-                    print("Recording was cancelled or failed.")
-                    return 
-                }
-                
-                // Create a default name
-                let defaultName = "Recording \(recordingNameFormatter.string(from: Date()))"
-                
-                // Create and add the new record
-                let newRecord = Record(name: defaultName, fileURL: url, duration: duration ?? 0.0)
-                records.append(newRecord)
-                print("Added new record: \(newRecord.name)")
-            }
-            .frame(minWidth: 350, minHeight: 300) // Adjusted size slightly
+            // Pass the model context to RecordingView
+             RecordingView() // <<< Remove onComplete closure, saving happens inside
+                // The view will use @Environment to get context
+                 .frame(minWidth: 350, minHeight: 300)
         }
     }
 
@@ -583,27 +580,33 @@ struct ContentView: View {
     private func deleteRecord(recordToDelete: Record) {
         // 1. Delete the associated audio file if it exists
         if let fileURL = recordToDelete.fileURL {
-            do {
-                // Check if file exists before attempting deletion
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    try FileManager.default.removeItem(at: fileURL)
-                    print("Successfully deleted audio file: \(fileURL.path)")
-                } else {
-                    print("Audio file not found, skipping deletion: \(fileURL.path)")
-                }
-            } catch {
-                print("Error deleting audio file \(fileURL.path): \(error.localizedDescription)")
-                // Decide if you want to proceed with removing the record from the list
-                // even if file deletion fails. For now, we will.
-            }
-        } else {
-            print("Record \(recordToDelete.name) has no associated fileURL.")
-        }
+             do {
+                 if FileManager.default.fileExists(atPath: fileURL.path) {
+                     try FileManager.default.removeItem(at: fileURL)
+                     print("Successfully deleted audio file: \(fileURL.path)")
+                 } else {
+                     print("Audio file not found, skipping deletion: \(fileURL.path)")
+                 }
+             } catch {
+                 print("Error deleting audio file \(fileURL.path): \(error.localizedDescription)")
+                 // Consider showing an error to the user
+             }
+         } else {
+             print("Record \(recordToDelete.name) has no associated fileURL.")
+         }
 
-        // 2. Remove the record from the state array
-        // Use removeAll(where:) for safer removal based on id
-        records.removeAll { $0.id == recordToDelete.id }
-        print("Removed record from list: \(recordToDelete.name)")
+        // 2. Remove the record from the model context
+        print("Deleting record from context: \(recordToDelete.name)")
+        modelContext.delete(recordToDelete)
+        
+        // Optional: Explicitly save changes, though autosave is common
+        // do {
+        //     try modelContext.save()
+        //     print("Record deleted and context saved.")
+        // } catch {
+        //     print("Error saving context after deleting record: \(error)")
+        //     // Handle error - maybe show an alert
+        // }
 
         // 3. If the deleted record was currently selected, deselect it
         if selectedRecord?.id == recordToDelete.id {
@@ -636,10 +639,11 @@ struct TabBarButton: View {
 
 // Separate view for the list of records
 struct RecordsListView: View {
-    @Binding var records: [Record]
-    @Binding var selectedRecord: Record? // Binding to control the detail sheet presentation
-    @Binding var showRecordingSheet: Bool // Binding to control the recording sheet
-    var onDelete: (Record) -> Void // Closure to handle deletion
+    // Use the actual Record model type
+    let records: [Record] // <<< Receive the array directly (no Binding needed for the array itself)
+    @Binding var selectedRecord: Record?
+    @Binding var showRecordingSheet: Bool
+    var onDelete: (Record) -> Void
 
     var body: some View {
         VStack {
@@ -679,16 +683,17 @@ struct RecordsListView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure VStack fills space
                 } else {
                     List {
+                        // Iterate over the fetched records
                         ForEach(records) { record in
                             RecordRow(record: record)
-                                .contentShape(Rectangle()) // Make the whole row tappable
+                                .contentShape(Rectangle())
                                 .onTapGesture {
                                     selectedRecord = record // Set the selected record to show the detail sheet
                                 }
                                 // Add Context Menu for Delete Action
                                 .contextMenu {
                                     Button(role: .destructive) {
-                                        onDelete(record) // Call the delete closure passed from ContentView
+                                        onDelete(record) // <<< Call the delete closure
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -952,11 +957,17 @@ struct AudioWaveView: View {
 // --- Updated Recording View --- 
 struct RecordingView: View {
     @Environment(\.dismiss) var dismiss
-    // Updated closure: returns optional URL and TimeInterval
-    var onComplete: (URL?, TimeInterval?) -> Void 
+    @Environment(\.modelContext) private var modelContext // <<< Inject ModelContext
 
     @StateObject private var recorderManager = AudioRecorderManager()
-    // Removed @State private var isRecording - now managed by recorderManager
+    
+    // Date formatter for default recording names
+    private var recordingNameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 
     var body: some View {
         VStack(spacing: 20) {
@@ -980,7 +991,7 @@ struct RecordingView: View {
                 )
             } else {
                 // Иконка микрофона когда не записываем
-                Image(systemName: "mic.slash.fill") 
+                Image(systemName: recorderManager.error != nil ? "mic.slash.fill" : "mic.fill") // Show mic.fill if ready
                     .font(.system(size: 60))
                     .foregroundColor(recorderManager.error != nil ? .orange : .secondary)
                     .padding()
@@ -997,16 +1008,34 @@ struct RecordingView: View {
 
             HStack {
                 // --- Updated Button Logic ---
-                // The main button is now always "Stop" but disabled until recording actually starts
                 Button("Stop") {
-                    // Stop recording and call completion handler
-                    if let result = recorderManager.stopRecording() {
-                         onComplete(result.url, result.duration)
-                     } else {
-                         // Handle error if stopRecording failed (error is likely already set in manager)
-                         onComplete(nil, nil)
+                    // Stop recording
+                     guard let result = recorderManager.stopRecording() else {
+                         // Handle error if stopRecording failed (error is likely set in manager)
+                         // Maybe show an alert or log
+                         print("Failed to stop recording properly.")
+                         // We might still want to dismiss, or keep the view open showing the error
+                         dismiss()
+                         return
                      }
-                    dismiss() // Dismiss the sheet after stopping
+                    
+                    // <<< Create and save the new Record >>>
+                    let defaultName = "Recording \(recordingNameFormatter.string(from: Date()))"
+                    let newRecord = Record(name: defaultName, fileURL: result.url, duration: result.duration)
+                    
+                    print("Attempting to insert new record: \(newRecord.name)")
+                    modelContext.insert(newRecord)
+                    
+                    // Optional: Explicit save, though autosave should work
+                    // do {
+                    //     try modelContext.save()
+                    //     print("New record saved successfully.")
+                    // } catch {
+                    //     print("Error saving context after inserting record: \(error)")
+                    //     // Handle error saving the context (e.g., show alert)
+                    // }
+
+                    dismiss() // Dismiss the sheet after stopping and attempting save
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -1020,12 +1049,10 @@ struct RecordingView: View {
                 Button(recorderManager.isRecording ? "Cancel" : "Close") {
                     if recorderManager.isRecording {
                         recorderManager.cancelRecording()
-                        onComplete(nil, nil) // Indicate cancellation
-                    } else {
-                        // If not recording (e.g., failed to start), just close the sheet
-                        onComplete(nil, nil) 
+                        // No need to call onComplete
                     }
-                    dismiss() // Close the sheet
+                    // Always dismiss when this button is pressed
+                    dismiss() 
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
@@ -1035,8 +1062,10 @@ struct RecordingView: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            // --- Start recording automatically when the view appears ---
+            // Start recording automatically
             print("RecordingView appeared. Attempting to start recording.")
+            // Clear previous errors before starting
+             recorderManager.error = nil 
             recorderManager.startRecording()
         }
         .onDisappear {
@@ -1061,5 +1090,21 @@ struct RecordingView: View {
 }
 
 #Preview {
-    ContentView()
+    // --- Updated Preview ---
+    // Need to provide a sample model container for the preview
+    do {
+        let schema = Schema([Record.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true) // Use in-memory for preview
+        let container = try ModelContainer(for: schema, configurations: [config])
+        
+        // Optional: Add sample data to the preview container
+        let sampleRecord = Record(name: "Preview Record", fileURL: nil, duration: 65.0)
+        container.mainContext.insert(sampleRecord)
+
+        return ContentView()
+            .modelContainer(container) // Provide the container to the preview
+    } catch {
+        // Handle error creating the preview container
+        return Text("Failed to create preview: \(error.localizedDescription)")
+    }
 }
