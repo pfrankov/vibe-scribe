@@ -690,8 +690,11 @@ struct RecordsListView: View {
                                 .onTapGesture {
                                     selectedRecord = record // Set the selected record to show the detail sheet
                                 }
-                                // Add Context Menu for Delete Action
+                                // Updated Context Menu (Removed Rename)
                                 .contextMenu {
+                                    // <<< Removed Rename Button >>>
+                                    // Button { ... } label: { ... }
+
                                     Button(role: .destructive) {
                                         onDelete(record) // <<< Call the delete closure
                                     } label: {
@@ -710,12 +713,45 @@ struct RecordsListView: View {
 
 // View for a single row in the records list
 struct RecordRow: View {
-    let record: Record
+    // Use @ObservedObject if Record conforms to ObservableObject
+    // Or pass the necessary binding/callback if direct modification isn't desired/possible
+    @Bindable var record: Record // Use @Bindable for direct modification of @Model
+
+    @State private var isEditing: Bool = false
+    @State private var editingName: String = ""
+    @FocusState private var isNameFieldFocused: Bool
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) { // Added spacing for clarity
-                Text(record.name).font(.headline)
+                // ZStack to overlay TextField on Text for editing
+                ZStack(alignment: .leading) {
+                    // --- TextField (Visible when editing) ---
+                    TextField("Name", text: $editingName)
+                        .textFieldStyle(.plain) // Use plain style to match Text look
+                        .focused($isNameFieldFocused)
+                        .onSubmit { // Handle Enter key press
+                            saveName()
+                        }
+                        // Prevent clicks on TextField from selecting the row
+                        .onTapGesture {}
+                        // Apply same font/padding as Text for alignment
+                        .font(.headline)
+                        // Make TextField visible only when editing
+                        .opacity(isEditing ? 1 : 0)
+                        .disabled(!isEditing) // Disable when not editing
+
+                    // --- Text (Visible when not editing) ---
+                    Text(record.name)
+                        .font(.headline)
+                        // Make Text visible only when *not* editing
+                        .opacity(isEditing ? 0 : 1)
+                        // Double-click to start editing
+                        .onTapGesture(count: 2) {
+                            startEditing()
+                        }
+                }
+
                 HStack {
                     Text(record.date, style: .date)
                     Text("-")
@@ -725,19 +761,46 @@ struct RecordRow: View {
                 .foregroundColor(.secondary)
             }
             Spacer()
-            if record.hasTranscription {
-                Image(systemName: "text.bubble.fill")
-                    .foregroundColor(.accentColor) // Use accent color for more style
-                    .imageScale(.large) // Slightly larger icon
-                    .help("Transcription available")
-            } else {
-                Image(systemName: "text.bubble")
-                    .foregroundColor(.secondary) // Use secondary color
-                    .imageScale(.large) // Slightly larger icon
-                    .help("Transcription pending")
-            }
+            // <<< Removed the transcription status icon >>>
         }
         .padding(.vertical, 8) // Increased vertical padding
+        // Detect when the text field loses focus to cancel editing
+        .onChange(of: isNameFieldFocused) { oldValue, newValue in
+            if !newValue && isEditing { // If focus is lost AND we were editing
+                // This handles clicking away or pressing Esc (which also removes focus)
+                cancelEditing()
+            }
+        }
+    }
+
+    private func startEditing() {
+        editingName = record.name // Initialize TextField with current name
+        isEditing = true
+        // Delay focus slightly to ensure TextField is visible
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+             isNameFieldFocused = true
+        }
+        print("Started editing record: \(record.name)")
+    }
+
+    private func saveName() {
+        // Only save if the name is valid and actually changed
+        if !editingName.isEmpty && editingName != record.name {
+            print("Saving new name: \(editingName) for record ID: \(record.id)")
+            record.name = editingName
+            // SwiftData @Bindable should handle the save automatically
+        } else {
+            print("Name unchanged or empty, reverting.")
+        }
+        isEditing = false // Exit editing mode
+        isNameFieldFocused = false // Ensure focus is released
+    }
+
+    private func cancelEditing() {
+        print("Cancelled editing for record: \(record.name)")
+        isEditing = false // Exit editing mode
+        isNameFieldFocused = false // Ensure focus is released
+        // No need to reset editingName, it will be re-initialized on next edit
     }
 }
 
@@ -766,10 +829,16 @@ struct SettingsView: View {
 
 // Detail view for a single record - Refactored to use AudioPlayerManager
 struct RecordDetailView: View {
-    let record: Record
+    // Use @Bindable for direct modification of @Model properties
+    @Bindable var record: Record
     @Environment(\.dismiss) var dismiss
     @StateObject private var playerManager = AudioPlayerManager()
     @State private var isEditingSlider = false // Track if user is scrubbing
+
+    // State for inline title editing
+    @State private var isEditingTitle: Bool = false
+    @State private var editingTitle: String = ""
+    @FocusState private var isTitleFieldFocused: Bool
 
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
@@ -778,9 +847,27 @@ struct RecordDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header with Title and Close button
+            // Header with Title (now editable) and Close button
             HStack {
-                Text(record.name).font(.title2).bold() // Make title bolder
+                ZStack(alignment: .leading) {
+                    // --- TextField (Visible when editing title) ---
+                    TextField("Name", text: $editingTitle)
+                        .textFieldStyle(.plain)
+                        .focused($isTitleFieldFocused)
+                        .onSubmit { saveTitle() }
+                        .font(.title2.bold()) // Match Text style
+                        .opacity(isEditingTitle ? 1 : 0)
+                        .disabled(!isEditingTitle)
+                        .onTapGesture {}
+
+                    // --- Text (Visible when not editing title) ---
+                    Text(record.name)
+                        .font(.title2.bold())
+                        .opacity(isEditingTitle ? 0 : 1)
+                        .onTapGesture(count: 2) {
+                            startEditingTitle()
+                        }
+                }
                 Spacer()
                 Button {
                     dismiss()
@@ -791,7 +878,6 @@ struct RecordDetailView: View {
                 }
                 .buttonStyle(PlainButtonStyle()) // Remove button chrome
             }
-            // .padding(.bottom) // Use spacing from VStack
             
             // --- Audio Player UI --- 
             VStack {
@@ -914,10 +1000,42 @@ struct RecordDetailView: View {
         .onDisappear {
             playerManager.stopAndCleanup()
         }
+        // Detect focus changes for the title TextField
+        .onChange(of: isTitleFieldFocused) { oldValue, newValue in
+            if !newValue && isEditingTitle { // If focus is lost AND we were editing
+                cancelEditingTitle()
+            }
+        }
     }
 
     // --- Helper Functions --- 
-    
+
+    private func startEditingTitle() {
+        editingTitle = record.name
+        isEditingTitle = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+             isTitleFieldFocused = true
+        }
+        print("Started editing title for record: \(record.name)")
+    }
+
+    private func saveTitle() {
+        if !editingTitle.isEmpty && editingTitle != record.name {
+            print("Saving new title: \(editingTitle) for record ID: \(record.id)")
+            record.name = editingTitle
+        } else {
+            print("Title unchanged or empty, reverting.")
+        }
+        isEditingTitle = false
+        isTitleFieldFocused = false
+    }
+
+    private func cancelEditingTitle() {
+        print("Cancelled editing title for record: \(record.name)")
+        isEditingTitle = false
+        isTitleFieldFocused = false
+    }
+
     private func copyTranscription() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
