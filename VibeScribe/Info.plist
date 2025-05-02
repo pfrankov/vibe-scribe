@@ -10,5 +10,7 @@
     <false/>
     <key>NSMicrophoneUsageDescription</key>
     <string>VibeScribe needs access to the microphone to record audio for transcription.</string>
+    <key>NSScreenCaptureDescription</key>
+    <string>VibeScribe needs screen capture permission to record system audio output for transcription.</string>
 </dict>
 </plist> 
