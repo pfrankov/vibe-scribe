@@ -17,6 +17,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     @Published var isRecording = false
     @Published var error: Error?
+    @Published var audioLevels: [Float] = Array(repeating: 0.0, count: 10) // Array to store system audio levels for visualization
 
     private var stream: SCStream?
     private var audioFile: AVAudioFile?
@@ -155,6 +156,9 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             return
         }
 
+        // Calculate audio levels from the sample buffer
+        updateAudioLevels(from: sampleBuffer)
+
         // Get format description and ASBD (non-isolated)
         guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(format) else {
@@ -256,8 +260,6 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         pcmBuffer.frameLength = frameCount
         
         // Get audio buffer list from the sample buffer
-        var audioBufferList = AudioBufferList()
-        var blockBuffer: CMBlockBuffer?
         
         // Instead of using the CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer that's failing,
         // try a different approach to extract audio data
@@ -331,6 +333,58 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             self.stream = nil
             self.audioFile = nil
             self.isRecording = false
+        }
+    }
+
+    // New method to calculate and update audio levels from the sample buffer
+    private nonisolated func updateAudioLevels(from sampleBuffer: CMSampleBuffer) {
+        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        
+        var dataLength: size_t = 0
+        var dataPointer: UnsafeMutablePointer<Int8>?
+        
+        let status = CMBlockBufferGetDataPointer(dataBuffer,
+                                             atOffset: 0,
+                                             lengthAtOffsetOut: nil,
+                                             totalLengthOut: &dataLength,
+                                             dataPointerOut: &dataPointer)
+        
+        if status != kCMBlockBufferNoErr || dataPointer == nil { return }
+        
+        // Get the audio data to calculate RMS power
+        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format) else { return }
+        
+        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        let channelCount = Int(asbd.pointee.mChannelsPerFrame)
+        let bytesPerFrame = asbd.pointee.mBytesPerFrame
+        
+        // Calculate RMS power (average of squared samples)
+        var sumSquares: Float = 0.0
+        let samples = UnsafeMutableRawPointer(dataPointer!)
+        
+        // Process each frame
+        for frame in 0..<frameCount {
+            // Process each channel in the frame
+            for channel in 0..<channelCount {
+                let offset = Int(bytesPerFrame) * frame + channel * 4 // Assuming 32-bit float samples
+                if offset + 4 <= dataLength {
+                    let sampleValue = samples.load(fromByteOffset: offset, as: Float.self)
+                    sumSquares += sampleValue * sampleValue
+                }
+            }
+        }
+        
+        // Calculate RMS and convert to level (0...1)
+        let rms = sqrtf(sumSquares / Float(frameCount * channelCount))
+        // Normalize and apply some scaling for better visualization
+        let normalizedLevel = min(1.0, max(0.0, rms * 5.0)) // Scale factor can be adjusted
+        
+        // Update the levels on the main thread
+        Task { @MainActor in
+            // Remove oldest value and add new one
+            self.audioLevels.removeFirst()
+            self.audioLevels.append(normalizedLevel)
         }
     }
 }

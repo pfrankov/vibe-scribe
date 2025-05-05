@@ -23,27 +23,32 @@ struct RecordingView: View {
     // Mic URL comes from its manager, Sys URL is generated here
     @State private var systemAudioOutputURL: URL? = nil
 
-    // Error handling - combine errors or prioritize?
+    // Error handling - display combined error
     private var displayError: Error? {
-        if #available(macOS 12.3, *) {
-            return micRecorderManager.error ?? systemRecorderManager.error
-        } else {
-            return micRecorderManager.error
-        }
+        // Simplified: Always consider both managers
+        micRecorderManager.error ?? systemRecorderManager.error
     }
     
-    // Combined recording state requires system manager only if available
+    // Combined recording state 
     private var isCombinedRecordingActive: Bool {
-        if #available(macOS 12.3, *) {
-             return micRecorderManager.isRecording && systemRecorderManager.isRecording
-        } else {
-            return micRecorderManager.isRecording
-        }
+        // Simplified: Always check both managers
+        micRecorderManager.isRecording && systemRecorderManager.isRecording
     }
 
     private var canStopRecording: Bool {
         // Stop should be enabled if at least the mic recorder is running and has recorded enough
         micRecorderManager.isRecording && micRecorderManager.recordingTime >= 0.5
+    }
+    
+    // Combined audio levels from both mic and system
+    private var combinedAudioLevels: [Float] {
+        // Simplified: Always combine levels if system recorder is active
+        if systemRecorderManager.isRecording {
+            return zip(micRecorderManager.audioLevels, systemRecorderManager.audioLevels).map { max($0, $1) }
+        } else {
+            // Fallback to mic levels if system isn't recording (e.g., during initial setup or error)
+            return micRecorderManager.audioLevels
+        }
     }
 
     // Date formatter for default recording names
@@ -68,9 +73,9 @@ struct RecordingView: View {
 
             // Replace microphone icon with audio wave visualization when recording
             if micRecorderManager.isRecording {
-                // Аудио волна во время записи (using mic levels)
+                // Use combinedAudioLevels instead of just micRecorderManager.audioLevels
                 AudioWaveView(
-                    levels: micRecorderManager.audioLevels,
+                    levels: combinedAudioLevels,
                     activeColor: .red,
                     isActive: true
                 )
@@ -125,10 +130,8 @@ struct RecordingView: View {
         }
         .onDisappear {
             // Ensure recording is stopped/cancelled if the view disappears unexpectedly
-             var wasRecording = micRecorderManager.isRecording
-             if #available(macOS 12.3, *) {
-                 wasRecording = wasRecording || systemRecorderManager.isRecording
-             }
+             // Simplified check: always consider both managers
+             let wasRecording = micRecorderManager.isRecording || systemRecorderManager.isRecording
              
             if wasRecording {
                 print("RecordingView disappeared while recording. Cancelling.")
@@ -143,9 +146,8 @@ struct RecordingView: View {
         print("RecordingView appeared. Attempting to start combined recording.")
         // Clear previous errors
         micRecorderManager.error = nil
-         if #available(macOS 12.3, *) {
-             systemRecorderManager.error = nil
-         }
+        // Simplified: Always clear system error
+        systemRecorderManager.error = nil
         
         // Generate unique URL *only* for system audio
         let timestamp = Int(Date().timeIntervalSince1970)
@@ -162,12 +164,8 @@ struct RecordingView: View {
         // Start Mic Recording (generates its own URL)
         micRecorderManager.startRecording() 
         
-        // Start System Audio Recording (if available)
-        if #available(macOS 12.3, *) {
-            systemRecorderManager.startRecording(outputURL: sysURL)
-        } else {
-            print("System audio recording not started (OS unsupported).")
-        }
+        // Start System Audio Recording (Simplified: Always attempt)
+        systemRecorderManager.startRecording(outputURL: sysURL)
     }
     
     private func stopAndProcessRecording() {
@@ -179,16 +177,16 @@ struct RecordingView: View {
         }
         
         var systemAudioStoppedURL: URL? = nil
-        // Stop System Audio (if available and was recording)
-        if #available(macOS 12.3, *), systemRecorderManager.isRecording {
+        // Stop System Audio (Simplified: Check if it was recording)
+        if systemRecorderManager.isRecording {
             systemRecorderManager.stopRecording()
             systemAudioStoppedURL = self.systemAudioOutputURL // Use the URL we generated
             print("Stopped system audio recording. URL: \(systemAudioStoppedURL?.path ?? "nil")")
         } else {
-             print("System audio recording was not active or not supported.")
+             print("System audio recording was not active.")
         }
         
-        // --- TODO: MERGING STEP --- 
+        // --- MERGING STEP --- 
         print("Mic file: \(micResult.url.path)")
         if let sysURL = systemAudioStoppedURL {
             print("System file: \(sysURL.path)")
@@ -239,10 +237,9 @@ struct RecordingView: View {
         print("Cancelling active recording.")
         micRecorderManager.cancelRecording() // Deletes its own temp file
         
-        if #available(macOS 12.3, *), systemRecorderManager.isRecording {
-            // Stop system recorder
+        // Simplified: Stop and clean up system audio if it was recording
+        if systemRecorderManager.isRecording {
             systemRecorderManager.stopRecording() 
-            // Explicitly delete the system audio file we generated
             if let sysURL = self.systemAudioOutputURL {
                  print("Deleting cancelled system audio file: \(sysURL.path)")
                 try? FileManager.default.removeItem(at: sysURL)
