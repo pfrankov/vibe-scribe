@@ -21,13 +21,13 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     private var stream: SCStream?
     private var audioFile: AVAudioFile?
-    private var audioSettings: [String: Any]?
     private var outputURL: URL?
 
     // Start recording system audio
     func startRecording(outputURL: URL) {
+        NSLog("SystemAudioRecorderManager: Attempting to start recording.")
         guard !isRecording else {
-            print("SystemAudioRecorderManager: Already recording.")
+            NSLog("SystemAudioRecorderManager: Already recording.")
             return
         }
 
@@ -39,25 +39,19 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
         } catch {
-            print("SystemAudioRecorderManager: Failed to create directory: \\(error)")
+            NSLog("SystemAudioRecorderManager: Failed to create directory: \(error.localizedDescription)")
             self.error = error
             return
         }
 
         // Fetch available content
         Task { // Use Task for async operation
-             print("SystemAudioRecorderManager: Task started.")
             do {
-                 print("SystemAudioRecorderManager: Attempting to get SCShareableContent.current...")
-                // Filter for displays. We need *a* source for the stream, even if audio-only.
-                // Capture audio from all displays/system.
                 let availableContent = try await SCShareableContent.current
-                 print("SystemAudioRecorderManager: Got SCShareableContent. Display count: \(availableContent.displays.count)")
                 guard let display = availableContent.displays.first else {
-                     print("SystemAudioRecorderManager: No displays found!")
+                     NSLog("SystemAudioRecorderManager: No displays found!")
                      throw NSError(domain: "SystemAudioRecorderManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "No displays found to capture audio from."])
                 }
-                 print("SystemAudioRecorderManager: Using display: \(display.displayID)")
 
                 // Configuration for the stream
                 let config = SCStreamConfiguration()
@@ -69,33 +63,23 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
                 // Filter for the selected display (required for stream setup)
                 let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-                 print("SystemAudioRecorderManager: Filter and config created.")
-
-                // Create the stream
-                 print("SystemAudioRecorderManager: Creating SCStream...")
-                stream = SCStream(filter: filter, configuration: config, delegate: self)
-                 print("SystemAudioRecorderManager: SCStream created.")
                 
-                // Add output handler
-                 print("SystemAudioRecorderManager: Adding stream output...")
-                try stream?.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInitiated))
-                // Добавим пустой обработчик для видео фреймов, чтобы избежать ворнингов
+                stream = SCStream(filter: filter, configuration: config, delegate: self)
+                
+                let audioSampleHandlerQueue = DispatchQueue(label: "com.vibescribe.audioSampleHandlerQueue")
+                try stream?.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioSampleHandlerQueue)
                 try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global(qos: .utility))
-                 print("SystemAudioRecorderManager: Stream outputs added.")
 
-                // Start capture
-                 print("SystemAudioRecorderManager: Attempting stream.startCapture()...")
                 try await stream?.startCapture()
-                 print("SystemAudioRecorderManager: stream.startCapture() completed.")
 
                 DispatchQueue.main.async {
                     self.isRecording = true
-                    print("SystemAudioRecorderManager: Started recording system audio.")
+                    NSLog("SystemAudioRecorderManager: Started recording system audio.")
                 }
 
             } catch {
                  DispatchQueue.main.async {
-                     print("SystemAudioRecorderManager: Failed to start recording: \\(error.localizedDescription)")
+                     NSLog("SystemAudioRecorderManager: Failed to start recording: \(error.localizedDescription). Error: \(error)")
                      self.error = error
                      self.isRecording = false // Ensure state is correct on failure
                  }
@@ -105,30 +89,26 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     // Stop recording system audio
     func stopRecording() {
-        // No Task needed here as @MainActor ensures it's on main thread
+        NSLog("SystemAudioRecorderManager: Attempting to stop recording.")
         guard isRecording else {
-            print("SystemAudioRecorderManager: Not recording.")
             return
         }
 
         guard let stream = stream else {
-            print("SystemAudioRecorderManager: Stream is nil, cannot stop.")
-            self.isRecording = false // Correct state if stream somehow nil
+            NSLog("SystemAudioRecorderManager: Stream is nil, cannot stop. Setting isRecording to false.")
+            self.isRecording = false 
             return
         }
-
-        // Stopping the stream needs to be async
+        
         Task {
             do {
                 try await stream.stopCapture()
-                // Update state back on the main actor after async call completes
                 self.stream = nil
-                self.audioFile = nil // Ensure file is closed/nil
+                self.audioFile = nil
                 self.isRecording = false
-                print("SystemAudioRecorderManager: Stopped recording system audio.")
+                NSLog("SystemAudioRecorderManager: Stopped recording system audio.")
             } catch {
-                print("SystemAudioRecorderManager: Failed to stop stream: \\(error.localizedDescription)")
-                // Still set recording to false, but maybe log error
+                NSLog("SystemAudioRecorderManager: Failed to stop stream: \(error.localizedDescription). Error: \(error)")
                 self.error = error
                 self.stream = nil
                 self.audioFile = nil
@@ -139,7 +119,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     // MARK: - SCStreamOutput Delegate
 
-    nonisolated
+    nonisolated 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Обрабатываем видео фреймы
         if type == .screen {
@@ -150,94 +130,74 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         // Обрабатываем аудио фреймы
         guard type == .audio else { return }
 
-        // Check data readiness first (non-isolated)
+        let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+
         guard CMSampleBufferDataIsReady(sampleBuffer) else {
-            print("SystemAudioRecorderManager: [Non-isolated] Sample buffer data is not ready.")
             return
         }
 
-        // Calculate audio levels from the sample buffer
         updateAudioLevels(from: sampleBuffer)
 
-        // Get format description and ASBD (non-isolated)
-        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(format) else {
-            print("SystemAudioRecorderManager: [Non-isolated] Could not get audio format description.")
-            Task { @MainActor in // Dispatch error setting and stop to main actor
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            NSLog("SystemAudioRecorderManager: [Non-isolated] Could not get audio format description.")
+            Task { @MainActor in 
                 self.error = NSError(domain: "SystemAudioRecorderManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to get audio format."])
                 self.stopRecording()
             }
             return
         }
-        var streamDesc = asbdPtr.pointee
-        print("""
-        SystemAudioRecorderManager: [Non-isolated] Received Buffer. ASBD Details:
-            SampleRate: \(streamDesc.mSampleRate)
-            FormatID: \(streamDesc.mFormatID) (\(fourCCString(from: streamDesc.mFormatID)))
-            FormatFlags: \(streamDesc.mFormatFlags)
-            BytesPerPacket: \(streamDesc.mBytesPerPacket)
-            FramesPerPacket: \(streamDesc.mFramesPerPacket)
-            BytesPerFrame: \(streamDesc.mBytesPerFrame)
-            ChannelsPerFrame: \(streamDesc.mChannelsPerFrame)
-            BitsPerChannel: \(streamDesc.mBitsPerChannel)
-        """)
+        var streamDesc = asbdPtr.pointee 
 
-        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        let frameCount = AVAudioFrameCount(numSamples)
 
-        // --- Main Actor Task for File I/O and State Updates ---
         Task { @MainActor in
-            // Re-check if still recording, in case stop was called concurrently
-            guard self.isRecording else { return }
+            guard self.isRecording else {
+                return
+            }
             
-            // Initialize audio file on first buffer (on MainActor)
-            if audioFile == nil {
+            if self.audioFile == nil {
                 guard let outputURL = self.outputURL else {
-                    print("SystemAudioRecorderManager: Output URL is nil.")
+                    NSLog("SystemAudioRecorderManager: [MainActor Task] Output URL is nil during init.")
                     self.error = NSError(domain: "SystemAudioRecorderManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Output URL not set."])
                     self.stopRecording()
                     return
                 }
 
                 guard let avFormat = AVAudioFormat(streamDescription: &streamDesc) else {
-                    print("SystemAudioRecorderManager: Could not create AVAudioFormat.")
+                    NSLog("SystemAudioRecorderManager: [MainActor Task] Could not create AVAudioFormat from streamDesc.")
                     self.error = NSError(domain: "SystemAudioRecorderManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create AVAudioFormat."])
                     self.stopRecording()
                     return
                 }
 
                 do {
-                    audioFile = try AVAudioFile(forWriting: outputURL, settings: avFormat.settings)
-                    print("SystemAudioRecorderManager: Audio file initialized successfully at \\(outputURL.path) with format: \\(avFormat)")
+                    self.audioFile = try AVAudioFile(forWriting: outputURL, settings: avFormat.settings)
                 } catch {
-                    print("SystemAudioRecorderManager: Failed to create AVAudioFile: \\(error)")
+                    NSLog("SystemAudioRecorderManager: [MainActor Task] Failed to create AVAudioFile: \(error.localizedDescription). Error: \(error)")
                     self.error = error
                     self.stopRecording()
                     return
                 }
             }
 
-            // --- Process and Write Audio Buffer (on MainActor) --- 
-            guard let audioFile = audioFile else {
-                print("SystemAudioRecorderManager: Audio file is nil, cannot write buffer.")
+            guard let audioFile = self.audioFile else {
                 return
             }
-
+            
             do {
-                // SIMPLER IMPLEMENTATION: Use AVAudioPCMBuffer initialization with CMSampleBuffer
                 guard let pcmBuffer = try createPCMBufferFrom(sampleBuffer: sampleBuffer,
                                                              format: audioFile.processingFormat,
                                                              frameCount: frameCount) else {
-                    print("SystemAudioRecorderManager: Failed to create PCM buffer from sample buffer")
+                    NSLog("SystemAudioRecorderManager: [MainActor Task] Failed to create PCM buffer from sample buffer.")
                     return
                 }
 
-                // Write the filled AVAudioPCMBuffer
                 try audioFile.write(from: pcmBuffer)
 
             } catch {
-                // Catch Swift errors, e.g., from audioFile.write
-                print("SystemAudioRecorderManager: [MainActor] Failed to process or write audio buffer (Swift Error): \(error)")
-                self.error = error // Optionally set error state
+                NSLog("SystemAudioRecorderManager: [MainActor Task] Failed to process or write audio buffer (Swift Error): \(error.localizedDescription). Error: \(error)")
+                self.error = error
             }
         }
     }
@@ -251,59 +211,79 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     // New helper function to create an AVAudioPCMBuffer from a CMSampleBuffer
     private nonisolated func createPCMBufferFrom(sampleBuffer: CMSampleBuffer, 
-                                               format: AVAudioFormat,
+                                               format: AVAudioFormat, 
                                                frameCount: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
-        // Create a new buffer with the right format
+        guard let sourceFormatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let sourceASBDRef = CMAudioFormatDescriptionGetStreamBasicDescription(sourceFormatDesc) else {
+            NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] Failed to get source ASBD from sampleBuffer.")
+            return nil
+        }
+
         guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] Failed to create AVAudioPCMBuffer with target format.")
             return nil
         }
         pcmBuffer.frameLength = frameCount
         
-        // Get audio buffer list from the sample buffer
-        
-        // Instead of using the CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer that's failing,
-        // try a different approach to extract audio data
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
-            print("SystemAudioRecorderManager: Failed to get data buffer from sample buffer")
+            NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] Failed to get data buffer (CMBlockBuffer).")
             return nil
         }
         
         var dataLength: size_t = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
+        var dataPointer: UnsafeMutablePointer<Int8>? = nil
         
-        // Lock the data buffer to get direct access to its memory
         let status = CMBlockBufferGetDataPointer(dataBuffer,
                                               atOffset: 0,
-                                              lengthAtOffsetOut: nil,
-                                              totalLengthOut: &dataLength,
+                                              lengthAtOffsetOut: &dataLength,
+                                              totalLengthOut: nil,
                                               dataPointerOut: &dataPointer)
         
         if status != kCMBlockBufferNoErr {
-            print("SystemAudioRecorderManager: Failed to get data pointer from block buffer: \(status)")
+            NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] Failed to get data pointer from block buffer: \(status).")
             return nil
         }
         
-        // Fill the PCM buffer with the data from the CMBlockBuffer
-        guard let dataPtr = dataPointer, let pcmBufferData = pcmBuffer.floatChannelData else {
+        guard let sourceDataPtr = dataPointer else {
+            NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] dataPointer is nil after CMBlockBufferGetDataPointer.")
             return nil
         }
-        
-        let channelCount = Int(format.channelCount)
-        let bytesPerFrame = format.streamDescription.pointee.mBytesPerFrame
-        
-        // Copy data for each channel
-        for channel in 0..<channelCount {
-            // First channel
-            let channelData = pcmBufferData[channel]
-            
-            // Copy the interleaved samples for this channel
-            for frame in 0..<Int(frameCount) {
-                let offset = frame * Int(bytesPerFrame)
-                if offset + 4 <= dataLength { // Ensure we don't read past the buffer
-                    let sample = dataPtr.advanced(by: offset + channel * 4).withMemoryRebound(to: Float.self, capacity: 1) { $0.pointee }
-                    channelData[frame] = sample
+
+        let targetChannelCount = Int(format.channelCount)
+        let targetIsFloat = format.commonFormat == .pcmFormatFloat32
+
+        if targetIsFloat, let targetFloatChannelData = pcmBuffer.floatChannelData {
+            let samplesPerChannel = Int(frameCount)
+
+            for channel in 0..<targetChannelCount {
+                let destinationChannelBuffer = targetFloatChannelData[channel]
+                let sourceChannelMemoryOffset = channel * samplesPerChannel * MemoryLayout<Float>.size
+
+                for frame in 0..<samplesPerChannel {
+                    let sourceSampleMemoryOffsetInChannel = frame * MemoryLayout<Float>.size
+                    let finalSourceSampleMemoryOffset = sourceChannelMemoryOffset + sourceSampleMemoryOffsetInChannel
+                    
+                    if finalSourceSampleMemoryOffset + MemoryLayout<Float>.size <= dataLength {
+                        let sampleValue = sourceDataPtr.advanced(by: finalSourceSampleMemoryOffset).withMemoryRebound(to: Float.self, capacity: 1) { $0.pointee }
+                        destinationChannelBuffer[frame] = sampleValue
+                    } else {
+                        NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] WARN: Read out of bounds or dataLength insufficient. channel=\(channel), frame=\(frame), offset=\(finalSourceSampleMemoryOffset), dataLength=\(dataLength). Filling with 0.")
+                        destinationChannelBuffer[frame] = 0.0 
+                    }
                 }
             }
+        } else if format.commonFormat == .pcmFormatInt16, let targetInt16ChannelData = pcmBuffer.int16ChannelData {
+            NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] Using int16ChannelData. CAUTION: Untested/Unexpected path for float source.")
+            let samplesPerChannel = Int(frameCount)
+            for channel in 0..<targetChannelCount {
+                let destinationChannelBuffer = targetInt16ChannelData[channel]
+                for frame in 0..<samplesPerChannel {
+                    destinationChannelBuffer[frame] = 0 
+                }
+            }
+        } else {
+             NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] PCM buffer data pointers (float/int16) are nil or format is unsupported for direct copy. Target Format: \(format.commonFormat).")
+             return nil // Cannot proceed if we don't have the channel data pointers
         }
         
         return pcmBuffer
@@ -327,7 +307,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         // Dispatch state updates to the main actor
         Task { @MainActor in
-            print("SystemAudioRecorderManager: Stream stopped with error: \\(error.localizedDescription)")
+            NSLog("SystemAudioRecorderManager: Stream stopped with error: \(error.localizedDescription). Error: \(error)")
             self.error = error
             // Ensure state is reset
             self.stream = nil
@@ -338,52 +318,74 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     // New method to calculate and update audio levels from the sample buffer
     private nonisolated func updateAudioLevels(from sampleBuffer: CMSampleBuffer) {
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+            return
+        }
         
         var dataLength: size_t = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
         
         let status = CMBlockBufferGetDataPointer(dataBuffer,
                                              atOffset: 0,
-                                             lengthAtOffsetOut: nil,
-                                             totalLengthOut: &dataLength,
+                                             lengthAtOffsetOut: &dataLength,
+                                             totalLengthOut: nil,
                                              dataPointerOut: &dataPointer)
         
-        if status != kCMBlockBufferNoErr || dataPointer == nil { return }
+        if status != kCMBlockBufferNoErr || dataPointer == nil {
+            return
+        }
         
         // Get the audio data to calculate RMS power
         guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format) else { return }
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format) else {
+            return
+        }
         
         let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        if frameCount == 0 { return } // Avoid division by zero
         let channelCount = Int(asbd.pointee.mChannelsPerFrame)
-        let bytesPerFrame = asbd.pointee.mBytesPerFrame
-        
+        if channelCount == 0 { return } // Avoid division by zero
+
         // Calculate RMS power (average of squared samples)
         var sumSquares: Float = 0.0
-        let samples = UnsafeMutableRawPointer(dataPointer!)
         
-        // Process each frame
-        for frame in 0..<frameCount {
-            // Process each channel in the frame
-            for channel in 0..<channelCount {
-                let offset = Int(bytesPerFrame) * frame + channel * 4 // Assuming 32-bit float samples
-                if offset + 4 <= dataLength {
-                    let sampleValue = samples.load(fromByteOffset: offset, as: Float.self)
-                    sumSquares += sampleValue * sampleValue
-                }
+        // Assuming audio data is 32-bit float (kAudioFormatLinearPCM + kAudioFormatFlagIsFloat)
+        // This is typical for SCStreamOutputType.audio
+        // Check mFormatFlags if you need to support other formats.
+        if (asbd.pointee.mFormatFlags & kAudioFormatFlagIsFloat) != 0 && asbd.pointee.mBitsPerChannel == 32 {
+            let floatDataPointer = UnsafeRawPointer(dataPointer!)!.assumingMemoryBound(to: Float.self)
+            let sampleCount = frameCount * channelCount
+            
+            if dataLength < sampleCount * MemoryLayout<Float>.size {
+                return
             }
+
+            for i in 0..<sampleCount {
+                let sampleValue = floatDataPointer[i]
+                sumSquares += sampleValue * sampleValue
+            }
+        } else {
+            Task { @MainActor in
+                // Simplified logic: if array is full, remove first, then append.
+                if self.audioLevels.count == 10 { // Assuming it's initialized with 10 items
+                    self.audioLevels.removeFirst()
+                }
+                self.audioLevels.append(0.0) // Append a default/silent level
+            }
+            return
         }
         
         // Calculate RMS and convert to level (0...1)
         let rms = sqrtf(sumSquares / Float(frameCount * channelCount))
         // Normalize and apply some scaling for better visualization
-        let normalizedLevel = min(1.0, max(0.0, rms * 5.0)) // Scale factor can be adjusted
+        let normalizedLevel = min(1.0, max(0.0, rms * 2.0)) // Adjusted scale factor
         
         // Update the levels on the main thread
         Task { @MainActor in
-            // Remove oldest value and add new one
-            self.audioLevels.removeFirst()
+            // Simplified logic: if array is full, remove first, then append.
+            if self.audioLevels.count == 10 { // Assuming it's initialized with 10 items
+                 self.audioLevels.removeFirst()
+            }
             self.audioLevels.append(normalizedLevel)
         }
     }
