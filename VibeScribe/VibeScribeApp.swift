@@ -71,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let schema = Schema([
                 Record.self,
+                AppSettings.self,
             ])
             let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
@@ -79,6 +80,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let container = modelContainer else {
                 print("Error: ModelContainer is nil after initialization")
                 return
+            }
+            
+            // Initialize default settings if not present
+            Task {
+                await initializeDefaultSettings(container: container)
             }
             
             let contentView = ContentView()
@@ -101,6 +107,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
         } catch {
             print("Could not complete app setup: \(error)")
+        }
+    }
+    
+    // Ensure default settings are initialized
+    func initializeDefaultSettings(container: ModelContainer) async {
+        do {
+            let descriptor = FetchDescriptor<AppSettings>(predicate: #Predicate { $0.id == "app_settings" })
+            let context = ModelContext(container)
+            let existingSettings = try context.fetch(descriptor)
+            
+            if existingSettings.isEmpty {
+                // Create default settings
+                let defaultSettings = AppSettings()
+                context.insert(defaultSettings)
+                try context.save()
+                print("Default settings initialized")
+            } else {
+                print("Settings already exist, no initialization needed")
+            }
+        } catch {
+            print("Error checking/initializing default settings: \(error)")
         }
     }
     

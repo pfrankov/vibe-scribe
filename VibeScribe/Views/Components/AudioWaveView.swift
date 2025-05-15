@@ -10,20 +10,23 @@ import SwiftUI
 // --- Audio Wave Visualization --- 
 struct AudioWaveView: View {
     var levels: [Float]
-    var activeColor: Color = .red
-    var inactiveColor: Color = .secondary
+    var activeColor: Color = Color(NSColor.controlAccentColor)
+    var inactiveColor: Color = Color(NSColor.unemphasizedSelectedContentBackgroundColor)
     var isActive: Bool = true
     
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<levels.count, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(isActive ? activeColor : inactiveColor)
-                    .frame(width: 8, height: CGFloat(levels[index] * 60) + 5) // Min height of 5, max of 65
-                    .animation(.easeOut(duration: 0.2), value: levels[index])
+        HStack(spacing: 3) { // Уменьшенный интервал для компактности
+            ForEach(0..<min(levels.count, 28), id: \.self) { index in // Ограничиваем количество полос
+                Capsule() // Используем Capsule для закругленных краев
+                    .fill(isActive 
+                          ? activeColor.opacity(max(0.3, Double(levels[index]))) // Динамическая непрозрачность
+                          : inactiveColor)
+                    .frame(width: 3, height: CGFloat(levels[index] * 50) + 3) // Более тонкие полоски
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: levels[index]) // Более естественная анимация
             }
         }
-        .frame(height: 65) // Match the height used by the mic icon
-        .padding()
+        .frame(height: 60) // Высота чуть меньше для компактности
+        .padding(.vertical, 10)
+        .padding(.horizontal, 5)
     }
 } 

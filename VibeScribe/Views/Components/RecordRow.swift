@@ -19,12 +19,12 @@ struct RecordRow: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) { // Added spacing for clarity
+            VStack(alignment: .leading, spacing: 4) { // Уменьшаем спейсинг до 4pt
                 // ZStack to overlay TextField on Text for editing
                 ZStack(alignment: .leading) {
                     // --- TextField (Visible when editing) ---
                     TextField("Name", text: $editingName)
-                        .textFieldStyle(.plain) // Use plain style to match Text look
+                        .textFieldStyle(.plain) // Стандартный плоский стиль
                         .focused($isNameFieldFocused)
                         .onSubmit { // Handle Enter key press
                             saveName()
@@ -32,14 +32,15 @@ struct RecordRow: View {
                         // Prevent clicks on TextField from selecting the row
                         .onTapGesture {}
                         // Apply same font/padding as Text for alignment
-                        .font(.headline)
+                        .font(.headline) // Стандартный headline
                         // Make TextField visible only when editing
                         .opacity(isEditing ? 1 : 0)
                         .disabled(!isEditing) // Disable when not editing
 
                     // --- Text (Visible when not editing) ---
                     Text(record.name)
-                        .font(.headline)
+                        .font(.headline) // Стандартный headline
+                        .lineLimit(1) // Ограничиваем одной строкой
                         // Make Text visible only when *not* editing
                         .opacity(isEditing ? 0 : 1)
                         // Double-click to start editing
@@ -48,18 +49,26 @@ struct RecordRow: View {
                         }
                 }
 
-                HStack {
+                HStack(spacing: 4) { // Уменьшенный интервал для деталей
                     Text(record.date, style: .date)
-                    Text("-")
+                        .foregroundColor(Color(NSColor.secondaryLabelColor)) // Используем системный цвет вместо ручной настройки opacity
+                    Text("•") // Bullet разделитель вместо дефиса
+                        .foregroundColor(Color(NSColor.secondaryLabelColor)) // Используем системный цвет
                     Text(formatDuration(record.duration))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor)) // Используем системный цвет
                 }
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+                .font(.caption) // Стандартный caption для macOS
             }
             Spacer()
-            // <<< Removed the transcription status icon >>>
+            
+            // Индикатор раскрытия
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(Color(NSColor.secondaryLabelColor)) // Системный цвет для chevron
         }
-        .padding(.vertical, 8) // Increased vertical padding
+        .padding(.vertical, 8) // Увеличиваем отступ для лучшей читаемости
+        .padding(.horizontal, 4) // Добавляем небольшой горизонтальный отступ
+        .cornerRadius(4) // Небольшое скругление для строки
         // Detect when the text field loses focus to cancel editing
         .onChange(of: isNameFieldFocused) { oldValue, newValue in
             if !newValue && isEditing { // If focus is lost AND we were editing

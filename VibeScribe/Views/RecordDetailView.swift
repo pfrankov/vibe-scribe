@@ -17,7 +17,7 @@ struct RecordDetailView: View {
     @StateObject private var playerManager = AudioPlayerManager()
     @State private var isEditingSlider = false // Track if user is scrubbing
 
-    // State for inline title editing
+    // State for inline title editing - Переименовал для ясности
     @State private var isEditingTitle: Bool = false
     @State private var editingTitle: String = ""
     @FocusState private var isTitleFieldFocused: Bool
@@ -28,7 +28,7 @@ struct RecordDetailView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) { // Стандартный интервал macOS
             // Header with Title (now editable) and Close button
             HStack {
                 ZStack(alignment: .leading) {
@@ -37,7 +37,7 @@ struct RecordDetailView: View {
                         .textFieldStyle(.plain)
                         .focused($isTitleFieldFocused)
                         .onSubmit { saveTitle() }
-                        .font(.title2.bold()) // Match Text style
+                        .font(.title2.bold())
                         .opacity(isEditingTitle ? 1 : 0)
                         .disabled(!isEditingTitle)
                         .onTapGesture {}
@@ -54,82 +54,86 @@ struct RecordDetailView: View {
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                        .font(.title2)
+                    Image(systemName: "xmark.circle")
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .font(.body)
                 }
-                .buttonStyle(PlainButtonStyle()) // Remove button chrome
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.escape)
             }
             
             // --- Audio Player UI --- 
-            VStack {
-                HStack {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
                     // Play/Pause Button
                     Button {
                         playerManager.togglePlayPause()
                     } label: {
-                        Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
-                            .frame(width: 30)
+                        Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.title3)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundColor(Color(NSColor.controlAccentColor))
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(.borderless)
+                    .disabled(playerManager.player == nil)
+                    .frame(width: 30, height: 30)
                     
                     // Progress Slider - Updated Logic
                     Slider(
-                        value: $playerManager.currentTime, // Bind directly to player's current time for display
+                        value: $playerManager.currentTime,
                         in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
                         onEditingChanged: { editing in
-                            isEditingSlider = editing // Track scrubbing state
+                            isEditingSlider = editing
                             if editing {
-                                playerManager.scrubbingStarted() // Tell manager scrubbing started
+                                playerManager.scrubbingStarted()
                             } else {
-                                // Seek when scrubbing ends (using the current value from playerManager)
                                 playerManager.seek(to: playerManager.currentTime)
                             }
                         }
                     )
-                    // Remove the complex onChange modifier, direct binding handles updates when not editing
-                    // .onChange(of: playerManager.currentTime) { oldValue, newValue in ... }
-
+                    .tint(Color(NSColor.controlAccentColor))
 
                     // Time Label
-                    // Display player's current time / total duration
                     Text("\(formatTime(playerManager.currentTime)) / \(formatTime(playerManager.duration))")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .monospacedDigit()
                         .frame(width: 80, alignment: .trailing)
                 }
-                .padding(.vertical, 5)
             }
-            .disabled(playerManager.player == nil) // Disable based on manager state
+            .padding(10)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(6)
+            .disabled(playerManager.player == nil)
             
             Divider()
             
             // Transcription Header with Copy Button
             HStack {
-                Text("Transcription") // Removed colon for cleaner look
+                Text("Transcription")
                     .font(.headline)
                 Spacer()
                 Button {
                     copyTranscription()
                 } label: {
-                    Image(systemName: "doc.on.doc")
+                    Label("Copy", systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly) // Только иконка
+                        .symbolRenderingMode(.hierarchical) // Улучшенное отображение SF Symbol
                 }
-                .help("Copy Transcription")
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(.borderless) // Стандартный macOS стиль
+                .help("Copy Transcription") // Всплывающая подсказка
                 // Disable button if no transcription
                 .disabled(!record.hasTranscription)
             }
             
-            // Revert back to Text for performance and no blinking cursor
-            // Keep ScrollView for potentially long transcriptions
+            // ScrollView for transcription
             ScrollView {
                 Text(transcriptionText)
-                    .foregroundColor(record.hasTranscription ? .primary : .secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading) // Ensure text aligns left
-                    // Enable text selection
+                    .font(.body)
+                    .foregroundColor(record.hasTranscription ? Color(NSColor.labelColor) : Color(NSColor.secondaryLabelColor))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
-                    // Explicitly change cursor on hover
                     .onHover { hovering in
                         if hovering {
                             NSCursor.iBeam.push()
@@ -137,28 +141,24 @@ struct RecordDetailView: View {
                             NSCursor.pop()
                         }
                     }
-                    // Add padding within the ScrollView for the Text
-                    .padding(5)
+                    .padding(10)
+                    .background(Color(NSColor.textBackgroundColor))
+                    .cornerRadius(4)
             }
-            .frame(maxHeight: .infinity) // Allow scroll view to expand
-            // Removed background, cornerRadius, and border from TextEditor/ScrollView
+            .frame(maxHeight: .infinity)
 
-            // --- Transcribe Button (Always visible) --- 
+            // Transcribe Button 
             Button {
                 // Action to start transcription (placeholder)
                 print("Start transcription for \(record.name)")
-                // In a real app, you'd trigger the transcription process here
-                // and update the record's state eventually.
             } label: {
-                Label("Transcribe", systemImage: "sparkles")
+                Label("Transcribe", systemImage: "waveform")
+                    .frame(maxWidth: .infinity) // Растягиваем кнопку
             }
-            .buttonStyle(.bordered) // Apply standard bordered style
-            .frame(maxWidth: .infinity, alignment: .center) // Center the button
-            .padding(.top, 5) // Add some space above the button
-            
-            // No need for Spacer() if ScrollView uses maxHeight: .infinity
+            .buttonStyle(.borderedProminent) // Акцентная кнопка
+            .controlSize(.regular) // Стандартный размер
         }
-        .padding() // Overall padding for the sheet content
+        .padding(16) // Стандартный отступ macOS
         .onAppear {
             // --- Refined File Loading Logic ---
             guard let fileURL = record.fileURL else {
@@ -176,8 +176,6 @@ struct RecordDetailView: View {
 
             print("Loading audio from: \(fileURL.path)")
             playerManager.setupPlayer(url: fileURL)
-            // No need to initialize currentSliderValue here anymore
-            // currentSliderValue = playerManager.currentTime
         }
         .onDisappear {
             playerManager.stopAndCleanup()

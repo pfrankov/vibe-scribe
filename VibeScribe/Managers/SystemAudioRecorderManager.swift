@@ -63,7 +63,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
                 // Filter for the selected display (required for stream setup)
                 let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-                
+
                 stream = SCStream(filter: filter, configuration: config, delegate: self)
                 
                 let audioSampleHandlerQueue = DispatchQueue(label: "com.vibescribe.audioSampleHandlerQueue")
@@ -99,7 +99,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             self.isRecording = false 
             return
         }
-        
+
         Task {
             do {
                 try await stream.stopCapture()
@@ -119,7 +119,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     // MARK: - SCStreamOutput Delegate
 
-    nonisolated 
+    nonisolated
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Обрабатываем видео фреймы
         if type == .screen {
@@ -147,7 +147,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             }
             return
         }
-        var streamDesc = asbdPtr.pointee 
+        var streamDesc = asbdPtr.pointee
 
         let frameCount = AVAudioFrameCount(numSamples)
 
@@ -184,7 +184,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             guard let audioFile = self.audioFile else {
                 return
             }
-            
+
             do {
                 guard let pcmBuffer = try createPCMBufferFrom(sampleBuffer: sampleBuffer,
                                                              format: audioFile.processingFormat,
@@ -211,7 +211,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     // New helper function to create an AVAudioPCMBuffer from a CMSampleBuffer
     private nonisolated func createPCMBufferFrom(sampleBuffer: CMSampleBuffer, 
-                                               format: AVAudioFormat, 
+                                               format: AVAudioFormat,
                                                frameCount: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
         guard let sourceFormatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let sourceASBDRef = CMAudioFormatDescriptionGetStreamBasicDescription(sourceFormatDesc) else {
@@ -248,7 +248,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] dataPointer is nil after CMBlockBufferGetDataPointer.")
             return nil
         }
-
+        
         let targetChannelCount = Int(format.channelCount)
         let targetIsFloat = format.commonFormat == .pcmFormatFloat32
 
@@ -345,7 +345,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         if frameCount == 0 { return } // Avoid division by zero
         let channelCount = Int(asbd.pointee.mChannelsPerFrame)
         if channelCount == 0 { return } // Avoid division by zero
-
+        
         // Calculate RMS power (average of squared samples)
         var sumSquares: Float = 0.0
         
@@ -362,8 +362,8 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
             for i in 0..<sampleCount {
                 let sampleValue = floatDataPointer[i]
-                sumSquares += sampleValue * sampleValue
-            }
+                    sumSquares += sampleValue * sampleValue
+                }
         } else {
             Task { @MainActor in
                 // Simplified logic: if array is full, remove first, then append.
@@ -384,7 +384,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         Task { @MainActor in
             // Simplified logic: if array is full, remove first, then append.
             if self.audioLevels.count == 10 { // Assuming it's initialized with 10 items
-                 self.audioLevels.removeFirst()
+            self.audioLevels.removeFirst()
             }
             self.audioLevels.append(normalizedLevel)
         }

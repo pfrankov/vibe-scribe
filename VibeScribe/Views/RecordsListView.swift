@@ -17,38 +17,42 @@ struct RecordsListView: View {
     var onDelete: (Record) -> Void
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) { // Убираем пространство между элементами
             // Header with New Recording Button
-            HStack {
-                Text("All Recordings").font(.title2).bold()
+            HStack(alignment: .center) { // Выравнивание по центру для лучшего вида
+                Text("All Recordings")
+                    .font(.title3) // Более подходящий размер для заголовка секции
+                    .fontWeight(.semibold) // Чуть более выразительный
+                    .foregroundColor(.primary) // Гарантированно основной цвет для максимального контраста
                 Spacer()
                 Button {
                     showRecordingSheet = true
                 } label: {
-                    Label("New Recording", systemImage: "plus.circle.fill")
+                    Label("New Recording", systemImage: "plus.circle.fill") // Используем plus.circle.fill для большей заметности
+                        .font(.body)
                 }
-                .buttonStyle(PlainButtonStyle()) // Use plain style for consistency
-                .labelStyle(.titleAndIcon) // Show both title and icon
+                .buttonStyle(.borderless) // Используем системный стиль без явной окраски
+                .controlSize(.regular) // Стандартный размер
             }
-            .padding(.horizontal)
-            .padding(.top)
-            .padding(.bottom, 5)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12) // Одинаковые отступы сверху и снизу
+            .background(Color(NSColor.windowBackgroundColor)) // Стандартный фон окна
 
             // Use a Group to switch between List and Empty State
             Group {
                 if records.isEmpty {
-                    VStack {
+                    VStack(spacing: 12) { // Добавлен стандартный интервал
                         Spacer() // Pushes content to center
-                        Image(systemName: "mic.slash") // More relevant icon
-                            .font(.largeTitle)
-                            .foregroundColor(.secondary)
-                            .padding(.bottom, 5)
-                        Text("No recordings yet.")
+                        Image(systemName: "waveform.slash")  // Более подходящая SF Symbol
+                            .font(.system(size: 40)) // Стандартный размер иконки
+                            .foregroundColor(Color(NSColor.secondaryLabelColor)) // Системный цвет
+                            .padding(.bottom, 4)
+                        Text("No recordings yet")
                             .font(.headline)
-                            .foregroundColor(.secondary)
-                        Text("Tap '+' to create your first recording.") // Actionable text
+                            .foregroundColor(Color(NSColor.labelColor)) // Системный цвет вместо .primary.opacity()
+                        Text("Click + to create your first recording") // Более простая инструкция
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color(NSColor.secondaryLabelColor)) // Системный цвет
                         Spacer() // Pushes content to center
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure VStack fills space
@@ -61,21 +65,26 @@ struct RecordsListView: View {
                                 .onTapGesture {
                                     selectedRecord = record // Set the selected record to show the detail sheet
                                 }
-                                // Updated Context Menu (Removed Rename)
+                                // Updated Context Menu
                                 .contextMenu {
-                                    // <<< Removed Rename Button >>>
-                                    // Button { ... } label: { ... }
-
                                     Button(role: .destructive) {
-                                        onDelete(record) // <<< Call the delete closure
+                                        onDelete(record) // Call the delete closure
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
                                 }
+                                .listRowBackground(Color(NSColor.alternatingContentBackgroundColors[records.firstIndex(of: record)! % 2])) // Чёткое чередование фона
+                                .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)) // Стандартные macOS отступы для строк
                         }
                     }
-                    .listStyle(InsetListStyle()) // A slightly more modern list style
-                    // Removed top padding here, handled by VStack container now
+                    .listStyle(.plain) // Используем plain вместо inset для более чёткого разделения
+                    .background(Color(NSColor.windowBackgroundColor)) // Корректный фон окна
+                    .cornerRadius(6) // Легкое скругление углов списка
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color(NSColor.separatorColor), lineWidth: 0.5) // Системный цвет для разделителей
+                    )
+                    .padding(.horizontal, 8) // Отступы по бокам для рамки
                 }
             }
         }

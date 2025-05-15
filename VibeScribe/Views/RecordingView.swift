@@ -62,68 +62,84 @@ struct RecordingView: View {
     var body: some View {
         VStack(spacing: 20) {
             // Title reflects recorder state more dynamically
-            Text(micRecorderManager.isRecording ? "Recording..." : displayError == nil ? "Preparing..." : "Error")
-                .font(.title)
+            Text(micRecorderManager.isRecording ? "Recording" : displayError == nil ? "Preparing..." : "Error")
+                .font(.headline)
+                .foregroundColor(micRecorderManager.isRecording ? Color(NSColor.systemRed) : Color(NSColor.labelColor))
+                .animation(.easeInOut(duration: 0.1), value: micRecorderManager.isRecording)
 
             // Display recording time (use mic recorder as primary timer)
             Text(formatTime(micRecorderManager.recordingTime))
-                .font(.title2)
-                .monospacedDigit() // Ensures stable width
-                .padding(.bottom)
+                .font(.system(.title2, design: .monospaced))
+                .fontWeight(.medium)
+                .padding(.bottom, 8)
 
-            // Replace microphone icon with audio wave visualization when recording
+            // Визуализация во время записи
             if micRecorderManager.isRecording {
                 // Use combinedAudioLevels instead of just micRecorderManager.audioLevels
                 AudioWaveView(
                     levels: combinedAudioLevels,
-                    activeColor: .red,
+                    activeColor: Color(NSColor.controlAccentColor),
                     isActive: true
                 )
+                .frame(height: 50)
             } else {
-                // Иконка микрофона когда не записываем
-                Image(systemName: displayError != nil ? "mic.slash.fill" : "mic.fill") // Show mic.fill if ready
-                    .font(.system(size: 60))
-                    .foregroundColor(displayError != nil ? .orange : .secondary)
+                // Иконка когда не записываем
+                Image(systemName: displayError != nil ? "exclamationmark.circle" : "waveform")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 50))
+                    .foregroundColor(displayError != nil ? Color(NSColor.systemOrange) : Color(NSColor.secondaryLabelColor))
                     .padding()
             }
 
             // Display error message if any
             if let error = displayError {
-                Text("Error: \(error.localizedDescription)")
-                    .foregroundColor(.red)
+                Text(error.localizedDescription)
+                    .foregroundColor(Color(NSColor.systemRed))
                     .font(.caption)
                     .lineLimit(2)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
+                    .padding(.bottom, 8)
             }
 
-            HStack {
-                // --- Updated Button Logic ---
+            HStack(spacing: 20) {
+                // Кнопка Stop всегда красная
                 Button("Stop") {
                     stopAndProcessRecording()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .tint(.red) // Always red as it's the "Stop" action
-                // Disable Stop button based on canStopRecording flag
+                .tint(Color(NSColor.systemRed))
+                .keyboardShortcut(.return) // Enter для остановки
                 .disabled(!canStopRecording || displayError != nil)
 
-                // Cancel Button (Always visible, but primary action changes)
-                // If recording: Cancels the recording
-                // If not recording (e.g., during setup or error): Closes the sheet
+                // Cancel Button (всегда видна, но действие меняется)
                 Button(micRecorderManager.isRecording ? "Cancel" : "Close") {
                     if micRecorderManager.isRecording {
                         cancelActiveRecording()
                     }
-                    // Always dismiss when this button is pressed
                     dismiss() 
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
+                .keyboardShortcut(.escape) // Esc для отмены/закрытия
             }
+            .padding(.top, 8)
+
+            // Индикатор записи (маленькая красная точка)
+            if micRecorderManager.isRecording {
+                Circle()
+                    .fill(Color(NSColor.systemRed))
+                    .frame(width: 8, height: 8)
+                    .opacity(micRecorderManager.isRecording ? 1 : 0)
+                    .padding(.top, 8)
+            }
+            
             Spacer() // Push controls up
         }
-        .padding()
+        .padding(16) // Стандартный отступ macOS
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor)) // Стандартный фон macOS
         .onAppear {
             // Start recording automatically
             startCombinedRecording()
