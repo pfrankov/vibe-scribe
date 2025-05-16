@@ -6,8 +6,10 @@
 //
 
 import SwiftUI
-import AppKit
+import Combine
 import SwiftData
+import AppKit
+import ServiceManagement
 import AVFoundation
 import ScreenCaptureKit
 

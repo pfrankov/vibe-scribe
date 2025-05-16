@@ -8,14 +8,22 @@
 import SwiftUI
 import SwiftData
 import AVFoundation
+import Combine
+@_exported import Foundation // добавляем для доступа к WhisperTranscriptionManager
 
 // Detail view for a single record - Refactored to use AudioPlayerManager
 struct RecordDetailView: View {
     // Use @Bindable for direct modification of @Model properties
     @Bindable var record: Record
     @Environment(\.dismiss) var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var appSettings: [AppSettings]
+    
     @StateObject private var playerManager = AudioPlayerManager()
     @State private var isEditingSlider = false // Track if user is scrubbing
+    @State private var isTranscribing = false
+    @State private var transcriptionError: String? = nil
+    @State private var cancellables = Set<AnyCancellable>()
 
     // State for inline title editing - Переименовал для ясности
     @State private var isEditingTitle: Bool = false
@@ -24,7 +32,18 @@ struct RecordDetailView: View {
 
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
-        record.hasTranscription ? "This is the placeholder for the transcription text. It would appear here once the audio is processed...\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua." : "Transcription not available yet."
+        if let text = record.transcriptionText, !text.isEmpty {
+            return text
+        } else if record.hasTranscription {
+            return "Transcription processing... Check back later."
+        } else {
+            return "Transcription not available yet."
+        }
+    }
+    
+    // Получаем текущие настройки
+    private var settings: AppSettings {
+        appSettings.first ?? AppSettings()
     }
 
     var body: some View {
@@ -124,14 +143,22 @@ struct RecordDetailView: View {
                 .buttonStyle(.borderless) // Стандартный macOS стиль
                 .help("Copy Transcription") // Всплывающая подсказка
                 // Disable button if no transcription
-                .disabled(!record.hasTranscription)
+                .disabled(!record.hasTranscription || record.transcriptionText == nil)
+            }
+            
+            // Show error if exists
+            if let error = transcriptionError {
+                Text(error)
+                    .foregroundColor(.red)
+                    .font(.callout)
+                    .padding(.bottom, 4)
             }
             
             // ScrollView for transcription
             ScrollView {
                 Text(transcriptionText)
                     .font(.body)
-                    .foregroundColor(record.hasTranscription ? Color(NSColor.labelColor) : Color(NSColor.secondaryLabelColor))
+                    .foregroundColor(record.hasTranscription && record.transcriptionText != nil ? Color(NSColor.labelColor) : Color(NSColor.secondaryLabelColor))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
                     .onHover { hovering in
@@ -149,14 +176,21 @@ struct RecordDetailView: View {
 
             // Transcribe Button 
             Button {
-                // Action to start transcription (placeholder)
-                print("Start transcription for \(record.name)")
+                startTranscription()
             } label: {
-                Label("Transcribe", systemImage: "waveform")
-                    .frame(maxWidth: .infinity) // Растягиваем кнопку
+                HStack {
+                    if isTranscribing {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .padding(.trailing, 5)
+                    }
+                    Label("Transcribe", systemImage: "waveform")
+                }
+                .frame(maxWidth: .infinity) // Растягиваем кнопку
             }
             .buttonStyle(.borderedProminent) // Акцентная кнопка
             .controlSize(.regular) // Стандартный размер
+            .disabled(isTranscribing || record.fileURL == nil)
         }
         .padding(16) // Стандартный отступ macOS
         .onAppear {
@@ -179,6 +213,9 @@ struct RecordDetailView: View {
         }
         .onDisappear {
             playerManager.stopAndCleanup()
+            // Отменяем все подписки при закрытии окна
+            cancellables.forEach { $0.cancel() }
+            cancellables.removeAll()
         }
         // Detect focus changes for the title TextField
         .onChange(of: isTitleFieldFocused) { oldValue, newValue in
@@ -217,10 +254,51 @@ struct RecordDetailView: View {
     }
 
     private func copyTranscription() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(transcriptionText, forType: .string)
-        print("Transcription copied to clipboard.")
+        if let text = record.transcriptionText {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            print("Transcription copied to clipboard.")
+        }
+    }
+    
+    // Функция для запуска транскрипции
+    private func startTranscription() {
+        guard let fileURL = record.fileURL, !isTranscribing else { return }
+        
+        isTranscribing = true
+        transcriptionError = nil
+        
+        print("Starting transcription for: \(record.name), using Whisper API at URL: \(settings.whisperURL)")
+        
+        let whisperManager = WhisperTranscriptionManager.shared
+        whisperManager.transcribeAudio(
+            audioURL: fileURL, 
+            whisperURL: settings.whisperURL,
+            language: "ru", // Используем русский язык по умолчанию
+            responseFormat: "srt" // Формат субтитров
+        )
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { completion in
+                isTranscribing = false
+                
+                switch completion {
+                case .finished:
+                    print("Transcription completed successfully")
+                case .failure(let error):
+                    transcriptionError = "Error: \(error.description)"
+                    print("Transcription error: \(error.description)")
+                }
+            },
+            receiveValue: { transcription in
+                print("Received transcription of length: \(transcription.count) characters")
+                record.transcriptionText = transcription
+                record.hasTranscription = true
+                try? modelContext.save()
+            }
+        )
+        .store(in: &cancellables)
     }
     
     // Helper to format time like MM:SS

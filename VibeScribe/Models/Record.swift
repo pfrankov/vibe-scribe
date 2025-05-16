@@ -17,14 +17,16 @@ final class Record: Identifiable {
     var date: Date
     var duration: TimeInterval
     var hasTranscription: Bool
+    var transcriptionText: String?
 
-    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false) {
+    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false, transcriptionText: String? = nil) {
         self.id = id
         self.name = name
         self.fileURL = fileURL // Store the URL object
         self.date = date
         self.duration = duration
         self.hasTranscription = hasTranscription
+        self.transcriptionText = transcriptionText
     }
 }
 
