@@ -98,12 +98,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             popover.contentViewController = NSHostingController(rootView: contentView)
             self.popover = popover
             
+            // Create status item without a menu
             let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            self.statusItem = statusItem
+            
+            // Configure status item button
             if let button = statusItem.button {
                 button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "VibeScribe")
-                button.action = #selector(togglePopover)
+                button.action = #selector(handleStatusItemClick)
+                button.target = self
+                button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             }
-            self.statusItem = statusItem
             
             print("App UI setup complete.")
             
@@ -133,7 +138,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    @objc func togglePopover() {
+    @objc func handleStatusItemClick(sender: NSStatusBarButton) {
+        // Check if this is a right-click
+        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
+            let menu = NSMenu()
+            menu.addItem(NSMenuItem(title: "Show App", action: #selector(showApp), keyEquivalent: ""))
+            menu.addItem(NSMenuItem.separator())
+            menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+            
+            // Position menu
+            let position = NSPoint(x: 0, y: 0)
+            
+            // Show menu manually
+            menu.popUp(positioning: nil, at: position, in: sender)
+        } else {
+            // Left click behavior - show popover
+            if let button = statusItem?.button, let popover = popover {
+                if popover.isShown {
+                    popover.performClose(nil)
+                } else {
+                    popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                }
+            }
+        }
+    }
+    
+    @objc func showApp() {
+        if let button = statusItem?.button, let popover = popover {
+            if !popover.isShown {
+                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            }
+        }
+    }
+    
+    @objc func togglePopover(sender: NSStatusBarButton) {
+        // Only proceed if this was a left click
+        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
+            return
+        }
+        
         if let button = statusItem?.button, let popover = popover {
             if popover.isShown {
                 popover.performClose(nil)
@@ -141,6 +184,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             }
         }
+    }
+    
+    @objc func quitApp() {
+        NSApp.terminate(nil)
     }
 }
 
