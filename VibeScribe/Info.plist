@@ -5,7 +5,7 @@
     <key>CFBundleIdentifier</key>
     <string>pfrankov.VibeScribe</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>NSMicrophoneUsageDescription</key>

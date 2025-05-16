@@ -15,14 +15,12 @@ import ScreenCaptureKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
-    var popover: NSPopover?
-    var modelContainer: ModelContainer?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupStatusBar()
+        
         requestPermissions { micGranted in
              DispatchQueue.main.async { // Ensure UI updates on main thread
-                // Original setup logic is now in setupApp()
-                self.setupApp()
                 // Log permission status
                 print("Microphone access: \(micGranted ? "Granted" : "Denied or Undetermined")")
                 // Screen capture permission is implicitly handled by SCShareableContent.current access
@@ -30,6 +28,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // which indirectly confirms permission.
              }
          }
+    }
+    
+    func setupStatusBar() {
+        // Create the status bar item
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        
+        if let button = statusItem?.button {
+            // Use a more visible icon - microphone symbol
+            button.image = NSImage(systemSymbolName: "mic.circle.fill", accessibilityDescription: "VibeScribe")
+            button.action = #selector(toggleMainWindow)
+        }
+        
+        // Create menu for status bar item
+        let menu = NSMenu()
+        
+        // Open/Show the main window
+        menu.addItem(NSMenuItem(title: "Open", action: #selector(toggleMainWindow), keyEquivalent: "o"))
+        
+        // Start/Stop recording
+        menu.addItem(NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "r"))
+        
+        // Add separator
+        menu.addItem(NSMenuItem.separator())
+        
+        // Quit application
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        
+        // Set the menu
+        statusItem?.menu = menu
+    }
+    
+    @objc func toggleMainWindow() {
+        guard let window = NSApplication.shared.windows.first else { return }
+        
+        if window.isVisible {
+            window.orderOut(nil)
+        } else {
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+    }
+    
+    @objc func startRecording() {
+        // Placeholder for recording functionality
+        print("Start recording triggered from menu")
+        // This would typically activate the recording functionality
     }
     
     func requestPermissions(completion: @escaping (Bool) -> Void) {
@@ -68,52 +112,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+}
 
-    func setupApp() {
+@main
+struct VibeScribeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var modelContainer: ModelContainer?
+    
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .modelContainer(createModelContainer())
+        }
+        .windowStyle(HiddenTitleBarWindowStyle())
+        .defaultSize(CGSize(width: 800, height: 600))
+        .windowResizability(.contentSize)
+        .windowToolbarStyle(.unifiedCompact)
+        .commands {
+            CommandGroup(replacing: .newItem) { }
+        }
+    }
+    
+    func createModelContainer() -> ModelContainer {
         do {
             let schema = Schema([
                 Record.self,
                 AppSettings.self,
             ])
             let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-            modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
             print("SwiftData ModelContainer initialized successfully.")
             
-            guard let container = modelContainer else {
-                print("Error: ModelContainer is nil after initialization")
-                return
-            }
-            
-            // Initialize default settings if not present
+            // Initialize default settings in the background
             Task {
                 await initializeDefaultSettings(container: container)
             }
             
-            let contentView = ContentView()
-                .modelContainer(container)
-
-            let popover = NSPopover()
-            popover.contentSize = NSSize(width: 600, height: 500)
-            popover.behavior = .transient
-            popover.contentViewController = NSHostingController(rootView: contentView)
-            self.popover = popover
-            
-            // Create status item without a menu
-            let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            self.statusItem = statusItem
-            
-            // Configure status item button
-            if let button = statusItem.button {
-                button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "VibeScribe")
-                button.action = #selector(handleStatusItemClick)
-                button.target = self
-                button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            }
-            
-            print("App UI setup complete.")
-            
+            return container
         } catch {
-            print("Could not complete app setup: \(error)")
+            print("Critical error: Could not initialize ModelContainer: \(error)")
+            // Fallback to in-memory container to avoid crashing
+            do {
+                let schema = Schema([Record.self, AppSettings.self])
+                return try ModelContainer(for: schema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
+            } catch {
+                fatalError("Fatal error: Could not create even an in-memory ModelContainer: \(error)")
+            }
         }
     }
     
@@ -135,69 +179,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } catch {
             print("Error checking/initializing default settings: \(error)")
-        }
-    }
-    
-    @objc func handleStatusItemClick(sender: NSStatusBarButton) {
-        // Check if this is a right-click
-        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
-            let menu = NSMenu()
-            menu.addItem(NSMenuItem(title: "Show App", action: #selector(showApp), keyEquivalent: ""))
-            menu.addItem(NSMenuItem.separator())
-            menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
-            
-            // Position menu
-            let position = NSPoint(x: 0, y: 0)
-            
-            // Show menu manually
-            menu.popUp(positioning: nil, at: position, in: sender)
-        } else {
-            // Left click behavior - show popover
-            if let button = statusItem?.button, let popover = popover {
-                if popover.isShown {
-                    popover.performClose(nil)
-                } else {
-                    popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-                }
-            }
-        }
-    }
-    
-    @objc func showApp() {
-        if let button = statusItem?.button, let popover = popover {
-            if !popover.isShown {
-                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            }
-        }
-    }
-    
-    @objc func togglePopover(sender: NSStatusBarButton) {
-        // Only proceed if this was a left click
-        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
-            return
-        }
-        
-        if let button = statusItem?.button, let popover = popover {
-            if popover.isShown {
-                popover.performClose(nil)
-            } else {
-                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            }
-        }
-    }
-    
-    @objc func quitApp() {
-        NSApp.terminate(nil)
-    }
-}
-
-@main
-struct VibeScribeApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
-    var body: some Scene {
-        Settings {
-            EmptyView()
         }
     }
 }
