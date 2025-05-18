@@ -117,78 +117,102 @@ struct SettingsView: View {
         }
     }
     
+    @State private var selectedTab: SettingsTab = .speechToText
+    
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: UIConstants.betweenMajorSections) { // Изменяем .center на .leading
-                VStack(alignment: .leading, spacing: UIConstants.betweenMajorSections) { // Внутренний VStack для контента
-                    // Transcription API Section
-                    contentBlock {
-                        Text("Whisper compatible API URL")
-                            .font(Typography.body)
-                        styledTextField("https://api.example.com/v1/audio/transcriptions", value: Binding(
-                            get: { settings.whisperURL },
-                            set: { settings.whisperURL = $0; trySave() }
-                        ))
-                        captionText("e.g., https://api.openai.com/v1/audio/transcriptions or your local Whisper instance.")
-                    }
-
-                    // LLM API section
-                    contentBlock {
-                        Text("OpenAI compatible API URL")
-                            .font(Typography.body)
-                        styledTextField("https://api.example.com/v1/chat/completions", value: Binding(
-                            get: { settings.openAICompatibleURL },
-                            set: { settings.openAICompatibleURL = $0; trySave() }
-                        ))
-                        captionText("e.g., https://api.openai.com/v1/chat/completions or your custom summarization endpoint.")
-                    }
-                    
-                    // Chunk Processing Prompt
-                    contentBlock {
-                        Text("Prompt for individual transcription chunks")
-                            .font(Typography.body)
-                        styledTextEditor(Binding(
-                            get: { settings.chunkPrompt },
-                            set: { settings.chunkPrompt = $0; trySave() }
-                        ))
-                        captionText("Use {transcription} as a placeholder for the transcription text.")
-                    }
-                    
-                    // Final Summary Prompt
-                    contentBlock {
-                        Text("Prompt for combining chunk summaries")
-                            .font(Typography.body)
-                        styledTextEditor(Binding(
-                            get: { settings.summaryPrompt },
-                            set: { settings.summaryPrompt = $0; trySave() }
-                        ))
-                        captionText("Use {summaries} as a placeholder for the combined chunk summaries.")
-                    }
-                    
-                    // Chunk Size Settings
-                    contentBlock {
-                        Text("Chunk Size (characters)")
-                            .font(Typography.body)
-                        styledTextField("1000", value: Binding(
-                            get: { settings.chunkSize },
-                            set: { newValue in 
-                                let clampedValue = max(100, min(2000, newValue))
-                                if settings.chunkSize != clampedValue {
-                                    settings.chunkSize = clampedValue
-                                    trySave()
-                                }
-                            }
-                        ), format: .number)
-                        captionText("Text chunk size for LLM processing (100-2000 characters). Larger chunks = more context but higher token cost.")
-                    }
-                    Spacer(minLength: UIConstants.spacing5x) // Отступ снизу
+        VStack(spacing: 0) {
+            // Tab selector
+            Picker("Settings", selection: $selectedTab) {
+                ForEach(SettingsTab.allCases) { tab in
+                    Text(tab.rawValue)
+                        .tag(tab)
                 }
-                .padding(.vertical, UIConstants.verticalMargin) // Оставляем только вертикальные отступы для этого блока
-                .frame(maxWidth: UIConstants.contentMaxWidth) // Ограничиваем ширину всего контента
             }
-            .frame(maxWidth: .infinity) // Главный VStack занимает всю ширину ScrollView
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, UIConstants.tabPickerHorizontalPadding)
+            .padding(.top, UIConstants.tabViewTopPadding)
+            .padding(.bottom, UIConstants.spacing4x)
+            .frame(maxWidth: UIConstants.tabPickerMaxWidth)
+            
+            // Content based on selected tab
+            ScrollView {
+                VStack(alignment: .leading, spacing: UIConstants.betweenMajorSections) {
+                    VStack(alignment: .leading, spacing: UIConstants.betweenMajorSections) {
+                        if selectedTab == .speechToText {
+                            // Speech to Text Tab Content
+                            contentBlock {
+                                Text("Whisper compatible API URL")
+                                    .font(Typography.body)
+                                styledTextField("https://api.example.com/v1/audio/transcriptions", value: Binding(
+                                    get: { settings.whisperURL },
+                                    set: { settings.whisperURL = $0; trySave() }
+                                ))
+                                captionText("e.g., https://api.openai.com/v1/audio/transcriptions or your local Whisper instance.")
+                            }
+                        } else if selectedTab == .summary {
+                            // Summary Tab Content
+                            // LLM API section
+                            contentBlock {
+                                Text("OpenAI compatible API URL")
+                                    .font(Typography.body)
+                                styledTextField("https://api.example.com/v1/chat/completions", value: Binding(
+                                    get: { settings.openAICompatibleURL },
+                                    set: { settings.openAICompatibleURL = $0; trySave() }
+                                ))
+                                captionText("e.g., https://api.openai.com/v1/chat/completions or your custom summarization endpoint.")
+                            }
+                            
+                            // Chunk Processing Prompt
+                            contentBlock {
+                                Text("Prompt for individual transcription chunks")
+                                    .font(Typography.body)
+                                styledTextEditor(Binding(
+                                    get: { settings.chunkPrompt },
+                                    set: { settings.chunkPrompt = $0; trySave() }
+                                ))
+                                captionText("Use {transcription} as a placeholder for the transcription text.")
+                            }
+                            
+                            // Final Summary Prompt
+                            contentBlock {
+                                Text("Prompt for combining chunk summaries")
+                                    .font(Typography.body)
+                                styledTextEditor(Binding(
+                                    get: { settings.summaryPrompt },
+                                    set: { settings.summaryPrompt = $0; trySave() }
+                                ))
+                                captionText("Use {summaries} as a placeholder for the combined chunk summaries.")
+                            }
+                            
+                            // Chunk Size Settings
+                            contentBlock {
+                                Text("Chunk Size (characters)")
+                                    .font(Typography.body)
+                                styledTextField("1000", value: Binding(
+                                    get: { settings.chunkSize },
+                                    set: { newValue in 
+                                        let clampedValue = max(100, min(2000, newValue))
+                                        if settings.chunkSize != clampedValue {
+                                            settings.chunkSize = clampedValue
+                                            trySave()
+                                        }
+                                    }
+                                ), format: .number)
+                                captionText("Text chunk size for LLM processing (100-2000 characters). Larger chunks = more context but higher token cost.")
+                            }
+                        }
+                        
+                        Spacer(minLength: UIConstants.spacing5x) // Отступ снизу
+                    }
+                    .padding(.vertical, UIConstants.verticalMargin) // Оставляем только вертикальные отступы для этого блока
+                    .frame(maxWidth: UIConstants.contentMaxWidth) // Ограничиваем ширину всего контента
+                }
+                .frame(maxWidth: .infinity) // Главный VStack занимает всю ширину ScrollView
+            }
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, UIConstants.horizontalMargin) // Добавляем горизонтальный отступ к ScrollView
+        .padding(.horizontal, UIConstants.horizontalMargin)
         .onAppear {
             _ = settings
         }
@@ -307,4 +331,11 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .modelContainer(for: AppSettings.self, inMemory: true)
+}
+
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case speechToText = "Speech to Text"
+    case summary = "Summary"
+    
+    var id: String { self.rawValue }
 } 
