@@ -123,6 +123,7 @@ struct VibeScribeApp: App {
         WindowGroup {
             ContentView()
                 .modelContainer(createModelContainer())
+                .background(Color(NSColor.windowBackgroundColor))
         }
         .windowStyle(HiddenTitleBarWindowStyle())
         .defaultSize(CGSize(width: 800, height: 600))

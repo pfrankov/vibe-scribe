@@ -43,32 +43,24 @@ struct RecordRow: View {
                         .lineLimit(1) // Ограничиваем одной строкой
                         // Make Text visible only when *not* editing
                         .opacity(isEditing ? 0 : 1)
-                        // Double-click to start editing
-                        .onTapGesture(count: 2) {
-                            startEditing()
-                        }
                 }
 
                 HStack(spacing: 4) { // Уменьшенный интервал для деталей
                     Text(record.date, style: .date)
-                        .foregroundColor(Color(NSColor.secondaryLabelColor)) // Используем системный цвет вместо ручной настройки opacity
+                        .foregroundStyle(.secondary) // Используем системный токен вместо ручного цвета
                     Text("•") // Bullet разделитель вместо дефиса
-                        .foregroundColor(Color(NSColor.secondaryLabelColor)) // Используем системный цвет
+                        .foregroundStyle(.secondary) // Используем системный токен
                     Text(formatDuration(record.duration))
-                        .foregroundColor(Color(NSColor.secondaryLabelColor)) // Используем системный цвет
+                        .foregroundStyle(.secondary) // Используем системный токен
                 }
                 .font(.caption) // Стандартный caption для macOS
             }
             Spacer()
-            
-            // Индикатор раскрытия
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(Color(NSColor.secondaryLabelColor)) // Системный цвет для chevron
+            // Disclosure indicator removed as per design decision
         }
         .padding(.vertical, 8) // Увеличиваем отступ для лучшей читаемости
         .padding(.horizontal, 4) // Добавляем небольшой горизонтальный отступ
-        .cornerRadius(4) // Небольшое скругление для строки
+        .contentShape(Rectangle()) // Гарантирует, что вся строка кликабельна
         // Detect when the text field loses focus to cancel editing
         .onChange(of: isNameFieldFocused) { oldValue, newValue in
             if !newValue && isEditing { // If focus is lost AND we were editing

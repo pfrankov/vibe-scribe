@@ -15,7 +15,6 @@ import Combine
 struct RecordDetailView: View {
     // Use @Bindable for direct modification of @Model properties
     @Bindable var record: Record
-    @Environment(\.dismiss) var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var appSettings: [AppSettings]
     
@@ -70,16 +69,6 @@ struct RecordDetailView: View {
                         }
                 }
                 Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle")
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
-                        .font(.body)
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut(.escape)
             }
             
             // --- Audio Player UI --- 
@@ -173,6 +162,7 @@ struct RecordDetailView: View {
                     .cornerRadius(4)
             }
             .frame(maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor)) // Добавляем непрозрачный фон для самого ScrollView
 
             // Transcribe Button 
             Button {

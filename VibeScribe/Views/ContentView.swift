@@ -47,24 +47,101 @@ struct ContentView: View {
 
             // Content Area 
             ZStack { // Use ZStack for smooth transitions
-                // Records view - only visible when selected
-                RecordsListView(
-                    records: records,
-                    selectedRecord: $selectedRecord,
-                    showRecordingSheet: $isShowingRecordingSheet,
-                    onDelete: deleteRecord
-                )
-                .opacity(selectedTab == 0 ? 1 : 0)
-                .zIndex(selectedTab == 0 ? 1 : 0) // Ensure correct view is on top
-                
-                // Settings view - only visible when selected
-                SettingsView()
-                    .opacity(selectedTab == 1 ? 1 : 0)
-                    .zIndex(selectedTab == 1 ? 1 : 0) // Ensure correct view is on top
+                // Records view - только показываем когда выбрана эта вкладка
+                if selectedTab == 0 {
+                    VStack(spacing: 0) {
+                        // Header with New Recording Button
+                        HStack(alignment: .center) {
+                            Text("All Recordings")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Button {
+                                isShowingRecordingSheet = true
+                            } label: {
+                                Label("New Recording", systemImage: "plus.circle.fill")
+                                    .font(.body)
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.regular)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        Divider()
+
+                        // Split view with sidebar list and detail view
+                        NavigationSplitView {
+                            Group {
+                                if records.isEmpty {
+                                    VStack(spacing: 12) {
+                                        Spacer()
+                                        Image(systemName: "waveform.slash")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(Color(NSColor.secondaryLabelColor))
+                                            .padding(.bottom, 4)
+                                        Text("No recordings yet")
+                                            .font(.headline)
+                                            .foregroundColor(Color(NSColor.labelColor))
+                                        Text("Click + to create your first recording")
+                                            .font(.subheadline)
+                                            .foregroundColor(Color(NSColor.secondaryLabelColor))
+                                        Spacer()
+                                    }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                } else {
+                                    List(selection: $selectedRecord) {
+                                        ForEach(records) { record in
+                                            RecordRow(record: record)
+                                                .tag(record)
+                                                .contextMenu {
+                                                    Button(role: .destructive) {
+                                                        deleteRecord(record)
+                                                    } label: {
+                                                        Label("Delete", systemImage: "trash")
+                                                    }
+                                                }
+                                                .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                                        }
+                                    }
+                                    .listStyle(.plain)
+                                    .scrollDismissesKeyboard(.immediately)
+                                }
+                            }
+                        } detail: {
+                            if let selectedRecord = selectedRecord {
+                                RecordDetailView(record: selectedRecord)
+                                    .id(selectedRecord.id)
+                            } else {
+                                VStack {
+                                    Spacer()
+                                    Text("Select a recording from the list")
+                                        .font(.headline)
+                                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                                    Spacer()
+                                }
+                            }
+                        }
+                        .navigationSplitViewStyle(.balanced)
+                        .background(Color(NSColor.windowBackgroundColor))
+                    }
+                    // Automatically select first record if available
+                    .onAppear {
+                        if selectedRecord == nil && !records.isEmpty {
+                            selectedRecord = records.first
+                        }
+                    }
+                    .onChange(of: records) { oldRecords, newRecords in
+                        if selectedRecord == nil && !newRecords.isEmpty {
+                            selectedRecord = newRecords.first
+                        }
+                    }
+                } else {
+                    SettingsView()
+                }
             }
             .animation(.easeInOut(duration: 0.15), value: selectedTab) // Более быстрая анимация
             .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure content fills space
-            .background(Color(NSColor.windowBackgroundColor))
 
             // Footer Area
             VStack(spacing: 0) { // Use VStack for Divider only
@@ -73,11 +150,6 @@ struct ContentView: View {
             }
             // Ensure Footer doesn't absorb extra space meant for content
             .layoutPriority(0) // Lower priority than the content ZStack
-        }
-        // Sheet for Record Detail
-        .sheet(item: $selectedRecord) { record in
-            RecordDetailView(record: record)
-                .frame(width: 450, height: 450) // Фиксированный размер для единообразия
         }
         // Sheet for Recording
         .sheet(isPresented: $isShowingRecordingSheet) {
@@ -90,7 +162,7 @@ struct ContentView: View {
     // --- Record Management Functions ---
 
     // Function to delete a record
-    private func deleteRecord(recordToDelete: Record) {
+    private func deleteRecord(_ recordToDelete: Record) {
         // 1. Delete the associated audio file if it exists
         if let fileURL = recordToDelete.fileURL {
              do {
