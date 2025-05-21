@@ -82,50 +82,64 @@ struct RecordDetailView: View {
             .padding(.bottom, 4)
             
             // --- Audio Player UI --- 
-            VStack(spacing: 6) {
-                HStack(spacing: 8) {
+            VStack(spacing: 0) {
+                HStack(spacing: 16) {
                     // Play/Pause Button
                     Button {
                         playerManager.togglePlayPause()
                     } label: {
                         Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.title2)
+                            .font(.system(size: 32))
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.plain)
                     .disabled(playerManager.player == nil)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 48, height: 48)
+                    .contentShape(Rectangle())
+                    .help(playerManager.isPlaying ? "Pause" : "Play")
                     
-                    // Progress Slider - Updated Logic
-                    Slider(
-                        value: $playerManager.currentTime,
-                        in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
-                        onEditingChanged: { editing in
-                            isEditingSlider = editing
-                            if editing {
-                                playerManager.scrubbingStarted()
-                            } else {
-                                playerManager.seek(to: playerManager.currentTime)
+                    // Time and Slider Column
+                    VStack(spacing: 8) {
+                        // Progress Slider
+                        Slider(
+                            value: $playerManager.currentTime,
+                            in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
+                            onEditingChanged: { editing in
+                                isEditingSlider = editing
+                                if editing {
+                                    playerManager.scrubbingStarted()
+                                } else {
+                                    playerManager.seek(to: playerManager.currentTime)
+                                }
                             }
+                        )
+                        .controlSize(.regular)
+                        
+                        // Time Label with equal space on both sides for better alignment
+                        HStack {
+                            Text(formatTime(playerManager.currentTime))
+                                .font(.caption)
+                                .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                                .monospacedDigit()
+                            
+                            Spacer()
+                            
+                            Text(formatTime(playerManager.duration))
+                                .font(.caption)
+                                .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                                .monospacedDigit()
                         }
-                    )
-                    .controlSize(.small)
-                    .frame(height: 16)
-
-                    // Time Label
-                    Text("\(formatTime(playerManager.currentTime)) / \(formatTime(playerManager.duration))")
-                        .font(.caption)
-                        .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                        .monospacedDigit()
-                        .frame(width: 80, alignment: .trailing)
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .padding(8)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(6)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.9))
+            .cornerRadius(10)
+            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
             .disabled(playerManager.player == nil)
-            .padding(.bottom, 8)
+            .padding(.vertical, 8)
             
             Divider()
             
