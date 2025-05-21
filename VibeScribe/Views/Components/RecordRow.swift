@@ -59,7 +59,6 @@ struct RecordRow: View {
             // Disclosure indicator removed as per design decision
         }
         .padding(.vertical, 8) // Увеличиваем отступ для лучшей читаемости
-        .padding(.horizontal, 4) // Добавляем небольшой горизонтальный отступ
         .contentShape(Rectangle()) // Гарантирует, что вся строка кликабельна
         // Detect when the text field loses focus to cancel editing
         .onChange(of: isNameFieldFocused) { oldValue, newValue in

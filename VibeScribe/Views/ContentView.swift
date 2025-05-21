@@ -101,7 +101,7 @@ struct ContentView: View {
                                                         Label("Delete", systemImage: "trash")
                                                     }
                                                 }
-                                                .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                         }
                                     }
                                     .listStyle(.plain)
