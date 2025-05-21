@@ -18,8 +18,9 @@ final class Record: Identifiable {
     var duration: TimeInterval
     var hasTranscription: Bool
     var transcriptionText: String?
+    var summaryText: String?
 
-    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false, transcriptionText: String? = nil) {
+    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false, transcriptionText: String? = nil, summaryText: String? = nil) {
         self.id = id
         self.name = name
         self.fileURL = fileURL // Store the URL object
@@ -27,6 +28,7 @@ final class Record: Identifiable {
         self.duration = duration
         self.hasTranscription = hasTranscription
         self.transcriptionText = transcriptionText
+        self.summaryText = summaryText
     }
 }
 

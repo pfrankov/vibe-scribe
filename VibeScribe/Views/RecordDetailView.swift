@@ -23,11 +23,20 @@ struct RecordDetailView: View {
     @State private var isTranscribing = false
     @State private var transcriptionError: String? = nil
     @State private var cancellables = Set<AnyCancellable>()
+    @State private var selectedTab: Tab = .transcription // Tab selection state
+    @State private var isSummarizing = false // Track summarization status
+    @State private var summaryError: String? = nil
 
     // State for inline title editing - Переименовал для ясности
     @State private var isEditingTitle: Bool = false
     @State private var editingTitle: String = ""
     @FocusState private var isTitleFieldFocused: Bool
+    
+    // Enum для вкладок
+    enum Tab {
+        case transcription
+        case summary
+    }
 
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
@@ -46,7 +55,7 @@ struct RecordDetailView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) { // Стандартный интервал macOS
+        VStack(alignment: .leading, spacing: 12) { // Уменьшаем базовый интервал
             // Header with Title (now editable) and Close button
             HStack {
                 ZStack(alignment: .leading) {
@@ -70,20 +79,21 @@ struct RecordDetailView: View {
                 }
                 Spacer()
             }
+            .padding(.bottom, 4)
             
             // --- Audio Player UI --- 
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     // Play/Pause Button
                     Button {
                         playerManager.togglePlayPause()
                     } label: {
                         Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.title3)
+                            .font(.title2)
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundColor(Color(NSColor.controlAccentColor))
+                            .foregroundStyle(Color.accentColor)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
                     .disabled(playerManager.player == nil)
                     .frame(width: 30, height: 30)
                     
@@ -100,106 +110,202 @@ struct RecordDetailView: View {
                             }
                         }
                     )
-                    .tint(Color(NSColor.controlAccentColor))
+                    .controlSize(.small)
+                    .frame(height: 16)
 
                     // Time Label
                     Text("\(formatTime(playerManager.currentTime)) / \(formatTime(playerManager.duration))")
                         .font(.caption)
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .foregroundStyle(Color(NSColor.secondaryLabelColor))
                         .monospacedDigit()
                         .frame(width: 80, alignment: .trailing)
                 }
             }
-            .padding(10)
+            .padding(8)
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(6)
             .disabled(playerManager.player == nil)
+            .padding(.bottom, 8)
             
             Divider()
             
-            // Transcription Header with Copy Button
-            HStack {
-                Text("Transcription")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    copyTranscription()
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                        .labelStyle(.iconOnly) // Только иконка
-                        .symbolRenderingMode(.hierarchical) // Улучшенное отображение SF Symbol
+            // Tab picker - properly centered segmented control following macOS HIG
+            Picker("", selection: $selectedTab) {
+                Text("Transcription").tag(Tab.transcription)
+                Text("Summary").tag(Tab.summary)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 300) // Limit width for better appearance
+            .frame(maxWidth: .infinity, alignment: .center) // Center in the container
+            .padding(.vertical, 8)
+            
+            // Tab content
+            if selectedTab == .transcription {
+                // Transcription Tab Content
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Spacer()
+                        Button {
+                            copyTranscription()
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .labelStyle(.iconOnly)
+                                .symbolRenderingMode(.hierarchical)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy Transcription")
+                        .disabled(!record.hasTranscription || record.transcriptionText == nil)
+                    }
+                    
+                    // Show error if exists
+                    if let error = transcriptionError {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .font(.callout)
+                            .padding(.bottom, 4)
+                    }
+                    
+                    // ScrollView for transcription
+                    ScrollView {
+                        Text(transcriptionText)
+                            .font(.body)
+                            .foregroundStyle(record.hasTranscription && record.transcriptionText != nil ? 
+                                            Color(NSColor.labelColor) : 
+                                            Color(NSColor.secondaryLabelColor))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                            .onHover { hovering in
+                                if hovering {
+                                    NSCursor.iBeam.push()
+                                } else {
+                                    NSCursor.pop()
+                                }
+                            }
+                            .padding(12)
+                            .background(Color(NSColor.textBackgroundColor))
+                            .cornerRadius(6)
+                    }
+                    .frame(maxHeight: .infinity)
+                    
+                    // Transcribe Button 
+                    Button {
+                        startTranscription()
+                    } label: {
+                        HStack {
+                            if isTranscribing {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .padding(.trailing, 5)
+                            }
+                            Text("Transcribe")
+                            Image(systemName: "waveform")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(isTranscribing || record.fileURL == nil)
+                    .padding(.top, 4)
                 }
-                .buttonStyle(.borderless) // Стандартный macOS стиль
-                .help("Copy Transcription") // Всплывающая подсказка
-                // Disable button if no transcription
-                .disabled(!record.hasTranscription || record.transcriptionText == nil)
-            }
-            
-            // Show error if exists
-            if let error = transcriptionError {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.callout)
-                    .padding(.bottom, 4)
-            }
-            
-            // ScrollView for transcription
-            ScrollView {
-                Text(transcriptionText)
-                    .font(.body)
-                    .foregroundColor(record.hasTranscription && record.transcriptionText != nil ? Color(NSColor.labelColor) : Color(NSColor.secondaryLabelColor))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .onHover { hovering in
-                        if hovering {
-                            NSCursor.iBeam.push()
+            } else {
+                // Summary Tab Content
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Spacer()
+                        Button {
+                            copySummary()
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .labelStyle(.iconOnly)
+                                .symbolRenderingMode(.hierarchical)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy Summary")
+                        .disabled(record.summaryText == nil)
+                    }
+                    
+                    // Show error if exists
+                    if let error = summaryError {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .font(.callout)
+                            .padding(.bottom, 4)
+                    }
+                    
+                    // ScrollView for summary
+                    ScrollView {
+                        if let summaryText = record.summaryText, !summaryText.isEmpty {
+                            Text(summaryText)
+                                .font(.body)
+                                .foregroundStyle(Color(NSColor.labelColor))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                                .onHover { hovering in
+                                    if hovering {
+                                        NSCursor.iBeam.push()
+                                    } else {
+                                        NSCursor.pop()
+                                    }
+                                }
+                                .padding(12)
+                                .background(Color(NSColor.textBackgroundColor))
+                                .cornerRadius(6)
                         } else {
-                            NSCursor.pop()
+                            Text("No summary available yet.")
+                                .font(.body)
+                                .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(Color(NSColor.textBackgroundColor))
+                                .cornerRadius(6)
                         }
                     }
-                    .padding(10)
-                    .background(Color(NSColor.textBackgroundColor))
-                    .cornerRadius(4)
-            }
-            .frame(maxHeight: .infinity)
-            .background(Color(NSColor.windowBackgroundColor)) // Добавляем непрозрачный фон для самого ScrollView
-
-            // Transcribe Button 
-            Button {
-                startTranscription()
-            } label: {
-                HStack {
-                    if isTranscribing {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .padding(.trailing, 5)
+                    .frame(maxHeight: .infinity)
+                    
+                    // Summarize Button 
+                    Button {
+                        startSummarization()
+                    } label: {
+                        HStack {
+                            if isSummarizing {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .padding(.trailing, 5)
+                            }
+                            Text("Summarize")
+                            Image(systemName: "doc.text.magnifyingglass")
+                        }
+                        .frame(maxWidth: .infinity)
                     }
-                    Label("Transcribe", systemImage: "waveform")
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(isSummarizing || record.transcriptionText == nil || !record.hasTranscription)
+                    .padding(.top, 4)
                 }
-                .frame(maxWidth: .infinity) // Растягиваем кнопку
             }
-            .buttonStyle(.borderedProminent) // Акцентная кнопка
-            .controlSize(.regular) // Стандартный размер
-            .disabled(isTranscribing || record.fileURL == nil)
         }
-        .padding(16) // Стандартный отступ macOS
+        .padding(16) // Более компактный общий отступ
         .onAppear {
             // --- Refined File Loading Logic ---
             guard let fileURL = record.fileURL else {
                 print("Error: Record '\(record.name)' has no associated fileURL.")
-                // Optionally disable player controls or show UI error
-                // For now, we just prevent player setup
                 return // Exit early
             }
 
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
                 print("Error: Audio file for record '\(record.name)' not found at path: \(fileURL.path)")
-                // Optionally disable player controls or show UI error
                 return // Exit early
             }
 
             print("Loading audio from: \(fileURL.path)")
             playerManager.setupPlayer(url: fileURL)
+            
+            // If summary exists, switch to summary tab
+            if let summaryText = record.summaryText, !summaryText.isEmpty {
+                selectedTab = .summary
+            }
         }
         .onDisappear {
             playerManager.stopAndCleanup()
@@ -252,6 +358,15 @@ struct RecordDetailView: View {
         }
     }
     
+    private func copySummary() {
+        if let text = record.summaryText {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            print("Summary copied to clipboard.")
+        }
+    }
+    
     // Функция для запуска транскрипции
     private func startTranscription() {
         guard let fileURL = record.fileURL, !isTranscribing else { return }
@@ -289,6 +404,188 @@ struct RecordDetailView: View {
             }
         )
         .store(in: &cancellables)
+    }
+    
+    // Функция для запуска суммаризации
+    private func startSummarization() {
+        guard let transcriptionText = record.transcriptionText, 
+              !transcriptionText.isEmpty,
+              !isSummarizing else { return }
+        
+        isSummarizing = true
+        summaryError = nil
+        
+        print("Starting summarization for: \(record.name), using OpenAI compatible API at URL: \(settings.openAICompatibleURL)")
+        
+        // Разбиваем транскрипцию на чанки
+        let chunks = splitTranscriptionIntoChunks(transcriptionText, chunkSize: settings.chunkSize)
+        print("Split transcription into \(chunks.count) chunks")
+        
+        // Создаем массив для хранения суммаризаций чанков
+        var chunkSummaries = [String]()
+        let group = DispatchGroup()
+        
+        // Суммаризируем каждый чанк
+        for (index, chunk) in chunks.enumerated() {
+            group.enter()
+            
+            summarizeChunk(chunk, index: index).sink(
+                receiveCompletion: { completion in
+                    switch completion {
+                    case .finished:
+                        print("Chunk \(index) summarization completed")
+                    case .failure(let error):
+                        print("Chunk \(index) summarization error: \(error.localizedDescription)")
+                        summaryError = "Error summarizing chunk \(index): \(error.localizedDescription)"
+                    }
+                    group.leave()
+                },
+                receiveValue: { summary in
+                    chunkSummaries.append(summary)
+                }
+            ).store(in: &cancellables)
+        }
+        
+        // Когда все чанки суммаризированы, объединяем их
+        group.notify(queue: .main) {
+            if chunkSummaries.isEmpty {
+                self.isSummarizing = false
+                if self.summaryError == nil {
+                    self.summaryError = "Failed to generate chunk summaries"
+                }
+                return
+            }
+            
+            // Если есть только один чанк, используем его как финальную суммаризацию
+            if chunkSummaries.count == 1 {
+                self.record.summaryText = chunkSummaries[0]
+                try? self.modelContext.save()
+                self.isSummarizing = false
+                return
+            }
+            
+            // Если чанков несколько, объединяем их
+            self.combineSummaries(chunkSummaries).sink(
+                receiveCompletion: { completion in
+                    self.isSummarizing = false
+                    switch completion {
+                    case .finished:
+                        print("Combined summary completed")
+                    case .failure(let error):
+                        print("Combined summary error: \(error.localizedDescription)")
+                        self.summaryError = "Error combining summaries: \(error.localizedDescription)"
+                    }
+                },
+                receiveValue: { finalSummary in
+                    self.record.summaryText = finalSummary
+                    try? self.modelContext.save()
+                }
+            ).store(in: &self.cancellables)
+        }
+    }
+    
+    // Разбиваем транскрипцию на чанки
+    private func splitTranscriptionIntoChunks(_ text: String, chunkSize: Int) -> [String] {
+        var chunks = [String]()
+        let words = text.split(separator: " ")
+        var currentChunk = [Substring]()
+        
+        for word in words {
+            currentChunk.append(word)
+            if currentChunk.joined(separator: " ").count >= chunkSize {
+                chunks.append(currentChunk.joined(separator: " "))
+                currentChunk = []
+            }
+        }
+        
+        if !currentChunk.isEmpty {
+            chunks.append(currentChunk.joined(separator: " "))
+        }
+        
+        return chunks
+    }
+    
+    // Суммаризируем один чанк
+    private func summarizeChunk(_ chunk: String, index: Int) -> AnyPublisher<String, Error> {
+        let prompt = settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: chunk)
+        
+        return callOpenAIAPI(
+            prompt: prompt,
+            url: settings.openAICompatibleURL
+        )
+    }
+    
+    // Объединяем суммаризации чанков
+    private func combineSummaries(_ summaries: [String]) -> AnyPublisher<String, Error> {
+        let combinedSummaries = summaries.joined(separator: "\n\n")
+        let prompt = settings.summaryPrompt.replacingOccurrences(of: "{summaries}", with: combinedSummaries)
+        
+        return callOpenAIAPI(
+            prompt: prompt,
+            url: settings.openAICompatibleURL
+        )
+    }
+    
+    // Вызываем OpenAI-совместимый API
+    private func callOpenAIAPI(prompt: String, url: String) -> AnyPublisher<String, Error> {
+        return Future<String, Error> { promise in
+            guard let url = URL(string: url) else {
+                promise(.failure(NSError(domain: "Invalid URL", code: -1)))
+                return
+            }
+            
+            // Создаем запрос
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            // Формируем тело запроса
+            let requestBody: [String: Any] = [
+                "model": "gpt-3.5-turbo",
+                "messages": [
+                    ["role": "system", "content": "You are a helpful assistant."],
+                    ["role": "user", "content": prompt]
+                ]
+            ]
+            
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+            } catch {
+                promise(.failure(error))
+                return
+            }
+            
+            // Отправляем запрос
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error = error {
+                    promise(.failure(error))
+                    return
+                }
+                
+                guard let data = data else {
+                    promise(.failure(NSError(domain: "No data received", code: -1)))
+                    return
+                }
+                
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let choices = json["choices"] as? [[String: Any]],
+                       let firstChoice = choices.first,
+                       let message = firstChoice["message"] as? [String: Any],
+                       let content = message["content"] as? String {
+                        
+                        promise(.success(content))
+                    } else {
+                        if let jsonStr = String(data: data, encoding: .utf8) {
+                            print("Unexpected response format: \(jsonStr)")
+                        }
+                        promise(.failure(NSError(domain: "Invalid response format", code: -1)))
+                    }
+                } catch {
+                    promise(.failure(error))
+                }
+            }.resume()
+        }.eraseToAnyPublisher()
     }
     
     // Helper to format time like MM:SS
