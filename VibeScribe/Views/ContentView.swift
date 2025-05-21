@@ -151,6 +151,19 @@ struct ContentView: View {
             // Ensure Footer doesn't absorb extra space meant for content
             .layoutPriority(0) // Lower priority than the content ZStack
         }
+        .onAppear {
+            // Assign the main window to the AppDelegate for global access (e.g., by menu bar)
+            if let window = NSApplication.shared.windows.first(where: { $0.isMainWindow }) {
+                (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = window
+                print("Main window assigned to AppDelegate.")
+            } else if let anyWindow = NSApplication.shared.windows.first {
+                // Fallback if no window is key/main, though less ideal
+                (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = anyWindow
+                print("Fallback window assigned to AppDelegate.")
+            } else {
+                print("ContentView onAppear: No window found to assign to AppDelegate.")
+            }
+        }
         // Sheet for Recording
         .sheet(isPresented: $isShowingRecordingSheet) {
             // Pass the model context to RecordingView

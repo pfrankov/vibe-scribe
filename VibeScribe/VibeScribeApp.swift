@@ -15,6 +15,7 @@ import ScreenCaptureKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
+    weak var mainWindow: NSWindow?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
@@ -37,7 +38,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem?.button {
             // Use a more visible icon - microphone symbol
             button.image = NSImage(systemSymbolName: "mic.circle.fill", accessibilityDescription: "VibeScribe")
-            button.action = #selector(toggleMainWindow)
+
+            // Add gesture recognizer for double-click
+            let gesture = NSClickGestureRecognizer(target: self, action: #selector(toggleMainWindow))
+            gesture.numberOfClicksRequired = 2
+            button.addGestureRecognizer(gesture)
         }
         
         // Create menu for status bar item
@@ -60,9 +65,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func toggleMainWindow() {
-        guard let window = NSApplication.shared.windows.first else { return }
+        guard let window = mainWindow else {
+            if let fallbackWindow = NSApplication.shared.windows.first(where: { $0.isMainWindow }) ?? NSApplication.shared.windows.first {
+                mainWindow = fallbackWindow
+                if fallbackWindow.isVisible && fallbackWindow.isKeyWindow {
+                    fallbackWindow.orderOut(nil)
+                } else {
+                    fallbackWindow.makeKeyAndOrderFront(nil)
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                }
+            } else {
+                print("Error: Main window not found during fallback.")
+            }
+            return
+        }
         
-        if window.isVisible {
+        if window.isVisible && window.isKeyWindow {
             window.orderOut(nil)
         } else {
             window.makeKeyAndOrderFront(nil)
