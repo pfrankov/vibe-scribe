@@ -46,7 +46,7 @@ struct RecordRow: View {
                 }
 
                 HStack(spacing: 4) { // Уменьшенный интервал для деталей
-                    Text(record.date, style: .date)
+                    Text(formattedDateTime(record.date))
                         .foregroundStyle(.secondary) // Используем системный токен вместо ручного цвета
                     Text("•") // Bullet разделитель вместо дефиса
                         .foregroundStyle(.secondary) // Используем системный токен
@@ -97,5 +97,13 @@ struct RecordRow: View {
         isEditing = false // Exit editing mode
         isNameFieldFocused = false // Ensure focus is released
         // No need to reset editingName, it will be re-initialized on next edit
+    }
+    
+    // Helper function to format the date with time
+    private func formattedDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 } 
