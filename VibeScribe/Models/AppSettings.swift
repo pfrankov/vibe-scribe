@@ -16,12 +16,16 @@ final class AppSettings {
     
     // Transcription settings
     var whisperURL: String = "https://api.openai.com/v1/audio/transcriptions"
+    var whisperAPIKey: String = ""
+    var whisperModel: String = "whisper-1"
     
     // LLM Context settings
     var chunkSize: Int = 750
     
     // OpenAI compatible server settings
     var openAICompatibleURL: String = "https://api.openai.com/v1/chat/completions"
+    var openAIAPIKey: String = ""
+    var openAIModel: String = "gpt-3.5-turbo"
     
     // Prompts
     var chunkPrompt: String = """
@@ -46,14 +50,22 @@ The combined text should be well-structured and feel like a single document rath
     
     init(id: String = "app_settings", 
          whisperURL: String, 
+         whisperAPIKey: String = "",
+         whisperModel: String = "whisper-1",
          chunkSize: Int, 
          openAICompatibleURL: String,
+         openAIAPIKey: String = "",
+         openAIModel: String = "gpt-3.5-turbo",
          chunkPrompt: String,
          summaryPrompt: String) {
         self.id = id
         self.whisperURL = whisperURL
+        self.whisperAPIKey = whisperAPIKey
+        self.whisperModel = whisperModel
         self.chunkSize = chunkSize
         self.openAICompatibleURL = openAICompatibleURL
+        self.openAIAPIKey = openAIAPIKey
+        self.openAIModel = openAIModel
         self.chunkPrompt = chunkPrompt
         self.summaryPrompt = summaryPrompt
     }

@@ -36,7 +36,7 @@ private struct UIConstants {
     static let tabPickerHorizontalPadding = 20.0 // macOS стандарт
     
     // Margins
-    static let horizontalMargin = 16.0 // Стандартный отступ по горизонтали
+    static let horizontalMargin = 24.0 // Увеличенный отступ по горизонтали 
     static let verticalMargin = 16.0 // Стандартный отступ по вертикали
     
     // Corner radius
@@ -51,7 +51,6 @@ private struct UIConstants {
     static let borderWidth: CGFloat = 0.5 // Более тонкие границы
     
     // Content width
-    static let contentMaxWidth: CGFloat = 500.0 // Уменьшенная ширина для компактности
     static let tabPickerMaxWidth: CGFloat = 280.0 // Уменьшенная ширина селектора для компактности
     
     // Colors
@@ -150,6 +149,33 @@ struct SettingsView: View {
                                 ))
                                 captionText("e.g., https://api.openai.com/v1/audio/transcriptions or your local Whisper instance.")
                             }
+                            
+                            // Whisper API Key
+                            contentBlock {
+                                Text("Whisper API Key")
+                                    .font(Typography.body)
+                                styledTextField("sk-...", value: Binding(
+                                    get: { settings.whisperAPIKey },
+                                    set: { settings.whisperAPIKey = $0; trySave() }
+                                ))
+                                captionText("Your Whisper API key. Leave empty for local servers that don't require authentication.")
+                            }
+                            
+                            // Whisper Model selection
+                            contentBlock {
+                                Text("Whisper Model")
+                                    .font(Typography.body)
+                                ComboBoxView(
+                                    placeholder: "Select Whisper model",
+                                    options: ["whisper-1", "tiny", "base", "small", "medium", "large", "large-v1", "large-v2", "large-v3"],
+                                    selectedOption: Binding(
+                                        get: { settings.whisperModel },
+                                        set: { settings.whisperModel = $0; trySave() }
+                                    )
+                                )
+                                .frame(height: 22)
+                                captionText("Specify the Whisper model to use for transcription. May vary depending on your server implementation.")
+                            }
                         } else if selectedTab == .summary {
                             // Summary Tab Content
                             // LLM API section
@@ -161,6 +187,33 @@ struct SettingsView: View {
                                     set: { settings.openAICompatibleURL = $0; trySave() }
                                 ))
                                 captionText("e.g., https://api.openai.com/v1/chat/completions or your custom summarization endpoint.")
+                            }
+                            
+                            // OpenAI API Key
+                            contentBlock {
+                                Text("OpenAI API Key")
+                                    .font(Typography.body)
+                                styledTextField("sk-...", value: Binding(
+                                    get: { settings.openAIAPIKey },
+                                    set: { settings.openAIAPIKey = $0; trySave() }
+                                ))
+                                captionText("Your OpenAI API key. Leave empty for local servers that don't require authentication.")
+                            }
+                            
+                            // OpenAI Model selection
+                            contentBlock {
+                                Text("OpenAI Model")
+                                    .font(Typography.body)
+                                ComboBoxView(
+                                    placeholder: "Select LLM model",
+                                    options: ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "claude-3-opus-20240229"],
+                                    selectedOption: Binding(
+                                        get: { settings.openAIModel },
+                                        set: { settings.openAIModel = $0; trySave() }
+                                    )
+                                )
+                                .frame(height: 22)
+                                captionText("Specify the model to use for summarization. Custom models from local servers can be entered manually.")
                             }
                             
                             // Chunk Processing Prompt
@@ -206,7 +259,7 @@ struct SettingsView: View {
                         Spacer(minLength: UIConstants.spacing5x) // Отступ снизу
                     }
                     .padding(.vertical, UIConstants.verticalMargin) // Оставляем только вертикальные отступы для этого блока
-                    .frame(maxWidth: UIConstants.contentMaxWidth) // Ограничиваем ширину всего контента
+                    .frame(maxWidth: .infinity) // Контент занимает всю доступную ширину
                 }
                 .frame(maxWidth: .infinity) // Главный VStack занимает всю ширину ScrollView
             }

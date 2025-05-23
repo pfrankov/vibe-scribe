@@ -388,12 +388,14 @@ struct RecordDetailView: View {
         isTranscribing = true
         transcriptionError = nil
         
-        print("Starting transcription for: \(record.name), using Whisper API at URL: \(settings.whisperURL)")
+        print("Starting transcription for: \(record.name), using Whisper API at URL: \(settings.whisperURL) with model: \(settings.whisperModel)")
         
         let whisperManager = WhisperTranscriptionManager.shared
         whisperManager.transcribeAudio(
             audioURL: fileURL, 
             whisperURL: settings.whisperURL,
+            apiKey: settings.whisperAPIKey,
+            model: settings.whisperModel,
             language: "ru", // Используем русский язык по умолчанию
             responseFormat: "srt" // Формат субтитров
         )
@@ -553,9 +555,14 @@ struct RecordDetailView: View {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
+            // Добавляем API Key, если он предоставлен
+            if !settings.openAIAPIKey.isEmpty {
+                request.setValue("Bearer \(settings.openAIAPIKey)", forHTTPHeaderField: "Authorization")
+            }
+            
             // Формируем тело запроса
             let requestBody: [String: Any] = [
-                "model": "gpt-3.5-turbo",
+                "model": settings.openAIModel,
                 "messages": [
                     ["role": "system", "content": "You are a helpful assistant."],
                     ["role": "user", "content": prompt]

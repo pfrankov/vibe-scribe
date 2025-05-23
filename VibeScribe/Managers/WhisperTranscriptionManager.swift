@@ -40,7 +40,7 @@ class WhisperTranscriptionManager {
     private init() {}
     
     // Функция для транскрипции аудиофайла
-    func transcribeAudio(audioURL: URL, whisperURL: String, language: String = "ru", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
+    func transcribeAudio(audioURL: URL, whisperURL: String, apiKey: String = "", model: String = "whisper-1", language: String = "ru", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
         // Проверяем, существует ли файл
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
@@ -65,11 +65,21 @@ class WhisperTranscriptionManager {
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         
+        // Добавляем API Key, если он предоставлен
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        
         // Получаем данные аудиофайла
         do {
             let audioData = try Data(contentsOf: audioURL)
             
             var body = Data()
+            
+            // Добавляем параметр model
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(model)\r\n".data(using: .utf8)!)
             
             // Добавляем параметр response_format
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
