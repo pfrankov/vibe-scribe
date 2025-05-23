@@ -2,131 +2,110 @@
 //  VibeScribeApp.swift
 //  VibeScribe
 //
-//  Created by Frankov Pavel on 13.04.2025.
+//  Created by System on 13.04.2025.
 //
 
 import SwiftUI
-import Combine
 import SwiftData
 import AppKit
-import ServiceManagement
 import AVFoundation
-import ScreenCaptureKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem?
-    weak var mainWindow: NSWindow?
+    var statusBarItem: NSStatusItem?
+    var mainWindow: NSWindow?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        setupStatusBar()
-        
-        requestPermissions { micGranted in
-             DispatchQueue.main.async { // Ensure UI updates on main thread
-                // Log permission status
-                print("Microphone access: \(micGranted ? "Granted" : "Denied or Undetermined")")
-                // Screen capture permission is implicitly handled by SCShareableContent.current access
-                // You might want to add a check later to see if content is available,
-                // which indirectly confirms permission.
-             }
-         }
+        setupStatusBarItem()
+        requestPermissions { granted in
+            if granted {
+                print("All permissions granted")
+            } else {
+                print("Some permissions were denied")
+            }
+        }
     }
     
-    func setupStatusBar() {
-        // Create the status bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private func setupStatusBarItem() {
+        statusBarItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
-        if let button = statusItem?.button {
-            // Use a more visible icon - microphone symbol
-            button.image = NSImage(systemSymbolName: "mic.circle.fill", accessibilityDescription: "VibeScribe")
-
-            // Add gesture recognizer for double-click
-            let gesture = NSClickGestureRecognizer(target: self, action: #selector(toggleMainWindow))
-            gesture.numberOfClicksRequired = 2
-            button.addGestureRecognizer(gesture)
+        if let button = statusBarItem?.button {
+            button.image = NSImage(systemSymbolName: "waveform.circle.fill", accessibilityDescription: "VibeScribe")
+            button.action = #selector(statusBarButtonClicked)
+            button.target = self
         }
         
-        // Create menu for status bar item
         let menu = NSMenu()
         
-        // Open/Show the main window
-        menu.addItem(NSMenuItem(title: "Open", action: #selector(toggleMainWindow), keyEquivalent: "o"))
+        // Open main window
+        menu.addItem(NSMenuItem(title: "Open", action: #selector(openMainWindow), keyEquivalent: "o"))
         
-        // Start/Stop recording
+        // Start recording
         menu.addItem(NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "r"))
         
-        // Add separator
+        menu.addItem(NSMenuItem.separator())
+        
+        // Settings
+        menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
+        
         menu.addItem(NSMenuItem.separator())
         
         // Quit application
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         
-        // Set the menu
-        statusItem?.menu = menu
+        statusBarItem?.menu = menu
     }
     
-    @objc func toggleMainWindow() {
-        guard let window = mainWindow else {
-            if let fallbackWindow = NSApplication.shared.windows.first(where: { $0.isMainWindow }) ?? NSApplication.shared.windows.first {
-                mainWindow = fallbackWindow
-                if fallbackWindow.isVisible && fallbackWindow.isKeyWindow {
-                    fallbackWindow.orderOut(nil)
-                } else {
-                    fallbackWindow.makeKeyAndOrderFront(nil)
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                }
+    @objc func statusBarButtonClicked() {
+        if let window = mainWindow {
+            if window.isVisible {
+                window.orderOut(nil)
             } else {
-                print("Error: Main window not found during fallback.")
+                window.makeKeyAndOrderFront(nil)
+                NSApplication.shared.activate(ignoringOtherApps: true)
             }
-            return
-        }
-        
-        if window.isVisible && window.isKeyWindow {
-            window.orderOut(nil)
         } else {
+            openMainWindow()
+        }
+    }
+    
+    @objc func openMainWindow() {
+        if let window = mainWindow {
             window.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate(ignoringOtherApps: true)
+        } else if let window = NSApplication.shared.windows.first {
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            mainWindow = window
         }
     }
     
     @objc func startRecording() {
-        // Placeholder for recording functionality
-        print("Start recording triggered from menu")
+        openMainWindow()
         // This would typically activate the recording functionality
+    }
+    
+    @objc func openSettings() {
+        if let window = mainWindow ?? NSApplication.shared.windows.first {
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                NotificationCenter.default.post(name: NSNotification.Name("ShowSettings"), object: nil)
+            }
+        }
     }
     
     func requestPermissions(completion: @escaping (Bool) -> Void) {
         // Request Microphone access first
         AVCaptureDevice.requestAccess(for: .audio) { micGranted in
-            guard micGranted else {
-                print("Microphone access denied.")
-                // Complete with mic status, screen capture prompt won't show if mic denied.
-                completion(false)
-                return
-            }
-            print("Microphone access granted.")
-
-            // If mic granted, attempt to access shareable content to trigger Screen Capture prompt
-            // This is asynchronous and doesn't block the main setup.
-            if #available(macOS 12.3, *) {
-                Task {
-                    do {
-                        // Accessing .current triggers the permission prompt if needed
-                        _ = try await SCShareableContent.current
-                        print("Screen capture prompt potentially shown (or permission already granted/denied).")
-                        // We can't reliably check the *result* of the SC prompt here synchronously.
-                        // Proceed with app setup based on mic permission.
-                    } catch {
-                        print("Error accessing SCShareableContent (might indicate an issue, but not necessarily denial): \(error.localizedDescription)")
-                        // Proceed based on mic permission even if this fails.
-                    }
-                    // Call completion *after* attempting SCShareableContent access
-                    // Reflecting only the mic status for now.
-                    completion(true) // Mic was granted
+            DispatchQueue.main.async {
+                if micGranted {
+                    print("Microphone access granted")
+                    completion(true)
+                } else {
+                    print("Microphone access denied")
+                    completion(false)
                 }
-            } else {
-                print("Screen Capture audio recording requires macOS 12.3 or later.")
-                // Microphone granted, but screen capture not possible/prompt won't show.
-                completion(true) // Mic was granted
             }
         }
     }
@@ -135,69 +114,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct VibeScribeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State private var modelContainer: ModelContainer?
     
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .modelContainer(createModelContainer())
-                .background(Color(NSColor.windowBackgroundColor))
+                .modelContainer(for: [Record.self, AppSettings.self])
         }
-        .windowStyle(HiddenTitleBarWindowStyle())
-        .defaultSize(CGSize(width: 800, height: 600))
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) { }
-        }
-    }
-    
-    func createModelContainer() -> ModelContainer {
-        do {
-            let schema = Schema([
-                Record.self,
-                AppSettings.self,
-            ])
-            let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            print("SwiftData ModelContainer initialized successfully.")
             
-            // Initialize default settings in the background
-            Task {
-                await initializeDefaultSettings(container: container)
+            CommandGroup(after: .appInfo) {
+                Button("Settings...") {
+                    appDelegate.openSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
             }
-            
-            return container
-        } catch {
-            print("Critical error: Could not initialize ModelContainer: \(error)")
-            // Fallback to in-memory container to avoid crashing
-            do {
-                let schema = Schema([Record.self, AppSettings.self])
-                return try ModelContainer(for: schema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
-            } catch {
-                fatalError("Fatal error: Could not create even an in-memory ModelContainer: \(error)")
-            }
-        }
-    }
-    
-    // Ensure default settings are initialized
-    func initializeDefaultSettings(container: ModelContainer) async {
-        do {
-            let descriptor = FetchDescriptor<AppSettings>(predicate: #Predicate { $0.id == "app_settings" })
-            let context = ModelContext(container)
-            let existingSettings = try context.fetch(descriptor)
-            
-            if existingSettings.isEmpty {
-                // Create default settings
-                let defaultSettings = AppSettings()
-                context.insert(defaultSettings)
-                try context.save()
-                print("Default settings initialized")
-            } else {
-                print("Settings already exist, no initialization needed")
-            }
-        } catch {
-            print("Error checking/initializing default settings: \(error)")
         }
     }
 }

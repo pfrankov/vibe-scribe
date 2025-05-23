@@ -10,220 +10,203 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @State private var selectedTab = 0
-    @State private var selectedRecord: Record? = nil // State to manage which detail view to show
-    @State private var isShowingRecordingSheet = false // State for the recording sheet
+    @State private var selectedRecord: Record? = nil
+    @State private var isShowingRecordingSheet = false
+    @State private var isShowingSettings = false
 
-    // Fetch records from SwiftData, sorted by date descending
     @Query(sort: \Record.date, order: .reverse) private var records: [Record]
 
-    // Date formatter for default recording names
-    private var recordingNameFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
     var body: some View {
-        // Main container with adjusted spacing
-        VStack(spacing: 0) { // Remove default VStack spacing, manage manually
-
-            // Custom Tab Bar Area
-            HStack(spacing: 0) { // No spacing between buttons
-                TabBarButton(title: "Records", isSelected: selectedTab == 0) {
-                    selectedTab = 0
+        VStack(spacing: 0) {
+            // Header
+            HStack(alignment: .center) {
+                Text("All Recordings")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                Spacer()
+                
+                Button {
+                    isShowingRecordingSheet = true
+                } label: {
+                    Label("New Recording", systemImage: "plus.circle.fill")
+                        .font(.body)
                 }
-                TabBarButton(title: "Settings", isSelected: selectedTab == 1) {
-                    selectedTab = 1
-                }
+                .buttonStyle(.borderless)
+                .controlSize(.regular)
             }
-            .padding(.horizontal, 16) // Стандартный отступ macOS
-            .padding(.top, 12)    // Стандартный отступ macOS
-            .padding(.bottom, 4) // Уменьшенный отступ до разделителя
-
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            
             Divider()
-                .padding(.horizontal, 12) // Слегка уменьшенный отступ для разделителя
+                .padding(.horizontal, 12)
 
-            // Content Area 
-            ZStack { // Use ZStack for smooth transitions
-                // Records view - только показываем когда выбрана эта вкладка
-                if selectedTab == 0 {
-                    VStack(spacing: 0) {
-                        // Header with New Recording Button
-                        HStack(alignment: .center) {
-                            Text("All Recordings")
-                                .font(.title3)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Button {
-                                isShowingRecordingSheet = true
-                            } label: {
-                                Label("New Recording", systemImage: "plus.circle.fill")
-                                    .font(.body)
-                            }
-                            .buttonStyle(.borderless)
-                            .controlSize(.regular)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        Divider()
-
-                        // Split view with sidebar list and detail view
-                        NavigationSplitView {
-                            Group {
-                                if records.isEmpty {
-                                    VStack(spacing: 12) {
-                                        Spacer()
-                                        Image(systemName: "waveform.slash")
-                                            .font(.system(size: 40))
-                                            .foregroundColor(Color(NSColor.secondaryLabelColor))
-                                            .padding(.bottom, 4)
-                                        Text("No recordings yet")
-                                            .font(.headline)
-                                            .foregroundColor(Color(NSColor.labelColor))
-                                        Text("Click + to create your first recording")
-                                            .font(.subheadline)
-                                            .foregroundColor(Color(NSColor.secondaryLabelColor))
-                                        Spacer()
-                                    }
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                } else {
-                                    List(selection: $selectedRecord) {
-                                        ForEach(records) { record in
-                                            RecordRow(record: record)
-                                                .tag(record)
-                                                .contextMenu {
-                                                    Button(role: .destructive) {
-                                                        deleteRecord(record)
-                                                    } label: {
-                                                        Label("Delete", systemImage: "trash")
-                                                    }
-                                                }
-                                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                                        }
-                                    }
-                                    .listStyle(.plain)
-                                    .scrollDismissesKeyboard(.immediately)
-                                }
-                            }
-                        } detail: {
-                            if let selectedRecord = selectedRecord {
-                                RecordDetailView(record: selectedRecord)
-                                    .id(selectedRecord.id)
-                            } else {
-                                VStack {
-                                    Spacer()
-                                    Text("Select a recording from the list")
-                                        .font(.headline)
-                                        .foregroundColor(Color(NSColor.secondaryLabelColor))
-                                    Spacer()
-                                }
-                            }
-                        }
-                        .navigationSplitViewStyle(.balanced)
-                        .background(Color(NSColor.windowBackgroundColor))
-                    }
-                    // Automatically select first record if available
-                    .onAppear {
-                        if selectedRecord == nil && !records.isEmpty {
-                            selectedRecord = records.first
-                        }
-                    }
-                    .onChange(of: records) { oldRecords, newRecords in
-                        if selectedRecord == nil && !newRecords.isEmpty {
-                            selectedRecord = newRecords.first
-                        }
-                    }
-                } else {
-                    SettingsView()
-                }
+            // Main content
+            NavigationSplitView {
+                recordsList
+            } detail: {
+                recordDetail
             }
-            .animation(.easeInOut(duration: 0.15), value: selectedTab) // Более быстрая анимация
-            .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure content fills space
-
-            // Footer Area
-            VStack(spacing: 0) { // Use VStack for Divider only
-                Divider()
-                    .padding(.horizontal, 12) // Соответствует верхнему разделителю
+            .navigationSplitViewStyle(.balanced)
+            .background(Color(NSColor.windowBackgroundColor))
+            
+            // Footer
+            Divider()
+                .padding(.horizontal, 12)
+        }
+        .contextMenu {
+            Button {
+                isShowingSettings = true
+            } label: {
+                Label("Settings", systemImage: "gear")
             }
-            // Ensure Footer doesn't absorb extra space meant for content
-            .layoutPriority(0) // Lower priority than the content ZStack
+            
+            Divider()
+            
+            Button {
+                isShowingRecordingSheet = true
+            } label: {
+                Label("New Recording", systemImage: "plus.circle.fill")
+            }
         }
         .onAppear {
-            // Assign the main window to the AppDelegate for global access (e.g., by menu bar)
-            if let window = NSApplication.shared.windows.first(where: { $0.isMainWindow }) {
-                (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = window
-                print("Main window assigned to AppDelegate.")
-            } else if let anyWindow = NSApplication.shared.windows.first {
-                // Fallback if no window is key/main, though less ideal
-                (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = anyWindow
-                print("Fallback window assigned to AppDelegate.")
-            } else {
-                print("ContentView onAppear: No window found to assign to AppDelegate.")
+            assignMainWindow()
+            selectFirstRecordIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowSettings"))) { _ in
+            isShowingSettings = true
+        }
+        .onChange(of: records) { _, newRecords in
+            if selectedRecord == nil && !newRecords.isEmpty {
+                selectedRecord = newRecords.first
             }
         }
-        // Sheet for Recording
         .sheet(isPresented: $isShowingRecordingSheet) {
-            // Pass the model context to RecordingView
-             RecordingView() 
-                 .frame(width: 350, height: 320) // Фиксированный размер для единообразия
+            RecordingView() 
+                .frame(width: 350, height: 320)
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView()
+                .frame(width: 600, height: 500)
+        }
+    }
+    
+    // MARK: - Subviews
+    
+    @ViewBuilder
+    private var recordsList: some View {
+        if records.isEmpty {
+            emptyState
+        } else {
+            List(selection: $selectedRecord) {
+                ForEach(records) { record in
+                    RecordRow(record: record)
+                        .tag(record)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                deleteRecord(record)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                }
+            }
+            .listStyle(.plain)
+            .scrollDismissesKeyboard(.immediately)
+        }
+    }
+    
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "waveform.slash")
+                .font(.system(size: 40))
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .padding(.bottom, 4)
+            Text("No recordings yet")
+                .font(.headline)
+                .foregroundColor(Color(NSColor.labelColor))
+            Text("Click + to create your first recording")
+                .font(.subheadline)
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    @ViewBuilder
+    private var recordDetail: some View {
+        if let selectedRecord = selectedRecord {
+            RecordDetailView(record: selectedRecord)
+                .id(selectedRecord.id)
+        } else {
+            VStack {
+                Spacer()
+                Text("Select a recording from the list")
+                    .font(.headline)
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                Spacer()
+            }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func assignMainWindow() {
+        if let window = NSApplication.shared.windows.first(where: { $0.isMainWindow }) {
+            (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = window
+            print("Main window assigned to AppDelegate.")
+        } else if let anyWindow = NSApplication.shared.windows.first {
+            (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = anyWindow
+            print("Fallback window assigned to AppDelegate.")
+        } else {
+            print("ContentView onAppear: No window found to assign to AppDelegate.")
+        }
+    }
+    
+    private func selectFirstRecordIfNeeded() {
+        if selectedRecord == nil && !records.isEmpty {
+            selectedRecord = records.first
         }
     }
 
-    // --- Record Management Functions ---
-
-    // Function to delete a record
     private func deleteRecord(_ recordToDelete: Record) {
-        // 1. Delete the associated audio file if it exists
         if let fileURL = recordToDelete.fileURL {
-             do {
-                 if FileManager.default.fileExists(atPath: fileURL.path) {
-                     try FileManager.default.removeItem(at: fileURL)
-                     print("Successfully deleted audio file: \(fileURL.path)")
-                 } else {
-                     print("Audio file not found, skipping deletion: \(fileURL.path)")
-                 }
-             } catch {
-                 print("Error deleting audio file \(fileURL.path): \(error.localizedDescription)")
-                 // Consider showing an error to the user
-             }
-         } else {
-             print("Record \(recordToDelete.name) has no associated fileURL.")
-         }
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                print("Successfully deleted audio file: \(fileURL.path)")
+            } catch {
+                print("Error deleting audio file \(fileURL.path): \(error.localizedDescription)")
+            }
+        } else {
+            print("Record \(recordToDelete.name) has no associated fileURL.")
+        }
 
-        // 2. Remove the record from the model context
-        print("Deleting record from context: \(recordToDelete.name)")
         modelContext.delete(recordToDelete)
         
-        // 3. If the deleted record was currently selected, deselect it
-        if selectedRecord?.id == recordToDelete.id {
-            selectedRecord = nil
+        do {
+            try modelContext.save()
+            print("Record \(recordToDelete.name) deleted successfully.")
+        } catch {
+            print("Error deleting record: \(error.localizedDescription)")
         }
     }
 }
 
 #Preview {
-    // --- Updated Preview ---
-    // Need to provide a sample model container for the preview
     do {
         let schema = Schema([Record.self, AppSettings.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true) // Use in-memory for preview
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [config])
         
-        // Optional: Add sample data to the preview container
-        let sampleRecord = Record(name: "Preview Record", fileURL: nil, duration: 65.0)
-        container.mainContext.insert(sampleRecord)
-        
-        // Add sample settings
         let settings = AppSettings()
         container.mainContext.insert(settings)
 
         return ContentView()
-            .modelContainer(container) // Provide the container to the preview
+            .modelContainer(container)
     } catch {
-        // Handle error creating the preview container
         return Text("Failed to create preview: \(error.localizedDescription)")
     }
 } 
