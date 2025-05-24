@@ -110,7 +110,7 @@ struct ComboBoxView: NSViewRepresentable {
 }
 
 #Preview {
-    @State var selected = "option1"
+    @Previewable @State var selected = "option1"
     
     return VStack(spacing: 20) {
         ComboBoxView(
