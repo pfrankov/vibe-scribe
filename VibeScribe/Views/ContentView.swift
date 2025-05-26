@@ -76,6 +76,24 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowSettings"))) { _ in
             isShowingSettings = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
+            if let recordId = notification.userInfo?["recordId"] as? UUID {
+                // Fetch the record directly from the model context to ensure it's found
+                let fetchDescriptor = FetchDescriptor<Record>(predicate: #Predicate { record in record.id == recordId })
+                do {
+                    let matchingRecords = try modelContext.fetch(fetchDescriptor)
+                    if let newRecord = matchingRecords.first {
+                        selectedRecord = newRecord
+                        print("ContentView: Auto-selected new record by fetching ID: \\(newRecord.id) Name: \\(newRecord.name)")
+                    } else {
+                        // This case should ideally not happen if the record was saved successfully
+                        print("ContentView ERROR: New record with ID \\(recordId) not found via fetch immediately after creation.")
+                    }
+                } catch {
+                    print("ContentView ERROR: Failed to fetch new record by ID \\(recordId): \\(error.localizedDescription)")
+                }
+            }
+        }
         .onChange(of: records) { _, newRecords in
             if selectedRecord == nil && !newRecords.isEmpty {
                 selectedRecord = newRecords.first
@@ -98,22 +116,33 @@ struct ContentView: View {
         if records.isEmpty {
             emptyState
         } else {
-            List(selection: $selectedRecord) {
-                ForEach(records) { record in
-                    RecordRow(record: record)
-                        .tag(record)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                deleteRecord(record)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+            ScrollViewReader { proxy in
+                List(selection: $selectedRecord) {
+                    ForEach(records) { record in
+                        RecordRow(record: record)
+                            .tag(record)
+                            .id(record.id)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    deleteRecord(record)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    }
+                }
+                .listStyle(.plain)
+                .scrollDismissesKeyboard(.immediately)
+                .onChange(of: selectedRecord) { oldValue, newValue in
+                    if let recordToScrollTo = newValue {
+                        print("ContentView: selectedRecord changed to \\(recordToScrollTo.name) (ID: \\(recordToScrollTo.id)), attempting to scroll.")
+                        withAnimation {
+                            proxy.scrollTo(recordToScrollTo.id, anchor: .top)
                         }
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    }
                 }
             }
-            .listStyle(.plain)
-            .scrollDismissesKeyboard(.immediately)
         }
     }
     

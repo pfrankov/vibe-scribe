@@ -271,8 +271,21 @@ struct RecordingView: View {
          
          print("Attempting to insert final record: \(newRecord.name) at \(url.path)")
          modelContext.insert(newRecord)
-         // Optional: Explicit save
-         // do { try modelContext.save() } catch { print("Error saving context: \(error)") }
+         
+         // Save the context to ensure the record is persisted
+         do {
+             try modelContext.save()
+             print("Record saved successfully: \(newRecord.name)")
+             
+             // Post notification about new record creation
+             NotificationCenter.default.post(
+                 name: NSNotification.Name("NewRecordCreated"),
+                 object: nil,
+                 userInfo: ["recordId": newRecord.id]
+             )
+         } catch {
+             print("Error saving record: \(error.localizedDescription)")
+         }
     }
 
     // Helper function to delete temporary audio files

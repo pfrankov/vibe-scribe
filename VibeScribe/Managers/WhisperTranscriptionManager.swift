@@ -16,6 +16,7 @@ enum TranscriptionError: Error {
     case invalidResponse
     case serverError(String)
     case unknownError
+    case dataParsingError(String)
     
     var description: String {
         switch self {
@@ -29,6 +30,8 @@ enum TranscriptionError: Error {
             return "Server error: \(message)"
         case .unknownError:
             return "Unknown error occurred"
+        case .dataParsingError(let message):
+            return "Data parsing error: \(message)"
         }
     }
 }
@@ -43,11 +46,13 @@ class WhisperTranscriptionManager {
     func transcribeAudio(audioURL: URL, whisperURL: String, apiKey: String = "", model: String = "whisper-1", language: String = "ru", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
         // Проверяем, существует ли файл
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            print("Error: Audio file not found at path: \(audioURL.path)")
             return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
         }
         
         // Формируем полный URL с эндпоинтом /v1/audio/transcriptions
         guard var serverURL = URL(string: whisperURL) else {
+            print("Error: Invalid Whisper API URL: \(whisperURL)")
             return Fail(error: TranscriptionError.networkError(NSError(domain: "InvalidURL", code: -1, userInfo: nil))).eraseToAnyPublisher()
         }
         
@@ -56,7 +61,7 @@ class WhisperTranscriptionManager {
             serverURL = serverURL.appendingPathComponent("v1/audio/transcriptions")
         }
         
-        print("Sending transcription request to: \(serverURL.absoluteString)")
+        print("Starting transcription for: \(audioURL.path), using Whisper API at URL: \(serverURL.absoluteString)")
         
         // Создаем multipart request для отправки аудио
         var request = URLRequest(url: serverURL)
@@ -73,6 +78,7 @@ class WhisperTranscriptionManager {
         // Получаем данные аудиофайла
         do {
             let audioData = try Data(contentsOf: audioURL)
+            print("Loaded audio data, size: \(ByteCountFormatter.string(fromByteCount: Int64(audioData.count), countStyle: .file))")
             
             var body = Data()
             
@@ -100,18 +106,30 @@ class WhisperTranscriptionManager {
             
             request.httpBody = body
             
-            // Выводим запрос для отладки
+            // Выводим информацию о запросе для отладки
             print("Request headers: \(request.allHTTPHeaderFields ?? [:])")
+            print("Request body size: \(ByteCountFormatter.string(fromByteCount: Int64(body.count), countStyle: .file))")
             
             return URLSession.shared.dataTaskPublisher(for: request)
                 .tryMap { data, response -> Data in
                     guard let httpResponse = response as? HTTPURLResponse else {
+                        print("Error: Invalid response type")
                         throw TranscriptionError.invalidResponse
                     }
                     
                     print("Response status code: \(httpResponse.statusCode)")
+                    print("Response headers: \(httpResponse.allHeaderFields)")
                     
                     if (200..<300).contains(httpResponse.statusCode) {
+                        // Проверяем, что данные не пустые
+                        guard !data.isEmpty else {
+                            print("Error: Empty response data")
+                            throw TranscriptionError.invalidResponse
+                        }
+                        
+                        // Логируем размер полученных данных
+                        print("Response data size: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))")
+                        
                         return data
                     } else {
                         if let errorMessage = String(data: data, encoding: .utf8) {
@@ -123,23 +141,60 @@ class WhisperTranscriptionManager {
                     }
                 }
                 .tryMap { data -> String in
-                    if let responseText = String(data: data, encoding: .utf8) {
-                        return responseText
-                    } else {
-                        throw TranscriptionError.invalidResponse
+                    // Пытаемся распарсить ответ
+                    guard let responseText = String(data: data, encoding: .utf8) else {
+                        print("Error: Could not decode response data as UTF-8 string")
+                        throw TranscriptionError.dataParsingError("Could not decode response as UTF-8 string")
                     }
+                    
+                    // Для формата srt, проверяем его структуру
+                    if responseFormat == "srt" {
+                        if responseText.contains("-->") && responseText.contains("\n\n") {
+                            // Выглядит как правильный SRT формат
+                            print("Response appears to be valid SRT format, length: \(responseText.count) characters")
+                        } else {
+                            print("Warning: Response doesn't appear to be in SRT format: \(responseText.prefix(100))...")
+                        }
+                    } else {
+                        // Для других форматов логируем начало ответа
+                        print("Response format: \(responseFormat), preview: \(responseText.prefix(100))...")
+                    }
+                    
+                    // Извлекаем только текст из SRT, если это требуется
+                    // В данном случае возвращаем как есть, но можно добавить парсинг SRT
+                    return responseText
                 }
                 .mapError { error -> TranscriptionError in
                     if let transcriptionError = error as? TranscriptionError {
                         return transcriptionError
                     } else {
+                        print("Mapped error: \(error.localizedDescription)")
                         return TranscriptionError.networkError(error)
                     }
                 }
                 .eraseToAnyPublisher()
         } catch {
+            print("Error loading audio file: \(error.localizedDescription)")
             return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
         }
+    }
+    
+    // Вспомогательный метод для парсинга SRT формата и извлечения чистого текста
+    func extractTextFromSRT(_ srtContent: String) -> String {
+        // Простой парсинг SRT формата - разбиваем на блоки и извлекаем только текст
+        let blocks = srtContent.components(separatedBy: "\n\n")
+        var extractedText = ""
+        
+        for block in blocks {
+            let lines = block.components(separatedBy: "\n")
+            // Пропускаем первые две строки (номер и таймкод), берем остальное как текст
+            if lines.count > 2 {
+                let textLines = lines.dropFirst(2).joined(separator: " ")
+                extractedText += textLines + " "
+            }
+        }
+        
+        return extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

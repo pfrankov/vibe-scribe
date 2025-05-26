@@ -26,6 +26,7 @@ struct RecordDetailView: View {
     @State private var selectedTab: Tab = .transcription // Tab selection state
     @State private var isSummarizing = false // Track summarization status
     @State private var summaryError: String? = nil
+    @State private var isAutomaticMode = false // Track if this is a new record that should auto-process
 
     // State for inline title editing - Переименовал для ясности
     @State private var isEditingTitle: Bool = false
@@ -320,6 +321,23 @@ struct RecordDetailView: View {
             if let summaryText = record.summaryText, !summaryText.isEmpty {
                 selectedTab = .summary
             }
+            
+            // Check if this is a new record that should auto-process
+            // A record is considered "new" if it has no transcription yet
+            if !record.hasTranscription && record.transcriptionText == nil {
+                print("Detected new record, starting automatic pipeline for: \(record.name)")
+                isAutomaticMode = true
+                startAutomaticPipeline()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
+            // If this view is showing the newly created record, start automatic processing
+            if let recordId = notification.userInfo?["recordId"] as? UUID,
+               recordId == record.id {
+                print("Received notification for new record creation: \(record.name)")
+                isAutomaticMode = true
+                startAutomaticPipeline()
+            }
         }
         .onDisappear {
             playerManager.stopAndCleanup()
@@ -402,21 +420,48 @@ struct RecordDetailView: View {
         .receive(on: DispatchQueue.main)
         .sink(
             receiveCompletion: { completion in
-                isTranscribing = false
+                self.isTranscribing = false
                 
                 switch completion {
                 case .finished:
                     print("Transcription completed successfully")
+                    
+                    // In automatic mode, start summarization after transcription completes
+                    if self.isAutomaticMode {
+                        print("Automatic mode: Starting summarization after transcription completion")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.startSummarization()
+                        }
+                    }
                 case .failure(let error):
-                    transcriptionError = "Error: \(error.description)"
+                    self.transcriptionError = "Error: \(error.description)"
                     print("Transcription error: \(error.description)")
+                    self.isAutomaticMode = false // Stop automatic mode on error
                 }
             },
             receiveValue: { transcription in
                 print("Received transcription of length: \(transcription.count) characters")
-                record.transcriptionText = transcription
-                record.hasTranscription = true
-                try? modelContext.save()
+                
+                // Проверяем, что транскрипция не пустая
+                guard !transcription.isEmpty else {
+                    self.transcriptionError = "Error: Empty transcription received"
+                    print("Error: Empty transcription received")
+                    return
+                }
+                
+                // Всегда сохраняем оригинальный SRT-формат
+                print("Saving original SRT format with timestamps")
+                
+                // Сохраняем только если текст не пустой
+                self.record.transcriptionText = transcription
+                self.record.hasTranscription = true
+                do {
+                    try self.modelContext.save()
+                    print("Transcription saved successfully")
+                } catch {
+                    print("Error saving transcription: \(error.localizedDescription)")
+                    self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
+                }
             }
         )
         .store(in: &cancellables)
@@ -424,18 +469,29 @@ struct RecordDetailView: View {
     
     // Функция для запуска суммаризации
     private func startSummarization() {
-        guard let transcriptionText = record.transcriptionText, 
-              !transcriptionText.isEmpty,
+        guard let srtText = record.transcriptionText, // Renamed for clarity, this is SRT
+              !srtText.isEmpty,
               !isSummarizing else { return }
+
+        // Extract clean text from SRT first
+        let cleanText = WhisperTranscriptionManager.shared.extractTextFromSRT(srtText)
+
+        guard !cleanText.isEmpty else {
+            print("Error: Clean text extracted from SRT is empty for record: \(record.name)")
+            summaryError = "Error: Transcription text is empty after cleaning."
+            isSummarizing = false
+            isAutomaticMode = false // Stop automatic mode
+            return
+        }
         
         isSummarizing = true
         summaryError = nil
         
         print("Starting summarization for: \(record.name), using OpenAI compatible API at URL: \(settings.openAICompatibleURL)")
         
-        // Разбиваем транскрипцию на чанки
-        let chunks = splitTranscriptionIntoChunks(transcriptionText, chunkSize: settings.chunkSize)
-        print("Split transcription into \(chunks.count) chunks")
+        // Разбиваем чистую транскрипцию на чанки
+        let chunks = splitTranscriptionIntoChunks(cleanText, chunkSize: settings.chunkSize)
+        print("Split clean transcription into \(chunks.count) chunks")
         
         // Создаем массив для хранения суммаризаций чанков
         var chunkSummaries = [String]()
@@ -453,6 +509,7 @@ struct RecordDetailView: View {
                     case .failure(let error):
                         print("Chunk \(index) summarization error: \(error.localizedDescription)")
                         summaryError = "Error summarizing chunk \(index): \(error.localizedDescription)"
+                        self.isAutomaticMode = false // Stop automatic mode on error
                     }
                     group.leave()
                 },
@@ -469,6 +526,7 @@ struct RecordDetailView: View {
                 if self.summaryError == nil {
                     self.summaryError = "Failed to generate chunk summaries"
                 }
+                self.isAutomaticMode = false // Stop automatic mode on error
                 return
             }
             
@@ -477,6 +535,13 @@ struct RecordDetailView: View {
                 self.record.summaryText = chunkSummaries[0]
                 try? self.modelContext.save()
                 self.isSummarizing = false
+                
+                // In automatic mode, switch to summary tab after completion
+                if self.isAutomaticMode {
+                    print("Automatic mode: Switching to summary tab after completion")
+                    self.selectedTab = .summary
+                    self.isAutomaticMode = false // Reset automatic mode
+                }
                 return
             }
             
@@ -490,11 +555,19 @@ struct RecordDetailView: View {
                     case .failure(let error):
                         print("Combined summary error: \(error.localizedDescription)")
                         self.summaryError = "Error combining summaries: \(error.localizedDescription)"
+                        self.isAutomaticMode = false // Stop automatic mode on error
                     }
                 },
                 receiveValue: { finalSummary in
                     self.record.summaryText = finalSummary
                     try? self.modelContext.save()
+                    
+                    // In automatic mode, switch to summary tab after completion
+                    if self.isAutomaticMode {
+                        print("Automatic mode: Switching to summary tab after combined summary completion")
+                        self.selectedTab = .summary
+                        self.isAutomaticMode = false // Reset automatic mode
+                    }
                 }
             ).store(in: &self.cancellables)
         }
@@ -614,5 +687,15 @@ struct RecordDetailView: View {
         let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+    
+    // Функция для запуска автоматического пайплайна
+    private func startAutomaticPipeline() {
+        guard isAutomaticMode else { return }
+        
+        print("Starting automatic pipeline for record: \(record.name)")
+        
+        // Start transcription first
+        startTranscription()
     }
 } 
