@@ -29,7 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusBarItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusBarItem?.button {
-            button.image = NSImage(systemSymbolName: "waveform.circle.fill", accessibilityDescription: "VibeScribe")
+            button.image = NSImage(named: "MenuBarIcon")
             button.action = #selector(statusBarButtonClicked)
             button.target = self
         }

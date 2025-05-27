@@ -4,12 +4,30 @@
 <dict>
     <key>CFBundleIdentifier</key>
     <string>pfrankov.VibeScribe</string>
-    <key>LSUIElement</key>
-    <false/>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundleDisplayName</key>
+    <string>VibeScribe</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>VibeScribe needs access to the microphone to record audio for transcription.</string>
+    <string>VibeScribe needs microphone access to record audio for transcription.</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>VibeScribe needs system administration access to capture system audio.</string>
     <key>NSScreenCaptureDescription</key>
     <string>VibeScribe needs screen capture permission to record system audio output for transcription.</string>
 </dict>
