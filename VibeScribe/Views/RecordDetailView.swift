@@ -212,9 +212,11 @@ struct RecordDetailView: View {
                                 ProgressView()
                                     .controlSize(.small)
                                     .padding(.trailing, 5)
+                            } else {
+                                Image(systemName: "waveform")
+                                    .padding(.trailing, 5)
                             }
                             Text("Transcribe")
-                            Image(systemName: "waveform")
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -288,9 +290,11 @@ struct RecordDetailView: View {
                                 ProgressView()
                                     .controlSize(.small)
                                     .padding(.trailing, 5)
+                            } else {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .padding(.trailing, 5)
                             }
                             Text("Summarize")
-                            Image(systemName: "doc.text.magnifyingglass")
                         }
                         .frame(maxWidth: .infinity)
                     }
