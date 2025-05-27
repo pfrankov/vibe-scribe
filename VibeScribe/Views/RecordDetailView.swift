@@ -211,10 +211,8 @@ struct RecordDetailView: View {
                             if isTranscribing {
                                 ProgressView()
                                     .controlSize(.small)
-                                    .padding(.trailing, 5)
                             } else {
                                 Image(systemName: "waveform")
-                                    .padding(.trailing, 5)
                             }
                             Text("Transcribe")
                         }
@@ -289,10 +287,8 @@ struct RecordDetailView: View {
                             if isSummarizing {
                                 ProgressView()
                                     .controlSize(.small)
-                                    .padding(.trailing, 5)
                             } else {
                                 Image(systemName: "doc.text.magnifyingglass")
-                                    .padding(.trailing, 5)
                             }
                             Text("Summarize")
                         }
