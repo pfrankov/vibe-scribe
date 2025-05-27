@@ -61,11 +61,24 @@ struct RecordingView: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            // Title reflects recorder state more dynamically
-            Text(micRecorderManager.isRecording ? "Recording" : displayError == nil ? "Preparing..." : "Error")
-                .font(.headline)
-                .foregroundColor(micRecorderManager.isRecording ? Color(NSColor.systemRed) : Color(NSColor.labelColor))
-                .animation(.easeInOut(duration: 0.1), value: micRecorderManager.isRecording)
+            Spacer() // Верхний спейсер для вертикального центрирования
+            
+            // Title с красной точкой перед ним
+            HStack(spacing: 8) {
+                // Мигающая красная точка
+                if micRecorderManager.isRecording {
+                    Circle()
+                        .fill(Color(NSColor.systemRed))
+                        .frame(width: 8, height: 8)
+                        .opacity(micRecorderManager.isRecording ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: micRecorderManager.isRecording)
+                }
+                
+                Text(micRecorderManager.isRecording ? "Recording" : displayError == nil ? "Preparing..." : "Error")
+                    .font(.headline)
+                    .foregroundColor(micRecorderManager.isRecording ? Color(NSColor.systemRed) : Color(NSColor.labelColor))
+                    .animation(.easeInOut(duration: 0.1), value: micRecorderManager.isRecording)
+            }
 
             // Display recording time (use mic recorder as primary timer)
             Text(formatTime(micRecorderManager.recordingTime))
@@ -125,17 +138,8 @@ struct RecordingView: View {
                 .keyboardShortcut(.escape) // Esc для отмены/закрытия
             }
             .padding(.top, 8)
-
-            // Индикатор записи (маленькая красная точка)
-            if micRecorderManager.isRecording {
-                Circle()
-                    .fill(Color(NSColor.systemRed))
-                    .frame(width: 8, height: 8)
-                    .opacity(micRecorderManager.isRecording ? 1 : 0)
-                    .padding(.top, 8)
-            }
             
-            Spacer() // Push controls up
+            Spacer() // Нижний спейсер для вертикального центрирования
         }
         .padding(16) // Стандартный отступ macOS
         .frame(maxWidth: .infinity, maxHeight: .infinity)
