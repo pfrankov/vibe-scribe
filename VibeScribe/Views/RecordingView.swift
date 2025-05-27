@@ -31,8 +31,8 @@ struct RecordingView: View {
     
     // Combined recording state 
     private var isCombinedRecordingActive: Bool {
-        // Simplified: Always check both managers
-        micRecorderManager.isRecording && systemRecorderManager.isRecording
+        // Recording is active if microphone is recording (system audio is optional)
+        micRecorderManager.isRecording
     }
 
     private var canStopRecording: Bool {
@@ -146,8 +146,7 @@ struct RecordingView: View {
         }
         .onDisappear {
             // Ensure recording is stopped/cancelled if the view disappears unexpectedly
-             // Simplified check: always consider both managers
-             let wasRecording = micRecorderManager.isRecording || systemRecorderManager.isRecording
+            let wasRecording = micRecorderManager.isRecording
              
             if wasRecording {
                 print("RecordingView disappeared while recording. Cancelling.")
@@ -162,26 +161,36 @@ struct RecordingView: View {
         print("RecordingView appeared. Attempting to start combined recording.")
         // Clear previous errors
         micRecorderManager.error = nil
-        // Simplified: Always clear system error
         systemRecorderManager.error = nil
         
-        // Generate unique URL *only* for system audio
-        let timestamp = Int(Date().timeIntervalSince1970)
-        guard let sysURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("sys_\(timestamp).caf")
-        else {
-            print("Error generating system recording URL")
-             // Set error on mic manager for display?
-            micRecorderManager.error = NSError(domain: "RecordingView", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not create system file URL."])
-            return
-        }
-        self.systemAudioOutputURL = sysURL // Store potential sys URL
-        print("System Audio URL: \(sysURL.path)")
-        
-        // Start Mic Recording (generates its own URL)
+        // Start Mic Recording first (always works if mic permissions are granted)
         micRecorderManager.startRecording() 
         
-        // Start System Audio Recording (Simplified: Always attempt)
-        systemRecorderManager.startRecording(outputURL: sysURL)
+        // Check if we can record system audio and start it conditionally
+        Task {
+            if #available(macOS 12.3, *) {
+                let hasPermission = await systemRecorderManager.hasScreenCapturePermission()
+                
+                if hasPermission {
+                    // Generate unique URL for system audio
+                    let timestamp = Int(Date().timeIntervalSince1970)
+                    guard let sysURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("sys_\(timestamp).caf") else {
+                        print("Error generating system recording URL")
+                        return
+                    }
+                    
+                    await MainActor.run {
+                        self.systemAudioOutputURL = sysURL
+                        print("System Audio URL: \(sysURL.path)")
+                        systemRecorderManager.startRecording(outputURL: sysURL)
+                    }
+                } else {
+                    print("Screen capture permission not available. Recording only microphone audio.")
+                }
+            } else {
+                print("System audio recording not available on this macOS version (< 12.3). Recording only microphone audio.")
+            }
+        }
     }
     
     private func stopAndProcessRecording() {

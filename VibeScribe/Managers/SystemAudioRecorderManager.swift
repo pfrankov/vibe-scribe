@@ -23,6 +23,17 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
     private var audioFile: AVAudioFile?
     private var outputURL: URL?
 
+    // Check if screen capture permissions are available
+    func hasScreenCapturePermission() async -> Bool {
+        do {
+            _ = try await SCShareableContent.current
+            return true
+        } catch {
+            NSLog("SystemAudioRecorderManager: Screen capture permission not available: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     // Start recording system audio
     func startRecording(outputURL: URL) {
         NSLog("SystemAudioRecorderManager: Attempting to start recording.")
