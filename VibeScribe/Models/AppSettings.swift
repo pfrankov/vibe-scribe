@@ -15,17 +15,17 @@ final class AppSettings {
     var id: String = "app_settings" 
     
     // Transcription settings
-    var whisperURL: String = "https://api.openai.com/v1/audio/transcriptions"
+    var whisperBaseURL: String = "https://api.openai.com/v1/"
     var whisperAPIKey: String = ""
-    var whisperModel: String = "whisper-1"
+    var whisperModel: String = ""
     
     // LLM Context settings
     var chunkSize: Int = 750
     
     // OpenAI compatible server settings
-    var openAICompatibleURL: String = "https://api.openai.com/v1/chat/completions"
+    var openAIBaseURL: String = "https://api.openai.com/v1/"
     var openAIAPIKey: String = ""
-    var openAIModel: String = "gpt-3.5-turbo"
+    var openAIModel: String = ""
     
     // Prompts
     var chunkPrompt: String = """
@@ -49,21 +49,21 @@ The combined text should be well-structured and feel like a single document rath
     }
     
     init(id: String = "app_settings", 
-         whisperURL: String, 
+         whisperBaseURL: String, 
          whisperAPIKey: String = "",
-         whisperModel: String = "whisper-1",
+         whisperModel: String = "",
          chunkSize: Int, 
-         openAICompatibleURL: String,
+         openAIBaseURL: String,
          openAIAPIKey: String = "",
-         openAIModel: String = "gpt-3.5-turbo",
+         openAIModel: String = "",
          chunkPrompt: String,
          summaryPrompt: String) {
         self.id = id
-        self.whisperURL = whisperURL
+        self.whisperBaseURL = whisperBaseURL
         self.whisperAPIKey = whisperAPIKey
         self.whisperModel = whisperModel
         self.chunkSize = chunkSize
-        self.openAICompatibleURL = openAICompatibleURL
+        self.openAIBaseURL = openAIBaseURL
         self.openAIAPIKey = openAIAPIKey
         self.openAIModel = openAIModel
         self.chunkPrompt = chunkPrompt

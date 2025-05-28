@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Combine
 
 // MARK: - UI Constants
 private struct UIConstants {
@@ -40,6 +41,8 @@ struct SettingsView: View {
     @FocusState private var isTextFieldFocused: Bool
     @FocusState private var isTextEditorFocused: Bool
     @State private var selectedTab: SettingsTab = .speechToText
+    
+    @StateObject private var modelService = ModelService.shared
     
     private var settings: AppSettings {
         if let existingSettings = appSettings.first {
@@ -81,7 +84,22 @@ struct SettingsView: View {
                 .padding(.vertical, UIConstants.verticalMargin)
             }
         }
-        .onAppear { _ = settings }
+        .onAppear {
+            _ = settings
+            loadModelsIfNeeded()
+        }
+        .onChange(of: settings.whisperBaseURL) { _, _ in
+            loadWhisperModelsIfURLValid()
+        }
+        .onChange(of: settings.whisperAPIKey) { _, _ in
+            loadWhisperModelsIfURLValid()
+        }
+        .onChange(of: settings.openAIBaseURL) { _, _ in
+            loadOpenAIModelsIfURLValid()
+        }
+        .onChange(of: settings.openAIAPIKey) { _, _ in
+            loadOpenAIModelsIfURLValid()
+        }
     }
     
     // MARK: - Content Sections
@@ -89,16 +107,16 @@ struct SettingsView: View {
     @ViewBuilder
     private var speechToTextContent: some View {
         settingsField(
-            title: "Whisper compatible API URL",
-            placeholder: "https://api.example.com/v1/audio/transcriptions",
+            title: "Whisper compatible API base URL",
+            placeholder: "https://api.example.com/v1/",
             value: Binding(
-                get: { settings.whisperURL },
+                get: { settings.whisperBaseURL },
                 set: { newValue in
-                    settings.whisperURL = newValue
+                    settings.whisperBaseURL = newValue
                     trySave()
                 }
             ),
-            caption: "e.g., https://api.openai.com/v1/audio/transcriptions or your local Whisper instance."
+            caption: "e.g., https://api.openai.com/v1/ or your local Whisper instance base URL. Endpoint will be appended automatically."
         )
         
         settingsField(
@@ -115,39 +133,68 @@ struct SettingsView: View {
         )
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("Whisper Model")
-                .font(.system(size: UIConstants.fontSize))
+            HStack {
+                Text("Whisper Model")
+                    .font(.system(size: UIConstants.fontSize))
+                
+                Spacer()
+                
+                Button(action: { modelService.loadWhisperModels(baseURL: settings.whisperBaseURL, apiKey: settings.whisperAPIKey) }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .disabled(modelService.isLoadingWhisperModels || settings.whisperBaseURL.isEmpty)
+                .help("Refresh models list")
+            }
             
-            ComboBoxView(
-                placeholder: "Select Whisper model",
-                options: ["whisper-1", "tiny", "base", "small", "medium", "large", "large-v1", "large-v2", "large-v3"],
-                selectedOption: Binding(
-                    get: { settings.whisperModel },
-                    set: { newValue in
-                        settings.whisperModel = newValue
-                        trySave()
-                    }
+            if modelService.isLoadingWhisperModels {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading models...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(height: 22)
+            } else {
+                ComboBoxView(
+                    placeholder: modelService.whisperModels.isEmpty ? "Enter model name or refresh list" : "Select Whisper model",
+                    options: modelService.whisperModels,
+                    selectedOption: Binding(
+                        get: { settings.whisperModel },
+                        set: { newValue in
+                            settings.whisperModel = newValue
+                            trySave()
+                        }
+                    )
                 )
-            )
-            .frame(height: 22)
+                .frame(height: 22)
+            }
             
-            captionText("Specify the Whisper model to use for transcription. May vary depending on your server implementation.")
+            if let error = modelService.whisperModelsError {
+                Text(error)
+                    .foregroundColor(.red)
+                    .font(.caption)
+            }
+            
+            captionText("Specify the Whisper model to use for transcription. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
         }
     }
     
     @ViewBuilder
     private var summaryContent: some View {
         settingsField(
-            title: "OpenAI compatible API URL",
-            placeholder: "https://api.example.com/v1/chat/completions",
+            title: "OpenAI compatible API base URL",
+            placeholder: "https://api.example.com/v1/",
             value: Binding(
-                get: { settings.openAICompatibleURL },
+                get: { settings.openAIBaseURL },
                 set: { newValue in
-                    settings.openAICompatibleURL = newValue
+                    settings.openAIBaseURL = newValue
                     trySave()
                 }
             ),
-            caption: "e.g., https://api.openai.com/v1/chat/completions or your custom summarization endpoint."
+            caption: "e.g., https://api.openai.com/v1/ or your custom summarization endpoint base URL. Endpoint will be appended automatically."
         )
         
         settingsField(
@@ -164,23 +211,52 @@ struct SettingsView: View {
         )
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("OpenAI Model")
-                .font(.system(size: UIConstants.fontSize))
+            HStack {
+                Text("OpenAI Model")
+                    .font(.system(size: UIConstants.fontSize))
+                
+                Spacer()
+                
+                Button(action: { modelService.loadOpenAIModels(baseURL: settings.openAIBaseURL, apiKey: settings.openAIAPIKey) }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .disabled(modelService.isLoadingOpenAIModels || settings.openAIBaseURL.isEmpty)
+                .help("Refresh models list")
+            }
             
-            ComboBoxView(
-                placeholder: "Select LLM model",
-                options: ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "claude-3-opus-20240229"],
-                selectedOption: Binding(
-                    get: { settings.openAIModel },
-                    set: { newValue in
-                        settings.openAIModel = newValue
-                        trySave()
-                    }
+            if modelService.isLoadingOpenAIModels {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading models...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(height: 22)
+            } else {
+                ComboBoxView(
+                    placeholder: modelService.openAIModels.isEmpty ? "Enter model name or refresh list" : "Select LLM model",
+                    options: modelService.openAIModels,
+                    selectedOption: Binding(
+                        get: { settings.openAIModel },
+                        set: { newValue in
+                            settings.openAIModel = newValue
+                            trySave()
+                        }
+                    )
                 )
-            )
-            .frame(height: 22)
+                .frame(height: 22)
+            }
             
-            captionText("Specify the model to use for summarization. Custom models from local servers can be entered manually.")
+            if let error = modelService.openAIModelsError {
+                Text(error)
+                    .foregroundColor(.red)
+                    .font(.caption)
+            }
+            
+            captionText("Specify the model to use for summarization. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
@@ -291,6 +367,33 @@ struct SettingsView: View {
         } catch {
             print("Error saving settings: \(error)")
         }
+    }
+    
+    private func loadModelsIfNeeded() {
+        loadWhisperModelsIfURLValid()
+        loadOpenAIModelsIfURLValid()
+    }
+    
+    private func loadWhisperModelsIfURLValid() {
+        guard !settings.whisperBaseURL.isEmpty else { return }
+        
+        guard APIURLBuilder.isValidBaseURL(settings.whisperBaseURL) else {
+            modelService.whisperModelsError = "Invalid URL format"
+            return
+        }
+        
+        modelService.loadWhisperModels(baseURL: settings.whisperBaseURL, apiKey: settings.whisperAPIKey)
+    }
+    
+    private func loadOpenAIModelsIfURLValid() {
+        guard !settings.openAIBaseURL.isEmpty else { return }
+        
+        guard APIURLBuilder.isValidBaseURL(settings.openAIBaseURL) else {
+            modelService.openAIModelsError = "Invalid URL format"
+            return
+        }
+        
+        modelService.loadOpenAIModels(baseURL: settings.openAIBaseURL, apiKey: settings.openAIAPIKey)
     }
 }
 

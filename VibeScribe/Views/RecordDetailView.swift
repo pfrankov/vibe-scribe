@@ -406,12 +406,12 @@ struct RecordDetailView: View {
         isTranscribing = true
         transcriptionError = nil
         
-        print("Starting transcription for: \(record.name), using Whisper API at URL: \(settings.whisperURL) with model: \(settings.whisperModel)")
+        print("Starting transcription for: \(record.name), using Whisper API at URL: \(settings.whisperBaseURL) with model: \(settings.whisperModel)")
         
         let whisperManager = WhisperTranscriptionManager.shared
         whisperManager.transcribeAudio(
             audioURL: fileURL, 
-            whisperURL: settings.whisperURL,
+            whisperBaseURL: settings.whisperBaseURL,
             apiKey: settings.whisperAPIKey,
             model: settings.whisperModel,
             language: "ru", // Используем русский язык по умолчанию
@@ -487,7 +487,7 @@ struct RecordDetailView: View {
         isSummarizing = true
         summaryError = nil
         
-        print("Starting summarization for: \(record.name), using OpenAI compatible API at URL: \(settings.openAICompatibleURL)")
+        print("Starting summarization for: \(record.name), using OpenAI compatible API at URL: \(settings.openAIBaseURL)")
         
         // Разбиваем чистую транскрипцию на чанки
         let chunks = splitTranscriptionIntoChunks(cleanText, chunkSize: settings.chunkSize)
@@ -600,7 +600,7 @@ struct RecordDetailView: View {
         
         return callOpenAIAPI(
             prompt: prompt,
-            url: settings.openAICompatibleURL
+            url: settings.openAIBaseURL
         )
     }
     
@@ -611,19 +611,19 @@ struct RecordDetailView: View {
         
         return callOpenAIAPI(
             prompt: prompt,
-            url: settings.openAICompatibleURL
+            url: settings.openAIBaseURL
         )
     }
     
     // Вызываем OpenAI-совместимый API
     private func callOpenAIAPI(prompt: String, url: String) -> AnyPublisher<String, Error> {
         return Future<String, Error> { promise in
-            guard let url = URL(string: url) else {
+            // Формируем полный URL
+            guard let url = APIURLBuilder.buildURL(baseURL: url, endpoint: "chat/completions") else {
                 promise(.failure(NSError(domain: "Invalid URL", code: -1)))
                 return
             }
             
-            // Создаем запрос
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

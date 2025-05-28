@@ -43,22 +43,17 @@ class WhisperTranscriptionManager {
     private init() {}
     
     // Функция для транскрипции аудиофайла
-    func transcribeAudio(audioURL: URL, whisperURL: String, apiKey: String = "", model: String = "whisper-1", language: String = "ru", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
+    func transcribeAudio(audioURL: URL, whisperBaseURL: String, apiKey: String = "", model: String = "whisper-1", language: String = "ru", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
         // Проверяем, существует ли файл
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             print("Error: Audio file not found at path: \(audioURL.path)")
             return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
         }
         
-        // Формируем полный URL с эндпоинтом /v1/audio/transcriptions
-        guard var serverURL = URL(string: whisperURL) else {
-            print("Error: Invalid Whisper API URL: \(whisperURL)")
+        // Формируем полный URL с эндпоинтом
+        guard let serverURL = APIURLBuilder.buildURL(baseURL: whisperBaseURL, endpoint: "audio/transcriptions") else {
+            print("Error: Invalid Whisper API base URL: \(whisperBaseURL)")
             return Fail(error: TranscriptionError.networkError(NSError(domain: "InvalidURL", code: -1, userInfo: nil))).eraseToAnyPublisher()
-        }
-        
-        // Если URL уже не содержит эндпоинт, добавляем его
-        if !whisperURL.contains("/v1/audio/transcriptions") {
-            serverURL = serverURL.appendingPathComponent("v1/audio/transcriptions")
         }
         
         print("Starting transcription for: \(audioURL.path), using Whisper API at URL: \(serverURL.absoluteString)")
