@@ -8,17 +8,18 @@
 import SwiftUI
 import SwiftData
 import Combine
+import AppKit
 
 // MARK: - UI Constants
 private struct UIConstants {
     static let spacing: CGFloat = 16
-    static let smallSpacing: CGFloat = 8
+    static let smallSpacing: CGFloat = 6
     static let tinySpacing: CGFloat = 4
     
     static let horizontalMargin: CGFloat = 24
     static let verticalMargin: CGFloat = 16
     
-    static let cornerRadius: CGFloat = 4
+    static let cornerRadius: CGFloat = 6
     static let textEditorHeight: CGFloat = 100
     static let tabPickerMaxWidth: CGFloat = 280
     
@@ -33,13 +34,99 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 
+enum FocusedField {
+    case textField
+    case chunkPromptEditor
+    case summaryPromptEditor
+}
+
+// MARK: - Custom TextEditor with controlled scrolling
+struct OptimizedTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    let font: NSFont
+    @FocusState.Binding var isFocused: Bool
+    
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        let textView = NSTextView()
+        
+        // Configure text view
+        textView.font = font
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.string = text
+        
+        // Configure scroll view to reduce overscroll effects
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        
+        // Reduce elastic scrolling effects
+        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
+        
+        // Set up text change notifications
+        textView.delegate = context.coordinator
+        
+        return scrollView
+    }
+    
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView else { return }
+        
+        if textView.string != text {
+            textView.string = text
+        }
+        
+        // Handle focus state
+        if isFocused && !textView.isFirstResponder {
+            textView.window?.makeFirstResponder(textView)
+        } else if !isFocused && textView.isFirstResponder {
+            textView.window?.makeFirstResponder(nil)
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, NSTextViewDelegate {
+        let parent: OptimizedTextEditor
+        
+        init(_ parent: OptimizedTextEditor) {
+            self.parent = parent
+        }
+        
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+        
+        func textViewDidBeginEditing(_ textView: NSTextView) {
+            parent.isFocused = true
+        }
+        
+        func textViewDidEndEditing(_ textView: NSTextView) {
+            parent.isFocused = false
+        }
+    }
+}
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(filter: #Predicate<AppSettings> { $0.id == "app_settings" })
     private var appSettings: [AppSettings]
     
-    @FocusState private var isTextFieldFocused: Bool
-    @FocusState private var isTextEditorFocused: Bool
+    @FocusState private var focusedField: FocusedField?
     @State private var selectedTab: SettingsTab = .speechToText
     
     @StateObject private var modelService = ModelService.shared
@@ -82,7 +169,13 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, UIConstants.horizontalMargin)
                 .padding(.vertical, UIConstants.verticalMargin)
+                .contentShape(Rectangle()) // Make the content area tappable
+                .onTapGesture {
+                    // Dismiss focus when tapping on empty space in content area
+                    focusedField = nil
+                }
             }
+            .scrollDisabled(focusedField == .chunkPromptEditor || focusedField == .summaryPromptEditor)
         }
         .onAppear {
             _ = settings
@@ -263,13 +356,16 @@ struct SettingsView: View {
             Text("Prompt for individual transcription chunks")
                 .font(.system(size: UIConstants.fontSize))
             
-            styledTextEditor(Binding(
-                get: { settings.chunkPrompt },
-                set: { newValue in
-                    settings.chunkPrompt = newValue
-                    trySave()
-                }
-            ))
+            styledTextEditor(
+                text: Binding(
+                    get: { settings.chunkPrompt },
+                    set: { newValue in
+                        settings.chunkPrompt = newValue
+                        trySave()
+                    }
+                ),
+                focusField: .chunkPromptEditor
+            )
             
             captionText("Use {transcription} as a placeholder for the transcription text.")
         }
@@ -278,13 +374,16 @@ struct SettingsView: View {
             Text("Prompt for combining chunk summaries")
                 .font(.system(size: UIConstants.fontSize))
             
-            styledTextEditor(Binding(
-                get: { settings.summaryPrompt },
-                set: { newValue in
-                    settings.summaryPrompt = newValue
-                    trySave()
-                }
-            ))
+            styledTextEditor(
+                text: Binding(
+                    get: { settings.summaryPrompt },
+                    set: { newValue in
+                        settings.summaryPrompt = newValue
+                        trySave()
+                    }
+                ),
+                focusField: .summaryPromptEditor
+            )
             
             captionText("Use {summaries} as a placeholder for the combined chunk summaries.")
         }
@@ -332,27 +431,52 @@ struct SettingsView: View {
                 }
             ))
             .textFieldStyle(.roundedBorder)
-            .focused($isTextFieldFocused)
+            .focused($focusedField, equals: .textField)
+            .onKeyPress(.escape) {
+                // Dismiss focus when Escape is pressed
+                focusedField = nil
+                return .handled
+            }
+            .onTapGesture {
+                // Prevent tap from bubbling up to parent
+            }
             
             captionText(caption)
         }
     }
     
-    private func styledTextEditor(_ text: Binding<String>) -> some View {
-        TextEditor(text: text)
+    private func styledTextEditor(
+        text: Binding<String>,
+        focusField: FocusedField
+    ) -> some View {
+        let isFocused = focusedField == focusField
+        
+        return TextEditor(text: text)
             .font(.system(size: UIConstants.fontSize))
             .padding(UIConstants.smallSpacing)
             .frame(height: UIConstants.textEditorHeight)
+            .scrollContentBackground(.hidden)
             .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(UIConstants.cornerRadius)
-            .focused($isTextEditorFocused)
             .overlay(
                 RoundedRectangle(cornerRadius: UIConstants.cornerRadius)
-                    .stroke(
-                        isTextEditorFocused ? Color(NSColor.controlAccentColor) : Color(NSColor.separatorColor),
-                        lineWidth: 0.5
+                    .strokeBorder(
+                        isFocused 
+                            ? Color(NSColor.keyboardFocusIndicatorColor)
+                            : Color(NSColor.separatorColor),
+                        lineWidth: isFocused ? 3.0 : 1.0
                     )
+                    .allowsHitTesting(false) // Prevent overlay from interfering with scroll
             )
+            .clipShape(RoundedRectangle(cornerRadius: UIConstants.cornerRadius))
+            .focused($focusedField, equals: focusField)
+            .onKeyPress(.escape) {
+                // Dismiss focus when Escape is pressed
+                focusedField = nil
+                return .handled
+            }
+            .onTapGesture {
+                // Prevent tap from bubbling up to parent
+            }
     }
     
     private func captionText(_ text: String) -> some View {
