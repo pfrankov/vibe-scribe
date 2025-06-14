@@ -23,10 +23,13 @@ struct RecordDetailView: View {
     @State private var isTranscribing = false
     @State private var transcriptionError: String? = nil
     @State private var cancellables = Set<AnyCancellable>()
-    @State private var selectedTab: Tab = .transcription // Tab selection state
+    @State private var selectedTab: Tab = .summary // Default to summary tab
     @State private var isSummarizing = false // Track summarization status
     @State private var summaryError: String? = nil
     @State private var isAutomaticMode = false // Track if this is a new record that should auto-process
+    
+    // Processing state for the beautiful loader
+    @State private var processingState: ProcessingState = .idle
 
     // State for inline title editing - Переименовал для ясности
     @State private var isEditingTitle: Bool = false
@@ -38,7 +41,7 @@ struct RecordDetailView: View {
         case transcription
         case summary
     }
-
+    
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
         if let text = record.transcriptionText, !text.isEmpty {
@@ -53,6 +56,21 @@ struct RecordDetailView: View {
     // Получаем текущие настройки
     private var settings: AppSettings {
         appSettings.first ?? AppSettings()
+    }
+    
+    // Check if we should show content or the processing view
+    private var shouldShowContent: Bool {
+        switch processingState {
+        case .completed:
+            return true
+        case .error:
+            return true // Show content on error so user can see retry buttons
+        case .idle:
+            // Show content if we have any existing data to display
+            return record.hasTranscription || record.summaryText != nil
+        case .transcribing, .summarizing:
+            return false
+        }
     }
 
     var body: some View {
@@ -144,117 +162,60 @@ struct RecordDetailView: View {
             
             Divider()
             
-            // Tab picker - properly centered segmented control following macOS HIG
-            Picker("", selection: $selectedTab) {
-                Text("Transcription").tag(Tab.transcription)
-                Text("Summary").tag(Tab.summary)
+            // Processing loader - always shows when processing, positioned below player
+            switch processingState {
+            case .transcribing, .summarizing:
+                ProcessingProgressView(state: processingState)
+                    .padding(.top, 8)
+            default:
+                EmptyView()
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 300) // Limit width for better appearance
-            .frame(maxWidth: .infinity, alignment: .center) // Center in the container
-            .padding(.vertical, 8)
             
-            // Tab content
-            if selectedTab == .transcription {
-                // Transcription Tab Content
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Spacer()
-                        Button {
-                            copyTranscription()
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                                .labelStyle(.iconOnly)
-                                .symbolRenderingMode(.hierarchical)
-                                .contentTransition(.symbolEffect(.replace))
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Copy Transcription")
-                        .disabled(!record.hasTranscription || record.transcriptionText == nil)
-                    }
-                    
-                    // Show error if exists
-                    if let error = transcriptionError {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.callout)
-                            .padding(.bottom, 4)
-                    }
-                    
-                    // ScrollView for transcription
-                    ScrollView {
-                        Text(transcriptionText)
-                            .font(.body)
-                            .foregroundStyle(record.hasTranscription && record.transcriptionText != nil ? 
-                                            Color(NSColor.labelColor) : 
-                                            Color(NSColor.secondaryLabelColor))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                            .onHover { hovering in
-                                if hovering {
-                                    NSCursor.iBeam.push()
-                                } else {
-                                    NSCursor.pop()
-                                }
-                            }
-                            .padding(12)
-                            .background(Color(NSColor.textBackgroundColor))
-                            .cornerRadius(6)
-                    }
-                    .frame(maxHeight: .infinity)
-                    
-                    // Transcribe Button 
-                    Button {
-                        startTranscription()
-                    } label: {
-                        HStack {
-                            if isTranscribing {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "waveform")
-                            }
-                            Text("Transcribe")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(isTranscribing || record.fileURL == nil)
-                    .padding(.top, 4)
+            // Show tabs only when everything is completed
+            if shouldShowContent {
+                // Tab picker - properly centered segmented control following macOS HIG
+                Picker("", selection: $selectedTab) {
+                    Text("Transcription").tag(Tab.transcription)
+                    Text("Summary").tag(Tab.summary)
                 }
-            } else {
-                // Summary Tab Content
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Spacer()
-                        Button {
-                            copySummary()
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                                .labelStyle(.iconOnly)
-                                .symbolRenderingMode(.hierarchical)
-                                .contentTransition(.symbolEffect(.replace))
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 300) // Limit width for better appearance
+                .frame(maxWidth: .infinity, alignment: .center) // Center in the container
+                .padding(.vertical, 8)
+                
+                // Tab content
+                if selectedTab == .transcription {
+                    // Transcription Tab Content
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Spacer()
+                            Button {
+                                copyTranscription()
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .labelStyle(.iconOnly)
+                                    .symbolRenderingMode(.hierarchical)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy Transcription")
+                            .disabled(!record.hasTranscription || record.transcriptionText == nil)
                         }
-                        .buttonStyle(.borderless)
-                        .help("Copy Summary")
-                        .disabled(record.summaryText == nil)
-                    }
-                    
-                    // Show error if exists
-                    if let error = summaryError {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.callout)
-                            .padding(.bottom, 4)
-                    }
-                    
-                    // ScrollView for summary
-                    ScrollView {
-                        if let summaryText = record.summaryText, !summaryText.isEmpty {
-                            Text(summaryText)
+                        
+                        // Show error if exists
+                        if let error = transcriptionError {
+                            Text(error)
+                                .foregroundStyle(.red)
+                                .font(.callout)
+                                .padding(.bottom, 4)
+                        }
+                        
+                        // ScrollView for transcription
+                        ScrollView {
+                            Text(transcriptionText)
                                 .font(.body)
-                                .foregroundStyle(Color(NSColor.labelColor))
+                                .foregroundStyle(record.hasTranscription && record.transcriptionText != nil ? 
+                                                Color(NSColor.labelColor) : 
+                                                Color(NSColor.secondaryLabelColor))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                                 .onHover { hovering in
@@ -267,42 +228,116 @@ struct RecordDetailView: View {
                                 .padding(12)
                                 .background(Color(NSColor.textBackgroundColor))
                                 .cornerRadius(6)
-                        } else {
-                            Text("No summary available yet.")
-                                .font(.body)
-                                .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
-                                .background(Color(NSColor.textBackgroundColor))
-                                .cornerRadius(6)
                         }
-                    }
-                    .frame(maxHeight: .infinity)
-                    
-                    // Summarize Button 
-                    Button {
-                        startSummarization()
-                    } label: {
-                        HStack {
-                            if isSummarizing {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "doc.text.magnifyingglass")
+                        .frame(maxHeight: .infinity)
+                        
+                        // Transcribe Button 
+                        Button {
+                            startTranscription()
+                        } label: {
+                            HStack {
+                                if isTranscribing {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "waveform")
+                                }
+                                Text("Transcribe")
                             }
-                            Text("Summarize")
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(isTranscribing || record.fileURL == nil)
+                        .padding(.top, 4)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(isSummarizing || record.transcriptionText == nil || !record.hasTranscription)
-                    .padding(.top, 4)
+                } else {
+                    // Summary Tab Content
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Spacer()
+                            Button {
+                                copySummary()
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .labelStyle(.iconOnly)
+                                    .symbolRenderingMode(.hierarchical)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy Summary")
+                            .disabled(record.summaryText == nil)
+                        }
+                        
+                        // Show error if exists
+                        if let error = summaryError {
+                            Text(error)
+                                .foregroundStyle(.red)
+                                .font(.callout)
+                                .padding(.bottom, 4)
+                        }
+                        
+                        // ScrollView for summary
+                        ScrollView {
+                            if let summaryText = record.summaryText, !summaryText.isEmpty {
+                                Text(summaryText)
+                                    .font(.body)
+                                    .foregroundStyle(Color(NSColor.labelColor))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                                    .onHover { hovering in
+                                        if hovering {
+                                            NSCursor.iBeam.push()
+                                        } else {
+                                            NSCursor.pop()
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(Color(NSColor.textBackgroundColor))
+                                    .cornerRadius(6)
+                            } else {
+                                Text("No summary available yet.")
+                                    .font(.body)
+                                    .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(Color(NSColor.textBackgroundColor))
+                                    .cornerRadius(6)
+                            }
+                        }
+                        .frame(maxHeight: .infinity)
+                        
+                        // Summarize Button 
+                        Button {
+                            startSummarization()
+                        } label: {
+                            HStack {
+                                if isSummarizing {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "doc.text.magnifyingglass")
+                                }
+                                Text("Summarize")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(isSummarizing || record.transcriptionText == nil || !record.hasTranscription)
+                        .padding(.top, 4)
+                    }
                 }
             }
+            
+            Spacer() // Добавляю Spacer чтобы контент прижимался к верху
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Фиксирую alignment по верху
         .padding(16) // Более компактный общий отступ
+        .animation(.easeInOut(duration: 0.4), value: shouldShowContent)
         .onAppear {
+            // Initialize processing state based on current record state
+            updateProcessingState()
+            
             // --- Refined File Loading Logic ---
             guard let fileURL = record.fileURL else {
                 print("Error: Record '\(record.name)' has no associated fileURL.")
@@ -316,11 +351,6 @@ struct RecordDetailView: View {
 
             print("Loading audio from: \(fileURL.path)")
             playerManager.setupPlayer(url: fileURL)
-            
-            // If summary exists, switch to summary tab
-            if let summaryText = record.summaryText, !summaryText.isEmpty {
-                selectedTab = .summary
-            }
             
             // Check if this is a new record that should auto-process
             // A record is considered "new" if it has no transcription yet
@@ -351,9 +381,47 @@ struct RecordDetailView: View {
                 cancelEditingTitle()
             }
         }
+        // Update processing state when transcription/summarization states change
+        .onChange(of: isTranscribing) { oldValue, newValue in
+            updateProcessingState()
+        }
+        .onChange(of: isSummarizing) { oldValue, newValue in
+            updateProcessingState()
+        }
+        .onChange(of: transcriptionError) { oldValue, newValue in
+            updateProcessingState()
+        }
+        .onChange(of: summaryError) { oldValue, newValue in
+            updateProcessingState()
+        }
     }
 
     // --- Helper Functions --- 
+    
+    // Update processing state based on current conditions
+    private func updateProcessingState() {
+        if let error = transcriptionError ?? summaryError {
+            processingState = .error(error)
+            
+            // Switch to appropriate tab based on error type
+            if transcriptionError != nil {
+                selectedTab = .transcription
+            } else if summaryError != nil {
+                selectedTab = .summary
+            }
+        } else if isTranscribing {
+            processingState = .transcribing
+        } else if isSummarizing {
+            processingState = .summarizing
+        } else if isAutomaticMode && record.hasTranscription && record.summaryText == nil {
+            // В автоматическом режиме между транскрипцией и суммаризацией показываем summarizing
+            processingState = .summarizing
+        } else if record.hasTranscription && record.summaryText != nil {
+            processingState = .completed
+        } else {
+            processingState = .idle
+        }
+    }
 
     private func startEditingTitle() {
         editingTitle = record.name
@@ -539,7 +607,6 @@ struct RecordDetailView: View {
                 // In automatic mode, switch to summary tab after completion
                 if self.isAutomaticMode {
                     print("Automatic mode: Switching to summary tab after completion")
-                    self.selectedTab = .summary
                     self.isAutomaticMode = false // Reset automatic mode
                 }
                 return
@@ -565,7 +632,6 @@ struct RecordDetailView: View {
                     // In automatic mode, switch to summary tab after completion
                     if self.isAutomaticMode {
                         print("Automatic mode: Switching to summary tab after combined summary completion")
-                        self.selectedTab = .summary
                         self.isAutomaticMode = false // Reset automatic mode
                     }
                 }

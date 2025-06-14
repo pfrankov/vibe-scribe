@@ -88,9 +88,9 @@ struct OptimizedTextEditor: NSViewRepresentable {
         }
         
         // Handle focus state
-        if isFocused && !textView.isFirstResponder {
+        if isFocused && textView.window?.firstResponder != textView {
             textView.window?.makeFirstResponder(textView)
-        } else if !isFocused && textView.isFirstResponder {
+        } else if !isFocused && textView.window?.firstResponder == textView {
             textView.window?.makeFirstResponder(nil)
         }
     }
@@ -111,11 +111,23 @@ struct OptimizedTextEditor: NSViewRepresentable {
             parent.text = textView.string
         }
         
-        func textViewDidBeginEditing(_ textView: NSTextView) {
+        // Use proper NSTextViewDelegate methods for focus tracking
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // This method is called when the text view receives commands
+            // We can use it to detect when editing begins
+            if !parent.isFocused {
+                parent.isFocused = true
+            }
+            return false // Let the text view handle the command
+        }
+        
+        func textDidBeginEditing(_ notification: Notification) {
+            guard notification.object as? NSTextView != nil else { return }
             parent.isFocused = true
         }
         
-        func textViewDidEndEditing(_ textView: NSTextView) {
+        func textDidEndEditing(_ notification: Notification) {
+            guard notification.object as? NSTextView != nil else { return }
             parent.isFocused = false
         }
     }
