@@ -7,6 +7,7 @@ enum ProcessingState {
     case summarizing
     case completed
     case error(String)
+    case streamingTranscription([String]) // Array of SSE chunks for streaming display
     
     var displayText: String {
         switch self {
@@ -14,6 +15,8 @@ enum ProcessingState {
             return "Ready"
         case .transcribing:
             return "Transcribing..."
+        case .streamingTranscription:
+            return "Streaming transcription..."
         case .summarizing:
             return "Summarizing..."
         case .completed:
@@ -25,7 +28,7 @@ enum ProcessingState {
     
     var isProcessing: Bool {
         switch self {
-        case .transcribing, .summarizing:
+        case .transcribing, .summarizing, .streamingTranscription:
             return true
         default:
             return false
@@ -41,11 +44,29 @@ enum ProcessingState {
         }
     }
     
+    var isStreaming: Bool {
+        switch self {
+        case .streamingTranscription:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    var streamingChunks: [String] {
+        switch self {
+        case .streamingTranscription(let chunks):
+            return chunks
+        default:
+            return []
+        }
+    }
+    
     var progress: Double {
         switch self {
         case .idle:
             return 0.0
-        case .transcribing:
+        case .transcribing, .streamingTranscription:
             return 0.5
         case .summarizing:
             return 0.8
@@ -106,6 +127,19 @@ struct ProcessingProgressView: View {
                         .foregroundStyle(colorForState(state))
                     
                     Spacer()
+                    
+                    // SSE indicator
+                    if state.isStreaming {
+                        HStack(spacing: 4) {
+                            Image(systemName: "waveform")
+                                .foregroundStyle(primaryColor.opacity(0.7))
+                                .font(.system(size: 10))
+                            Text("Live")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundStyle(primaryColor.opacity(0.8))
+                        }
+                    }
                 }
                 
                 // Progress Bar
@@ -138,6 +172,12 @@ struct ProcessingProgressView: View {
                     }
                     .frame(height: 6)
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+                
+                // SSE Streaming Text Preview (only for transcription streaming)
+                if state.isStreaming && !state.streamingChunks.isEmpty {
+                    streamingTextPreview
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .padding(.vertical, 16)
@@ -176,11 +216,49 @@ struct ProcessingProgressView: View {
         }
     }
     
+    // SSE Streaming text preview - just text, nothing else
+    private var streamingTextPreview: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 3) {
+                    // Show last 4-5 chunks
+                    let recentChunks = Array(state.streamingChunks.suffix(5))
+                    ForEach(Array(recentChunks.enumerated()), id: \.offset) { index, chunk in
+                        Text(chunk)
+                            .font(.caption)
+                            .foregroundStyle(
+                                index == recentChunks.count - 1 ? 
+                                Color(NSColor.labelColor) : 
+                                Color(NSColor.labelColor).opacity(0.6)
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id("chunk-\(state.streamingChunks.count - recentChunks.count + index)")
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+            }
+            .frame(height: 60)
+            .onChange(of: state.streamingChunks.count) { oldValue, newValue in
+                // Auto-scroll to latest chunk with smooth animation
+                if newValue > 0 {
+                    withAnimation(.easeOut(duration: 0.4)) {
+                        proxy.scrollTo("chunk-\(newValue - 1)", anchor: .bottom)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+    
     private func colorForState(_ state: ProcessingState) -> Color {
         switch state {
         case .idle:
             return secondaryTextColor
         case .transcribing:
+            return primaryColor
+        case .streamingTranscription:
             return primaryColor
         case .summarizing:
             return primaryColor
@@ -199,6 +277,15 @@ struct ProcessingProgressView: View {
         ProcessingProgressView(state: .summarizing)
         ProcessingProgressView(state: .completed)
         ProcessingProgressView(state: .error("Connection failed"))
+        
+        // Test SSE streaming with chunks
+        ProcessingProgressView(state: .streamingTranscription([
+            "убедиться все-таки что это ну да",
+            "хочу убедиться все-таки, что это, ну, то есть",
+            "проверить работает ли стриминг",
+            "последние несколько слов транскрипции",
+            "финальный чанк для тестирования"
+        ]))
     }
     .padding()
     .frame(width: 400)

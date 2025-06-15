@@ -30,6 +30,11 @@ struct RecordDetailView: View {
     
     // Processing state for the beautiful loader
     @State private var processingState: ProcessingState = .idle
+    
+    // SSE streaming chunks for real-time preview  
+    @State private var sseStreamingChunks: [String] = [] // For UI preview (last few lines)
+    @State private var sseFullText: String = "" // For accumulating full transcription text
+    @State private var isSSEStreaming = false // Track if currently using SSE streaming
 
     // State for inline title editing - Переименовал для ясности
     @State private var isEditingTitle: Bool = false
@@ -44,11 +49,17 @@ struct RecordDetailView: View {
     
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
+        print("🔍 transcriptionText computed - record.transcriptionText: '\(record.transcriptionText?.prefix(50) ?? "nil")'")
+        print("🔍 transcriptionText computed - record.hasTranscription: \(record.hasTranscription)")
+        
         if let text = record.transcriptionText, !text.isEmpty {
+            print("🔍 transcriptionText computed - returning actual text: '\(text.prefix(50))'")
             return text
         } else if record.hasTranscription {
+            print("🔍 transcriptionText computed - returning 'processing' message")
             return "Transcription processing... Check back later."
         } else {
+            print("🔍 transcriptionText computed - returning 'not available' message")
             return "Transcription not available yet."
         }
     }
@@ -68,7 +79,7 @@ struct RecordDetailView: View {
         case .idle:
             // Show content if we have any existing data to display
             return record.hasTranscription || record.summaryText != nil
-        case .transcribing, .summarizing:
+        case .transcribing, .summarizing, .streamingTranscription:
             return false
         }
     }
@@ -164,7 +175,7 @@ struct RecordDetailView: View {
             
             // Processing loader - always shows when processing, positioned below player
             switch processingState {
-            case .transcribing, .summarizing:
+            case .transcribing, .summarizing, .streamingTranscription:
                 ProcessingProgressView(state: processingState)
                     .padding(.top, 8)
             default:
@@ -394,14 +405,24 @@ struct RecordDetailView: View {
         .onChange(of: summaryError) { oldValue, newValue in
             updateProcessingState()
         }
+        .onChange(of: sseStreamingChunks) { oldValue, newValue in
+            updateProcessingState()
+        }
+        .onChange(of: isSSEStreaming) { oldValue, newValue in
+            updateProcessingState()
+        }
     }
 
     // --- Helper Functions --- 
     
     // Update processing state based on current conditions
     private func updateProcessingState() {
+        print("🔄 updateProcessingState called")
+        print("🔍 isTranscribing: \(isTranscribing), isSSEStreaming: \(isSSEStreaming), chunks: \(sseStreamingChunks.count)")
+        
         if let error = transcriptionError ?? summaryError {
             processingState = .error(error)
+            print("🚨 Set state to error: \(error)")
             
             // Switch to appropriate tab based on error type
             if transcriptionError != nil {
@@ -410,16 +431,27 @@ struct RecordDetailView: View {
                 selectedTab = .summary
             }
         } else if isTranscribing {
-            processingState = .transcribing
+            // Use streaming state if SSE is active and we have chunks
+            if isSSEStreaming && !sseStreamingChunks.isEmpty {
+                processingState = .streamingTranscription(sseStreamingChunks)
+                print("🌊 Set state to streamingTranscription with \(sseStreamingChunks.count) chunks")
+            } else {
+                processingState = .transcribing
+                print("📝 Set state to transcribing (no SSE or no chunks)")
+            }
         } else if isSummarizing {
             processingState = .summarizing
+            print("📋 Set state to summarizing")
         } else if isAutomaticMode && record.hasTranscription && record.summaryText == nil {
             // В автоматическом режиме между транскрипцией и суммаризацией показываем summarizing
             processingState = .summarizing
+            print("🤖 Set state to summarizing (automatic mode)")
         } else if record.hasTranscription && record.summaryText != nil {
             processingState = .completed
+            print("✅ Set state to completed")
         } else {
             processingState = .idle
+            print("💤 Set state to idle")
         }
     }
 
@@ -473,18 +505,173 @@ struct RecordDetailView: View {
         
         isTranscribing = true
         transcriptionError = nil
+        isSSEStreaming = false
+        sseStreamingChunks.removeAll()
+        sseFullText = ""
         
-        print("Starting transcription for: \(record.name), using Whisper API at URL: \(settings.whisperBaseURL) with model: \(settings.whisperModel)")
+        print("Starting transcription for: \(record.name)")
+        print("Using Whisper API at URL: \(settings.whisperBaseURL) with model: \(settings.whisperModel)")
+        print("Will attempt SSE streaming first, with automatic fallback to regular mode")
         
         let whisperManager = WhisperTranscriptionManager.shared
-        whisperManager.transcribeAudio(
-            audioURL: fileURL, 
-            whisperBaseURL: settings.whisperBaseURL,
-            apiKey: settings.whisperAPIKey,
-            model: settings.whisperModel,
-            language: "ru", // Используем русский язык по умолчанию
-            responseFormat: "srt" // Формат субтитров
+        
+        // Try real-time streaming first for better UX
+        whisperManager.transcribeAudioRealTime(audioURL: fileURL, settings: settings)
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { completion in
+                switch completion {
+                case .finished:
+                    print("✅ SSE Transcription completed successfully")
+                    
+                    // Save the final accumulated text from SSE full text BEFORE clearing
+                    if !self.sseFullText.isEmpty {
+                        print("💾 Saving final SSE transcription result: \(self.sseFullText.count) characters")
+                        print("📝 Final text preview: \(self.sseFullText.prefix(100))...")
+                        
+                        self.record.transcriptionText = self.sseFullText
+                        self.record.hasTranscription = true
+                        
+                        print("🔍 BEFORE SAVE - record.transcriptionText: '\(self.record.transcriptionText?.prefix(100) ?? "nil")'")
+                        print("🔍 BEFORE SAVE - record.hasTranscription: \(self.record.hasTranscription)")
+                        
+                        do {
+                            try self.modelContext.save()
+                            print("✅ Final SSE transcription saved successfully")
+                            
+                            // Verify what was actually saved
+                            print("🔍 AFTER SAVE - record.transcriptionText: '\(self.record.transcriptionText?.prefix(100) ?? "nil")'")
+                            print("🔍 AFTER SAVE - record.hasTranscription: \(self.record.hasTranscription)")
+                            print("🔍 AFTER SAVE - transcriptionText computed property: '\(self.transcriptionText.prefix(100))'")
+                        } catch {
+                            print("❌ Error saving final SSE transcription: \(error.localizedDescription)")
+                            self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
+                        }
+                    } else {
+                        print("⚠️ No SSE full text to save - this might be a problem!")
+                    }
+                    
+                    // Clear state AFTER saving
+                    self.isTranscribing = false
+                    self.isSSEStreaming = false
+                    self.sseStreamingChunks.removeAll()
+                    self.sseFullText = ""
+                    
+                    // In automatic mode, start summarization after transcription completes
+                    if self.isAutomaticMode {
+                        print("🔄 Automatic mode: Starting summarization after transcription completion")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.startSummarization()
+                        }
+                    }
+                case .failure(let error):
+                    // Clear state on error too
+                    self.isTranscribing = false
+                    self.isSSEStreaming = false
+                    self.sseStreamingChunks.removeAll()
+                    self.sseFullText = ""
+                    
+                    if case .streamingNotSupported = error {
+                        print("⚠️ SSE not supported, falling back to regular transcription")
+                        // Fallback to regular transcription
+                        self.startRegularTranscription()
+                    } else {
+                        self.transcriptionError = "Error: \(error.description)"
+                        print("❌ SSE Transcription error: \(error.description)")
+                        self.isAutomaticMode = false // Stop automatic mode on error
+                    }
+                }
+            },
+            receiveValue: { update in
+                if update.isPartial {
+                    print("🔄 Partial SSE update: \(update.text.prefix(50))...")
+                    
+                    // Mark as SSE streaming
+                    self.isSSEStreaming = true
+                    
+                    // Clean the text
+                    let cleanText = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    print("🧹 Cleaned text length: \(cleanText.count), content: '\(cleanText.prefix(100))'")
+                    
+                    if !cleanText.isEmpty && cleanText.count > 5 {
+                        // 1. Update full text (this is what we'll save)
+                        self.sseFullText = cleanText
+                        print("💾 Updated full text: \(self.sseFullText.count) characters")
+                        
+                        // 2. For UI preview, extract last few words as a chunk
+                        let words = cleanText.split(separator: " ")
+                        let recentWords = Array(words.suffix(12)) // Last 12 words for preview
+                        let chunkText = recentWords.joined(separator: " ")
+                        
+                        print("📝 Preview chunk text: '\(chunkText)'")
+                        print("🔍 Current preview chunks count: \(self.sseStreamingChunks.count)")
+                        print("🔍 Last preview chunk: '\(self.sseStreamingChunks.last ?? "none")'")
+                        
+                        // Add preview chunk if it's different from the last one
+                        if self.sseStreamingChunks.last != chunkText {
+                            self.sseStreamingChunks.append(chunkText)
+                            print("✅ Added preview chunk! Total preview chunks: \(self.sseStreamingChunks.count)")
+                            print("📋 All preview chunks so far: \(self.sseStreamingChunks)")
+                            
+                            // Limit preview chunks to prevent memory issues (keep last 10 for UI)
+                            if self.sseStreamingChunks.count > 10 {
+                                self.sseStreamingChunks.removeFirst()
+                                print("🗑️ Removed oldest preview chunk, now have: \(self.sseStreamingChunks.count)")
+                            }
+                        } else {
+                            print("⚠️ Preview chunk skipped - same as last one")
+                        }
+                    } else {
+                        print("⚠️ Chunk skipped - too short or empty")
+                    }
+                    
+                    print("🎯 isSSEStreaming: \(self.isSSEStreaming), preview chunks: \(self.sseStreamingChunks.count), full text: \(self.sseFullText.count) chars")
+                } else {
+                    print("✅ Final SSE transcription chunk received: \(update.text.count) characters")
+                    print("📝 Final chunk preview: \(update.text.prefix(100))...")
+                    
+                    // This is the final chunk - update our full text
+                    let cleanText = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleanText.isEmpty {
+                        // Update full text with final result
+                        self.sseFullText = cleanText
+                        print("💾 Updated full text with final chunk: \(self.sseFullText.count) characters")
+                        
+                        // Also add final preview chunk for UI
+                        if cleanText.count > 5 {
+                            let words = cleanText.split(separator: " ")
+                            let recentWords = Array(words.suffix(12))
+                            let chunkText = recentWords.joined(separator: " ")
+                            
+                            if self.sseStreamingChunks.last != chunkText {
+                                self.sseStreamingChunks.append(chunkText)
+                                print("✅ Added final preview chunk! Total preview chunks: \(self.sseStreamingChunks.count)")
+                                print("📋 All preview chunks including final: \(self.sseStreamingChunks)")
+                            }
+                        }
+                    }
+                    
+                    // Don't save here - let receiveCompletion handle the final save from full text
+                    print("🔄 Final chunk processed, waiting for completion to save full text")
+                }
+            }
         )
+        .store(in: &cancellables)
+    }
+    
+    // Fallback method for regular transcription when SSE is not supported
+    private func startRegularTranscription() {
+        guard let fileURL = record.fileURL, !isTranscribing else { return }
+        
+        isTranscribing = true
+        transcriptionError = nil
+        
+        print("🔄 Starting regular (non-streaming) transcription")
+        
+        let whisperManager = WhisperTranscriptionManager.shared
+        
+        // Use regular transcription API with settings parameter  
+        whisperManager.transcribeAudio(audioURL: fileURL, settings: settings)
         .receive(on: DispatchQueue.main)
         .sink(
             receiveCompletion: { completion in
@@ -492,42 +679,42 @@ struct RecordDetailView: View {
                 
                 switch completion {
                 case .finished:
-                    print("Transcription completed successfully")
+                    print("✅ Regular transcription completed successfully")
                     
                     // In automatic mode, start summarization after transcription completes
                     if self.isAutomaticMode {
-                        print("Automatic mode: Starting summarization after transcription completion")
+                        print("🔄 Automatic mode: Starting summarization after transcription completion")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             self.startSummarization()
                         }
                     }
                 case .failure(let error):
                     self.transcriptionError = "Error: \(error.description)"
-                    print("Transcription error: \(error.description)")
+                    print("❌ Regular transcription error: \(error.description)")
                     self.isAutomaticMode = false // Stop automatic mode on error
                 }
             },
             receiveValue: { transcription in
-                print("Received transcription of length: \(transcription.count) characters")
+                print("📝 Received regular transcription of length: \(transcription.count) characters")
                 
                 // Проверяем, что транскрипция не пустая
                 guard !transcription.isEmpty else {
                     self.transcriptionError = "Error: Empty transcription received"
-                    print("Error: Empty transcription received")
+                    print("❌ Error: Empty transcription received")
                     return
                 }
                 
-                // Всегда сохраняем оригинальный SRT-формат
-                print("Saving original SRT format with timestamps")
+                // Всегда сохраняем оригинальный результат
+                print("💾 Saving regular transcription result")
                 
                 // Сохраняем только если текст не пустой
                 self.record.transcriptionText = transcription
                 self.record.hasTranscription = true
                 do {
                     try self.modelContext.save()
-                    print("Transcription saved successfully")
+                    print("✅ Regular transcription saved successfully")
                 } catch {
-                    print("Error saving transcription: \(error.localizedDescription)")
+                    print("❌ Error saving regular transcription: \(error.localizedDescription)")
                     self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
                 }
             }
@@ -763,5 +950,70 @@ struct RecordDetailView: View {
         
         // Start transcription first
         startTranscription()
+    }
+    
+    // Функция для запуска real-time транскрипции с промежуточными обновлениями
+    private func startRealTimeTranscription() {
+        guard let fileURL = record.fileURL, !isTranscribing else { return }
+        
+        isTranscribing = true
+        transcriptionError = nil
+        
+        print("🚀 Starting REAL-TIME transcription for: \(record.name)")
+        
+        let whisperManager = WhisperTranscriptionManager.shared
+        
+        // Use real-time streaming method
+        whisperManager.transcribeAudioRealTime(audioURL: fileURL, settings: settings)
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { completion in
+                self.isTranscribing = false
+                
+                switch completion {
+                case .finished:
+                    print("✅ Real-time transcription completed successfully")
+                    
+                    // In automatic mode, start summarization after transcription completes
+                    if self.isAutomaticMode {
+                        print("🔄 Automatic mode: Starting summarization after real-time transcription")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.startSummarization()
+                        }
+                    }
+                case .failure(let error):
+                    if case .streamingNotSupported = error {
+                        print("⚠️ Real-time streaming not supported, falling back to regular transcription")
+                        // Fallback to regular transcription
+                        self.startTranscription()
+                    } else {
+                        self.transcriptionError = "Real-time error: \(error.description)"
+                        print("❌ Real-time transcription error: \(error.description)")
+                        self.isAutomaticMode = false
+                    }
+                }
+            },
+            receiveValue: { update in
+                if update.isPartial {
+                    print("🔄 Partial update: \(update.text.prefix(50))...")
+                    // You could update UI here to show partial results
+                    // For now, just logging
+                } else {
+                    print("✅ Final transcription update: \(update.text.count) characters")
+                    
+                    // Save final result
+                    self.record.transcriptionText = update.text
+                    self.record.hasTranscription = true
+                    do {
+                        try self.modelContext.save()
+                        print("✅ Real-time transcription saved successfully")
+                    } catch {
+                        print("❌ Error saving real-time transcription: \(error.localizedDescription)")
+                        self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
+                    }
+                }
+            }
+        )
+        .store(in: &cancellables)
     }
 } 

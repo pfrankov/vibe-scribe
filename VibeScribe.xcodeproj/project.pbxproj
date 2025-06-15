@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		7A8E8A6B2C88EC9F00DC14A4 /* (null) in Sources */ = {isa = PBXBuildFile; };
+		8D5AD7B22DFF789C008A9AFB /* EventSource in Frameworks */ = {isa = PBXBuildFile; productRef = 8D5AD7B12DFF789C008A9AFB /* EventSource */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		8DC158442DAC281A00BECEAC /* VibeScribe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VibeScribe.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -36,6 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8D5AD7B22DFF789C008A9AFB /* EventSource in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +84,7 @@
 			);
 			name = VibeScribe;
 			packageProductDependencies = (
+				8D5AD7B12DFF789C008A9AFB /* EventSource */,
 			);
 			productName = VibeScribe;
 			productReference = 8DC158442DAC281A00BECEAC /* VibeScribe.app */;
@@ -107,6 +114,9 @@
 			);
 			mainGroup = 8DC1583B2DAC281A00BECEAC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				8D5AD7B02DFF789C008A9AFB /* XCRemoteSwiftPackageReference "EventSource" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8DC158452DAC281A00BECEAC /* Products */;
 			projectDirPath = "";
@@ -132,6 +142,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7A8E8A6B2C88EC9F00DC14A4 /* (null) in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -340,6 +351,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		8D5AD7B02DFF789C008A9AFB /* XCRemoteSwiftPackageReference "EventSource" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Recouse/EventSource.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8D5AD7B12DFF789C008A9AFB /* EventSource */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8D5AD7B02DFF789C008A9AFB /* XCRemoteSwiftPackageReference "EventSource" */;
+			productName = EventSource;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8DC1583C2DAC281A00BECEAC /* Project object */;
 }
