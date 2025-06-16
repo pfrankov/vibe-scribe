@@ -61,11 +61,11 @@ struct RecordingView: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            Spacer() // Верхний спейсер для вертикального центрирования
+            Spacer() // Top spacer for vertical centering
             
-            // Title с красной точкой перед ним
+            // Title with red dot indicator
             HStack(spacing: 8) {
-                // Мигающая красная точка
+                // Blinking red dot
                 if micRecorderManager.isRecording {
                     Circle()
                         .fill(Color(NSColor.systemRed))
@@ -86,7 +86,7 @@ struct RecordingView: View {
                 .fontWeight(.medium)
                 .padding(.bottom, 8)
 
-            // Визуализация во время записи
+            // Audio visualization during recording
             if micRecorderManager.isRecording {
                 // Use combinedAudioLevels instead of just micRecorderManager.audioLevels
                 AudioWaveView(
@@ -96,7 +96,7 @@ struct RecordingView: View {
                 )
                 .frame(height: 50)
             } else {
-                // Иконка когда не записываем
+                // Icon when not recording
                 Image(systemName: displayError != nil ? "exclamationmark.circle" : "waveform")
                     .symbolRenderingMode(.hierarchical)
                     .font(.system(size: 50))
@@ -116,17 +116,17 @@ struct RecordingView: View {
             }
 
             HStack(spacing: 20) {
-                // Кнопка Stop всегда красная
+                // Stop button - always red
                 Button("Stop") {
                     stopAndProcessRecording()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(Color(NSColor.systemRed))
-                .keyboardShortcut(.return) // Enter для остановки
+                .keyboardShortcut(.return) // Enter to stop
                 .disabled(!canStopRecording || displayError != nil)
 
-                // Cancel Button (всегда видна, но действие меняется)
+                // Cancel Button - always visible, but action changes
                 Button(micRecorderManager.isRecording ? "Cancel" : "Close") {
                     if micRecorderManager.isRecording {
                         cancelActiveRecording()
@@ -135,15 +135,15 @@ struct RecordingView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
-                .keyboardShortcut(.escape) // Esc для отмены/закрытия
+                .keyboardShortcut(.escape) // Escape to cancel/close
             }
             .padding(.top, 8)
             
-            Spacer() // Нижний спейсер для вертикального центрирования
+            Spacer() // Bottom spacer for vertical centering
         }
-        .padding(16) // Стандартный отступ macOS
+        .padding(16) // Standard macOS padding
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor)) // Стандартный фон macOS
+        .background(Color(NSColor.windowBackgroundColor)) // Standard macOS background
         .onAppear {
             // Start recording automatically
             startCombinedRecording()

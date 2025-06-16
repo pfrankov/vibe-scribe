@@ -19,12 +19,12 @@ struct RecordRow: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) { // Уменьшаем спейсинг до 4pt
+            VStack(alignment: .leading, spacing: 4) { // Reduced spacing to 4pt
                 // ZStack to overlay TextField on Text for editing
                 ZStack(alignment: .leading) {
                     // --- TextField (Visible when editing) ---
                     TextField("Name", text: $editingName)
-                        .textFieldStyle(.plain) // Стандартный плоский стиль
+                        .textFieldStyle(.plain) // Standard plain style
                         .focused($isNameFieldFocused)
                         .onSubmit { // Handle Enter key press
                             saveName()
@@ -32,34 +32,34 @@ struct RecordRow: View {
                         // Prevent clicks on TextField from selecting the row
                         .onTapGesture {}
                         // Apply same font/padding as Text for alignment
-                        .font(.headline) // Стандартный headline
+                        .font(.headline) // Standard headline
                         // Make TextField visible only when editing
                         .opacity(isEditing ? 1 : 0)
                         .disabled(!isEditing) // Disable when not editing
 
                     // --- Text (Visible when not editing) ---
                     Text(record.name)
-                        .font(.headline) // Стандартный headline
-                        .lineLimit(1) // Ограничиваем одной строкой
+                        .font(.headline) // Standard headline
+                        .lineLimit(1) // Limit to one line
                         // Make Text visible only when *not* editing
                         .opacity(isEditing ? 0 : 1)
                 }
 
-                HStack(spacing: 4) { // Уменьшенный интервал для деталей
+                HStack(spacing: 4) { // Reduced spacing for details
                     Text(formattedDateTime(record.date))
-                        .foregroundStyle(.secondary) // Используем системный токен вместо ручного цвета
-                    Text("•") // Bullet разделитель вместо дефиса
-                        .foregroundStyle(.secondary) // Используем системный токен
+                        .foregroundStyle(.secondary) // Use system token instead of manual color
+                    Text("•") // Bullet separator instead of dash
+                        .foregroundStyle(.secondary) // Use system token
                     Text(formatDuration(record.duration))
-                        .foregroundStyle(.secondary) // Используем системный токен
+                        .foregroundStyle(.secondary) // Use system token
                 }
-                .font(.caption) // Стандартный caption для macOS
+                .font(.caption) // Standard caption for macOS
             }
             Spacer()
             // Disclosure indicator removed as per design decision
         }
-        .padding(.vertical, 8) // Увеличиваем отступ для лучшей читаемости
-        .contentShape(Rectangle()) // Гарантирует, что вся строка кликабельна
+        .padding(.vertical, 8) // Increase padding for better readability
+        .contentShape(Rectangle()) // Ensures that the entire row is clickable
         // Detect when the text field loses focus to cancel editing
         .onChange(of: isNameFieldFocused) { oldValue, newValue in
             if !newValue && isEditing { // If focus is lost AND we were editing
@@ -76,24 +76,24 @@ struct RecordRow: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
              isNameFieldFocused = true
         }
-        print("Started editing record: \(record.name)")
+        Logger.debug("Started editing record: \(record.name)", category: .ui)
     }
 
     private func saveName() {
         // Only save if the name is valid and actually changed
         if !editingName.isEmpty && editingName != record.name {
-            print("Saving new name: \(editingName) for record ID: \(record.id)")
+            Logger.info("Saving new name: \(editingName) for record ID: \(record.id)", category: .data)
             record.name = editingName
             // SwiftData @Bindable should handle the save automatically
         } else {
-            print("Name unchanged or empty, reverting.")
+            Logger.debug("Name unchanged or empty, reverting", category: .ui)
         }
         isEditing = false // Exit editing mode
         isNameFieldFocused = false // Ensure focus is released
     }
 
     private func cancelEditing() {
-        print("Cancelled editing for record: \(record.name)")
+        Logger.debug("Cancelled editing for record: \(record.name)", category: .ui)
         isEditing = false // Exit editing mode
         isNameFieldFocused = false // Ensure focus is released
         // No need to reset editingName, it will be re-initialized on next edit

@@ -95,9 +95,15 @@ class ModelService: ObservableObject {
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 10.0
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("VibeScribe/1.0", forHTTPHeaderField: "User-Agent")
             
             if !apiKey.isEmpty {
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                // Validate API key format to prevent header injection
+                let cleanAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\n", with: "")
+                    .replacingOccurrences(of: "\r", with: "")
+                request.setValue("Bearer \(cleanAPIKey)", forHTTPHeaderField: "Authorization")
             }
             
             URLSession.shared.dataTask(with: request) { data, response, error in

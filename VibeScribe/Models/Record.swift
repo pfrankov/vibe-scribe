@@ -32,10 +32,39 @@ final class Record: Identifiable {
     }
 }
 
+// MARK: - Extensions
+
+extension Record {
+    /// Formatted duration string for display purposes
+    var formattedDuration: String {
+        formatDuration(duration)
+    }
+    
+    /// Check if the record has a valid file
+    var hasValidFile: Bool {
+        guard let url = fileURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+    
+    /// Safe file size calculation
+    var fileSize: Int64 {
+        guard let url = fileURL else { return 0 }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            return attributes[.size] as? Int64 ?? 0
+        } catch {
+            return 0
+        }
+    }
+}
+
 // Helper to format duration
 func formatDuration(_ duration: TimeInterval) -> String {
+    guard duration.isFinite && duration >= 0 else { return "0s" }
+    
     let formatter = DateComponentsFormatter()
     formatter.allowedUnits = [.minute, .second]
     formatter.unitsStyle = .abbreviated
+    formatter.zeroFormattingBehavior = .dropLeading
     return formatter.string(from: duration) ?? "0s"
 } 

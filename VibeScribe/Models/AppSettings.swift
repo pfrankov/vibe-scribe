@@ -20,7 +20,8 @@ final class AppSettings {
     var whisperModel: String = ""
     
     // LLM Context settings
-    var chunkSize: Int = 750
+    var useChunking: Bool = true // Option to enable/disable chunking entirely
+    var chunkSize: Int = 25000 // Chunk size when chunking is enabled
     
     // OpenAI compatible server settings
     var openAIBaseURL: String = "https://api.openai.com/v1/"
@@ -39,7 +40,7 @@ Give me only the summary, don't include any introductory phrases.
     var summaryPrompt: String = """
 Combine these summaries into one cohesive document that flows naturally:
 
-{summaries}
+{transcription}
 
 The combined text should be well-structured and feel like a single document rather than disconnected parts.
 """
@@ -52,7 +53,8 @@ The combined text should be well-structured and feel like a single document rath
          whisperBaseURL: String, 
          whisperAPIKey: String = "",
          whisperModel: String = "",
-         chunkSize: Int, 
+         useChunking: Bool = true,
+         chunkSize: Int = 25000, 
          openAIBaseURL: String,
          openAIAPIKey: String = "",
          openAIModel: String = "",
@@ -62,11 +64,47 @@ The combined text should be well-structured and feel like a single document rath
         self.whisperBaseURL = whisperBaseURL
         self.whisperAPIKey = whisperAPIKey
         self.whisperModel = whisperModel
+        self.useChunking = useChunking
         self.chunkSize = chunkSize
         self.openAIBaseURL = openAIBaseURL
         self.openAIAPIKey = openAIAPIKey
         self.openAIModel = openAIModel
         self.chunkPrompt = chunkPrompt
         self.summaryPrompt = summaryPrompt
+    }
+}
+
+// MARK: - Extensions
+
+extension AppSettings {
+    /// Validate if Whisper settings are properly configured
+    var isWhisperConfigured: Bool {
+        return !whisperBaseURL.isEmpty && APIURLBuilder.isValidBaseURL(whisperBaseURL)
+    }
+    
+    /// Validate if OpenAI settings are properly configured
+    var isOpenAIConfigured: Bool {
+        return !openAIBaseURL.isEmpty && APIURLBuilder.isValidBaseURL(openAIBaseURL)
+    }
+    
+    /// Use the chunk size as-is without validation
+    var validatedChunkSize: Int {
+        return chunkSize
+    }
+    
+    /// Clean API key without leading/trailing whitespace
+    var cleanWhisperAPIKey: String {
+        return whisperAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Clean API key without leading/trailing whitespace
+    var cleanOpenAIAPIKey: String {
+        return openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Should we chunk this text based on settings?
+    /// Simple: just check if chunking is enabled
+    var shouldChunkText: Bool {
+        return useChunking
     }
 } 

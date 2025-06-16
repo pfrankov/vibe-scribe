@@ -15,17 +15,17 @@ struct AudioWaveView: View {
     var isActive: Bool = true
     
     var body: some View {
-        HStack(spacing: 3) { // Уменьшенный интервал для компактности
-            ForEach(0..<min(levels.count, 28), id: \.self) { index in // Ограничиваем количество полос
-                Capsule() // Используем Capsule для закругленных краев
+        HStack(spacing: 3) { // Reduced spacing for compactness
+            ForEach(0..<min(levels.count, 28), id: \.self) { index in // Limit number of bars
+                Capsule() // Use Capsule for rounded edges
                     .fill(isActive 
-                          ? activeColor.opacity(max(0.3, Double(levels[index]))) // Динамическая непрозрачность
+                          ? activeColor.opacity(max(0.3, Double(levels[index]))) // Dynamic opacity
                           : inactiveColor)
-                    .frame(width: 3, height: CGFloat(levels[index] * 50) + 3) // Более тонкие полоски
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: levels[index]) // Более естественная анимация
+                    .frame(width: 3, height: CGFloat(levels[index] * 50) + 3) // Thinner bars
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: levels[index]) // More natural animation
             }
         }
-        .frame(height: 60) // Высота чуть меньше для компактности
+        .frame(height: 60) // Slightly smaller height for compactness
         .padding(.vertical, 10)
         .padding(.horizontal, 5)
     }

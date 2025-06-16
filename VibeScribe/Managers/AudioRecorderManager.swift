@@ -28,7 +28,10 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         let fileManager = FileManager.default
         let urls = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         guard let appSupportURL = urls.first else {
-            fatalError("Could not find Application Support directory.") // Handle more gracefully in production
+            // Fallback to Documents directory if Application Support is not available
+            let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
+            return documentsURL.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
         }
         
         // Append your app's bundle identifier and a 'Recordings' subdirectory
@@ -39,9 +42,12 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         if !fileManager.fileExists(atPath: recordingsURL.path) {
             do {
                 try fileManager.createDirectory(at: recordingsURL, withIntermediateDirectories: true, attributes: nil)
-                print("Created recordings directory at: \(recordingsURL.path)")
+                Logger.info("Created recordings directory at: \(recordingsURL.path)", category: .audio)
             } catch {
-                fatalError("Could not create recordings directory: \(error.localizedDescription)")
+                Logger.error("Error creating recordings directory", error: error, category: .audio)
+                // Return a fallback directory in Documents
+                let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                return documentsURL.appendingPathComponent("VibeScribe-Recordings")
             }
         }
         return recordingsURL

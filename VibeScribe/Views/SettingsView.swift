@@ -38,6 +38,7 @@ enum FocusedField {
     case textField
     case chunkPromptEditor
     case summaryPromptEditor
+    case chunkSizeField
 }
 
 // MARK: - Custom TextEditor with controlled scrolling
@@ -140,6 +141,7 @@ struct SettingsView: View {
     
     @FocusState private var focusedField: FocusedField?
     @State private var selectedTab: SettingsTab = .speechToText
+    @State private var chunkSizeText: String = ""
     
     @StateObject private var modelService = ModelService.shared
     
@@ -191,6 +193,7 @@ struct SettingsView: View {
         }
         .onAppear {
             _ = settings
+            chunkSizeText = String(settings.chunkSize)
             loadModelsIfNeeded()
         }
         .onChange(of: settings.whisperBaseURL) { _, _ in
@@ -365,25 +368,7 @@ struct SettingsView: View {
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("Prompt for individual transcription chunks")
-                .font(.system(size: UIConstants.fontSize))
-            
-            styledTextEditor(
-                text: Binding(
-                    get: { settings.chunkPrompt },
-                    set: { newValue in
-                        settings.chunkPrompt = newValue
-                        trySave()
-                    }
-                ),
-                focusField: .chunkPromptEditor
-            )
-            
-            captionText("Use {transcription} as a placeholder for the transcription text.")
-        }
-        
-        VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("Prompt for combining chunk summaries")
+            Text("Final summary prompt")
                 .font(.system(size: UIConstants.fontSize))
             
             styledTextEditor(
@@ -397,28 +382,68 @@ struct SettingsView: View {
                 focusField: .summaryPromptEditor
             )
             
-            captionText("Use {summaries} as a placeholder for the combined chunk summaries.")
+            captionText("Use {transcription} as a placeholder for the text to be processed.")
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("Chunk Size (characters)")
-                .font(.system(size: UIConstants.fontSize))
-            
-            TextField("1000", value: Binding(
-                get: { settings.chunkSize },
-                set: { newValue in
-                    let clampedValue = max(100, min(2000, newValue))
-                    if settings.chunkSize != clampedValue {
-                        settings.chunkSize = clampedValue
+            HStack {
+                Toggle("Split long texts into chunks", isOn: Binding(
+                    get: { settings.useChunking },
+                    set: { newValue in
+                        settings.useChunking = newValue
                         trySave()
                     }
-                }
-            ), format: .number)
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 100)
-            .frame(maxWidth: .infinity, alignment: .leading)
+                ))
+                .toggleStyle(.checkbox)
+                
+                Spacer()
+            }
             
-            captionText("Text chunk size for LLM processing (100-2000 characters). Larger chunks = more context but higher token cost.")
+            captionText("When enabled, long texts are split into smaller chunks before processing.")
+        }
+        
+        if settings.useChunking {
+            VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+                Text("Prompt for individual chunks")
+                    .font(.system(size: UIConstants.fontSize))
+                
+                styledTextEditor(
+                    text: Binding(
+                        get: { settings.chunkPrompt },
+                        set: { newValue in
+                            settings.chunkPrompt = newValue
+                            trySave()
+                        }
+                    ),
+                    focusField: .chunkPromptEditor
+                )
+                
+                captionText("Use {transcription} as a placeholder for the individual chunk text.")
+            }
+            
+            VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+                Text("Chunk Size (characters)")
+                    .font(.system(size: UIConstants.fontSize))
+                
+                TextField("25000", text: $chunkSizeText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 100)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .focused($focusedField, equals: .chunkSizeField)
+                    .onSubmit {
+                        // Save when user presses Enter
+                        saveChunkSize()
+                        focusedField = nil
+                    }
+                    .onChange(of: focusedField) { _, newValue in
+                        // Save when focus is lost
+                        if newValue != .chunkSizeField && !chunkSizeText.isEmpty {
+                            saveChunkSize()
+                        }
+                    }
+                
+                captionText("Maximum size for each text chunk in characters. Text is split intelligently by paragraphs first, then sentences, then words.")
+            }
         }
     }
     
@@ -501,7 +526,18 @@ struct SettingsView: View {
         do {
             try modelContext.save()
         } catch {
-            print("Error saving settings: \(error)")
+                            Logger.error("Error saving settings", error: error, category: .data)
+        }
+    }
+    
+    private func saveChunkSize() {
+        // Convert text to Int, allow any number (including 0 or negative)
+        if let chunkSize = Int(chunkSizeText) {
+            settings.chunkSize = chunkSize
+            trySave()
+        } else {
+            // If invalid input, revert to current settings value
+            chunkSizeText = String(settings.chunkSize)
         }
     }
     

@@ -29,16 +29,16 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             _ = try await SCShareableContent.current
             return true
         } catch {
-            NSLog("SystemAudioRecorderManager: Screen capture permission not available: \(error.localizedDescription)")
+            Logger.error("Screen capture permission not available", error: error, category: .audio)
             return false
         }
     }
 
     // Start recording system audio
     func startRecording(outputURL: URL) {
-        NSLog("SystemAudioRecorderManager: Attempting to start recording.")
+        Logger.info("Attempting to start system audio recording", category: .audio)
         guard !isRecording else {
-            NSLog("SystemAudioRecorderManager: Already recording.")
+            Logger.warning("Already recording system audio", category: .audio)
             return
         }
 
@@ -50,7 +50,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
         } catch {
-            NSLog("SystemAudioRecorderManager: Failed to create directory: \(error.localizedDescription)")
+            Logger.error("Failed to create directory for system audio recording", error: error, category: .audio)
             self.error = error
             return
         }
@@ -132,13 +132,13 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     nonisolated
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        // Обрабатываем видео фреймы
+        // Process video frames
         if type == .screen {
             processVideoSampleBuffer(sampleBuffer)
             return
         }
         
-        // Обрабатываем аудио фреймы
+        // Process audio frames
         guard type == .audio else { return }
 
         let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
@@ -213,11 +213,11 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         }
     }
 
-    // Обработчик видео фреймов - просто игнорируем их, но предотвращаем ошибки
+    // Video frame handler - simply ignore them but prevent errors
     nonisolated
     func processVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // Пустая реализация - ничего не делаем с видео фреймами
-        // Просто позволяем ScreenCaptureKit иметь место для их отправки
+        // Empty implementation - we don't need video frames
+        // Just allow ScreenCaptureKit to have a place to send them
     }
 
     // New helper function to create an AVAudioPCMBuffer from a CMSampleBuffer
@@ -225,7 +225,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
                                                format: AVAudioFormat,
                                                frameCount: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
         guard let sourceFormatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let sourceASBDRef = CMAudioFormatDescriptionGetStreamBasicDescription(sourceFormatDesc) else {
+              let _ = CMAudioFormatDescriptionGetStreamBasicDescription(sourceFormatDesc) else {
             NSLog("SystemAudioRecorderManager: [createPCMBufferFrom] Failed to get source ASBD from sampleBuffer.")
             return nil
         }
@@ -357,12 +357,11 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         let channelCount = Int(asbd.pointee.mChannelsPerFrame)
         if channelCount == 0 { return } // Avoid division by zero
         
-        // Calculate RMS power (average of squared samples)
+        // Calculate RMS power (average of squared samples) with optimized sampling
         var sumSquares: Float = 0.0
         
         // Assuming audio data is 32-bit float (kAudioFormatLinearPCM + kAudioFormatFlagIsFloat)
         // This is typical for SCStreamOutputType.audio
-        // Check mFormatFlags if you need to support other formats.
         if (asbd.pointee.mFormatFlags & kAudioFormatFlagIsFloat) != 0 && asbd.pointee.mBitsPerChannel == 32 {
             let floatDataPointer = UnsafeRawPointer(dataPointer!)!.assumingMemoryBound(to: Float.self)
             let sampleCount = frameCount * channelCount
@@ -371,10 +370,20 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
                 return
             }
 
-            for i in 0..<sampleCount {
+            // Performance optimization: sample every 16th sample for level calculation
+            // This reduces CPU usage while maintaining visual accuracy
+            let sampleStep = max(1, sampleCount / 1024) // Sample at most 1024 points
+            var actualSampleCount = 0
+            
+            for i in stride(from: 0, to: sampleCount, by: sampleStep) {
                 let sampleValue = floatDataPointer[i]
-                    sumSquares += sampleValue * sampleValue
-                }
+                sumSquares += sampleValue * sampleValue
+                actualSampleCount += 1
+            }
+            
+            if actualSampleCount > 0 {
+                sumSquares /= Float(actualSampleCount)
+            }
         } else {
             Task { @MainActor in
                 // Simplified logic: if array is full, remove first, then append.
@@ -387,7 +396,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         }
         
         // Calculate RMS and convert to level (0...1)
-        let rms = sqrtf(sumSquares / Float(frameCount * channelCount))
+        let rms = sqrtf(sumSquares)
         // Normalize and apply some scaling for better visualization
         let normalizedLevel = min(1.0, max(0.0, rms * 2.0)) // Adjusted scale factor
         

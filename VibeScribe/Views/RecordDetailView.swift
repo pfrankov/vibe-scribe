@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import Combine
-@_exported import Foundation // добавляем для доступа к WhisperTranscriptionManager
+@_exported import Foundation // Import for WhisperTranscriptionManager access
 
 // Detail view for a single record - Refactored to use AudioPlayerManager
 struct RecordDetailView: View {
@@ -36,12 +36,12 @@ struct RecordDetailView: View {
     @State private var sseFullText: String = "" // For accumulating full transcription text
     @State private var isSSEStreaming = false // Track if currently using SSE streaming
 
-    // State for inline title editing - Переименовал для ясности
+    // State for inline title editing - Renamed for clarity
     @State private var isEditingTitle: Bool = false
     @State private var editingTitle: String = ""
     @FocusState private var isTitleFieldFocused: Bool
     
-    // Enum для вкладок
+    // Enum for tabs
     enum Tab {
         case transcription
         case summary
@@ -64,7 +64,7 @@ struct RecordDetailView: View {
         }
     }
     
-    // Получаем текущие настройки
+    // Get current settings
     private var settings: AppSettings {
         appSettings.first ?? AppSettings()
     }
@@ -85,7 +85,7 @@ struct RecordDetailView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) { // Уменьшаем базовый интервал
+        VStack(alignment: .leading, spacing: 12) { // Reduce base spacing
             // Header with Title (now editable) and Close button
             HStack {
                 ZStack(alignment: .leading) {
@@ -458,9 +458,8 @@ struct RecordDetailView: View {
     private func startEditingTitle() {
         editingTitle = record.name
         isEditingTitle = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-             isTitleFieldFocused = true
-        }
+        // Focus immediately - SwiftUI will handle timing properly
+        isTitleFieldFocused = true
         print("Started editing title for record: \(record.name)")
     }
 
@@ -499,7 +498,7 @@ struct RecordDetailView: View {
         }
     }
     
-    // Функция для запуска транскрипции
+    // Function to start transcription
     private func startTranscription() {
         guard let fileURL = record.fileURL, !isTranscribing else { return }
         
@@ -509,9 +508,8 @@ struct RecordDetailView: View {
         sseStreamingChunks.removeAll()
         sseFullText = ""
         
-        print("Starting transcription for: \(record.name)")
-        print("Using Whisper API at URL: \(settings.whisperBaseURL) with model: \(settings.whisperModel)")
-        print("Will attempt SSE streaming first, with automatic fallback to regular mode")
+        Logger.info("Starting transcription for: \(record.name)", category: .transcription)
+        Logger.debug("Using Whisper API at URL: \(settings.whisperBaseURL) with model: \(settings.whisperModel)", category: .transcription)
         
         let whisperManager = WhisperTranscriptionManager.shared
         
@@ -763,15 +761,26 @@ struct RecordDetailView: View {
         
         print("Starting summarization for: \(record.name), using OpenAI compatible API at URL: \(settings.openAIBaseURL)")
         
-        // Разбиваем чистую транскрипцию на чанки
-        let chunks = splitTranscriptionIntoChunks(cleanText, chunkSize: settings.chunkSize)
-        print("Split clean transcription into \(chunks.count) chunks")
-        
-        // Создаем массив для хранения суммаризаций чанков
+        // Check if we should chunk the text based on settings
+        if settings.shouldChunkText {
+            print("📊 Chunking enabled - splitting text (\(cleanText.count) characters) into chunks")
+            let chunks = TextChunker.chunkText(cleanText, maxChunkSize: settings.validatedChunkSize, forceChunking: false)
+            print("Split text into \(chunks.count) chunks using intelligent boundaries")
+            processSummaryWithChunks(chunks)
+        } else {
+            print("📊 Chunking disabled - processing text (\(cleanText.count) characters) as single text")
+            processSummaryAsSingleText(cleanText)
+            return
+        }
+    }
+    
+    // Process summary with chunking
+    private func processSummaryWithChunks(_ chunks: [String]) {
+        // Create array to store chunk summaries
         var chunkSummaries = [String]()
         let group = DispatchGroup()
         
-        // Суммаризируем каждый чанк
+        // Summarize each chunk
         for (index, chunk) in chunks.enumerated() {
             group.enter()
             
@@ -793,7 +802,7 @@ struct RecordDetailView: View {
             ).store(in: &cancellables)
         }
         
-        // Когда все чанки суммаризированы, объединяем их
+        // When all chunks are summarized, combine them
         group.notify(queue: .main) {
             if chunkSummaries.isEmpty {
                 self.isSummarizing = false
@@ -804,7 +813,7 @@ struct RecordDetailView: View {
                 return
             }
             
-            // Если есть только один чанк, используем его как финальную суммаризацию
+            // If there's only one chunk, use it as the final summary
             if chunkSummaries.count == 1 {
                 self.record.summaryText = chunkSummaries[0]
                 try? self.modelContext.save()
@@ -818,7 +827,7 @@ struct RecordDetailView: View {
                 return
             }
             
-            // Если чанков несколько, объединяем их
+            // If there are multiple chunks, combine them
             self.combineSummaries(chunkSummaries).sink(
                 receiveCompletion: { completion in
                     self.isSummarizing = false
@@ -845,28 +854,42 @@ struct RecordDetailView: View {
         }
     }
     
-    // Разбиваем транскрипцию на чанки
-    private func splitTranscriptionIntoChunks(_ text: String, chunkSize: Int) -> [String] {
-        var chunks = [String]()
-        let words = text.split(separator: " ")
-        var currentChunk = [Substring]()
+    // Process summary as single text (no chunking)
+    private func processSummaryAsSingleText(_ text: String) {
+        // Use the summary prompt directly for single text
+        let prompt = settings.summaryPrompt.replacingOccurrences(of: "{transcription}", with: text)
         
-        for word in words {
-            currentChunk.append(word)
-            if currentChunk.joined(separator: " ").count >= chunkSize {
-                chunks.append(currentChunk.joined(separator: " "))
-                currentChunk = []
+        callOpenAIAPI(prompt: prompt, url: settings.openAIBaseURL).sink(
+            receiveCompletion: { completion in
+                isSummarizing = false
+                switch completion {
+                case .finished:
+                    print("Single text summarization completed successfully")
+                    if isAutomaticMode {
+                        print("Automatic mode: Switching to summary tab after single text completion")
+                        isAutomaticMode = false
+                    }
+                case .failure(let error):
+                    summaryError = "Error: \(error.localizedDescription)"
+                    print("Single text summarization failed: \(error.localizedDescription)")
+                    isAutomaticMode = false
+                }
+            },
+            receiveValue: { summary in
+                record.summaryText = summary
+                // Note: hasSummary is automatically set when summaryText is assigned
+                do {
+                    try modelContext.save()
+                    print("Single text summary saved successfully")
+                } catch {
+                    summaryError = "Error saving summary: \(error.localizedDescription)"
+                    print("Error saving single text summary: \(error.localizedDescription)")
+                }
             }
-        }
-        
-        if !currentChunk.isEmpty {
-            chunks.append(currentChunk.joined(separator: " "))
-        }
-        
-        return chunks
+        ).store(in: &cancellables)
     }
     
-    // Суммаризируем один чанк
+    // Summarize one chunk
     private func summarizeChunk(_ chunk: String, index: Int) -> AnyPublisher<String, Error> {
         let prompt = settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: chunk)
         
@@ -876,10 +899,10 @@ struct RecordDetailView: View {
         )
     }
     
-    // Объединяем суммаризации чанков
+    // Combine chunk summaries
     private func combineSummaries(_ summaries: [String]) -> AnyPublisher<String, Error> {
         let combinedSummaries = summaries.joined(separator: "\n\n")
-        let prompt = settings.summaryPrompt.replacingOccurrences(of: "{summaries}", with: combinedSummaries)
+        let prompt = settings.summaryPrompt.replacingOccurrences(of: "{transcription}", with: combinedSummaries)
         
         return callOpenAIAPI(
             prompt: prompt,
@@ -887,10 +910,10 @@ struct RecordDetailView: View {
         )
     }
     
-    // Вызываем OpenAI-совместимый API
+    // Call OpenAI-compatible API
     private func callOpenAIAPI(prompt: String, url: String) -> AnyPublisher<String, Error> {
         return Future<String, Error> { promise in
-            // Формируем полный URL
+            // Form complete URL
             guard let url = APIURLBuilder.buildURL(baseURL: url, endpoint: "chat/completions") else {
                 promise(.failure(NSError(domain: "Invalid URL", code: -1)))
                 return
@@ -900,12 +923,12 @@ struct RecordDetailView: View {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
-            // Добавляем API Key, если он предоставлен
+            // Add API Key if provided
             if !settings.openAIAPIKey.isEmpty {
                 request.setValue("Bearer \(settings.openAIAPIKey)", forHTTPHeaderField: "Authorization")
             }
             
-            // Формируем тело запроса
+            // Form request body
             let requestBody: [String: Any] = [
                 "model": settings.openAIModel,
                 "messages": [
@@ -921,7 +944,7 @@ struct RecordDetailView: View {
                 return
             }
             
-            // Отправляем запрос
+            // Send request
             URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error = error {
                     promise(.failure(error))

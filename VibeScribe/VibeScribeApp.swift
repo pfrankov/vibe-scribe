@@ -10,6 +10,7 @@ import SwiftData
 import AppKit
 import AVFoundation
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBarItem: NSStatusItem?
     var mainWindow: NSWindow?
@@ -18,9 +19,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusBarItem()
         requestPermissions { granted in
             if granted {
-                print("All permissions granted")
+                Logger.info("All permissions granted", category: .general)
             } else {
-                print("Some permissions were denied")
+                Logger.warning("Some permissions were denied", category: .general)
+                // Show user notification about permissions
+                DispatchQueue.main.async {
+                    self.showPermissionAlert()
+                }
             }
         }
     }
@@ -28,11 +33,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusBarItem() {
         statusBarItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
-        if let button = statusBarItem?.button {
-            button.image = NSImage(named: "MenuBarIcon")
-            button.action = #selector(statusBarButtonClicked)
-            button.target = self
-        }
+        guard let button = statusBarItem?.button else { return }
+        
+        button.image = NSImage(named: "MenuBarIcon")
+        button.action = #selector(statusBarButtonClicked)
+        button.target = self
         
         let menu = NSMenu()
         
@@ -81,7 +86,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc func startRecording() {
         openMainWindow()
-        // This would typically activate the recording functionality
+        // Notify the UI to start recording
+        NotificationCenter.default.post(name: NSNotification.Name("StartRecording"), object: nil)
     }
     
     @objc func openSettings() {
@@ -95,17 +101,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func requestPermissions(completion: @escaping (Bool) -> Void) {
-        // Request Microphone access first
+    private func requestPermissions(completion: @escaping (Bool) -> Void) {
+        // Request Microphone access
         AVCaptureDevice.requestAccess(for: .audio) { micGranted in
             DispatchQueue.main.async {
-                if micGranted {
-                    print("Microphone access granted")
-                    completion(true)
-                } else {
-                    print("Microphone access denied")
-                    completion(false)
-                }
+                completion(micGranted)
+            }
+        }
+    }
+    
+    private func showPermissionAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Microphone Permission Required"
+        alert.informativeText = "VibeScribe needs microphone access to record audio. Please grant permission in System Preferences > Security & Privacy > Microphone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Preferences")
+        alert.addButton(withTitle: "Cancel")
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            // Open System Preferences
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
             }
         }
     }

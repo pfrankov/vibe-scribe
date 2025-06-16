@@ -86,13 +86,13 @@ struct ContentView: View {
                     if let newRecord = matchingRecords.first {
                         shouldScrollToSelectedRecord = true // Set flag to scroll for new records
                         selectedRecord = newRecord
-                        print("ContentView: Auto-selected new record by fetching ID: \\(newRecord.id) Name: \\(newRecord.name)")
+                        print("ContentView: Auto-selected new record by fetching ID: \(newRecord.id) Name: \(newRecord.name)")
                     } else {
                         // This case should ideally not happen if the record was saved successfully
-                        print("ContentView ERROR: New record with ID \\(recordId) not found via fetch immediately after creation.")
+                        print("ContentView ERROR: New record with ID \(recordId) not found via fetch immediately after creation.")
                     }
                 } catch {
-                    print("ContentView ERROR: Failed to fetch new record by ID \\(recordId): \\(error.localizedDescription)")
+                    print("ContentView ERROR: Failed to fetch new record by ID \(recordId): \(error.localizedDescription)")
                 }
             }
         }
@@ -140,13 +140,13 @@ struct ContentView: View {
                 .scrollDismissesKeyboard(.immediately)
                 .onChange(of: selectedRecord) { oldValue, newValue in
                     if let recordToScrollTo = newValue, shouldScrollToSelectedRecord {
-                        print("ContentView: selectedRecord changed to \\(recordToScrollTo.name) (ID: \\(recordToScrollTo.id)), scrolling to new record.")
+                        print("ContentView: selectedRecord changed to \(recordToScrollTo.name) (ID: \(recordToScrollTo.id)), scrolling to new record.")
                         withAnimation {
                             proxy.scrollTo(recordToScrollTo.id, anchor: .top)
                         }
                         shouldScrollToSelectedRecord = false // Reset flag after scrolling
                     } else if newValue != nil {
-                        print("ContentView: selectedRecord changed to \\(newValue!.name) (ID: \\(newValue!.id)), not scrolling (user selection).")
+                        print("ContentView: selectedRecord changed to \(newValue!.name) (ID: \(newValue!.id)), not scrolling (user selection).")
                     }
                 }
             }
