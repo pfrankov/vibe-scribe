@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var selectedRecord: Record? = nil
     @State private var isShowingRecordingSheet = false
     @State private var isShowingSettings = false
+    @State private var shouldScrollToSelectedRecord = false
 
     @Query(sort: \Record.date, order: .reverse) private var records: [Record]
 
@@ -83,6 +84,7 @@ struct ContentView: View {
                 do {
                     let matchingRecords = try modelContext.fetch(fetchDescriptor)
                     if let newRecord = matchingRecords.first {
+                        shouldScrollToSelectedRecord = true // Set flag to scroll for new records
                         selectedRecord = newRecord
                         print("ContentView: Auto-selected new record by fetching ID: \\(newRecord.id) Name: \\(newRecord.name)")
                     } else {
@@ -96,7 +98,9 @@ struct ContentView: View {
         }
         .onChange(of: records) { _, newRecords in
             if selectedRecord == nil && !newRecords.isEmpty {
+                // Don't scroll when auto-selecting first record on app launch
                 selectedRecord = newRecords.first
+                print("ContentView: Auto-selected first record without scrolling")
             }
         }
         .sheet(isPresented: $isShowingRecordingSheet) {
@@ -135,11 +139,14 @@ struct ContentView: View {
                 .listStyle(.plain)
                 .scrollDismissesKeyboard(.immediately)
                 .onChange(of: selectedRecord) { oldValue, newValue in
-                    if let recordToScrollTo = newValue {
-                        print("ContentView: selectedRecord changed to \\(recordToScrollTo.name) (ID: \\(recordToScrollTo.id)), attempting to scroll.")
+                    if let recordToScrollTo = newValue, shouldScrollToSelectedRecord {
+                        print("ContentView: selectedRecord changed to \\(recordToScrollTo.name) (ID: \\(recordToScrollTo.id)), scrolling to new record.")
                         withAnimation {
                             proxy.scrollTo(recordToScrollTo.id, anchor: .top)
                         }
+                        shouldScrollToSelectedRecord = false // Reset flag after scrolling
+                    } else if newValue != nil {
+                        print("ContentView: selectedRecord changed to \\(newValue!.name) (ID: \\(newValue!.id)), not scrolling (user selection).")
                     }
                 }
             }
@@ -197,7 +204,9 @@ struct ContentView: View {
     
     private func selectFirstRecordIfNeeded() {
         if selectedRecord == nil && !records.isEmpty {
+            // Don't scroll when auto-selecting first record on app launch
             selectedRecord = records.first
+            print("ContentView: selectFirstRecordIfNeeded - Auto-selected first record without scrolling")
         }
     }
 

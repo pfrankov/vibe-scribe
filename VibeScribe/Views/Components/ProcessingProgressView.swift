@@ -216,35 +216,50 @@ struct ProcessingProgressView: View {
         }
     }
     
-    // SSE Streaming text preview - just text, nothing else
+    // SSE Streaming text preview with precise, animated scrolling
     private var streamingTextPreview: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 3) {
-                    // Show last 4-5 chunks
-                    let recentChunks = Array(state.streamingChunks.suffix(5))
-                    ForEach(Array(recentChunks.enumerated()), id: \.offset) { index, chunk in
+                VStack(alignment: .leading, spacing: 4) {
+                    // Using the full array directly for stable IDs
+                    let chunks = state.streamingChunks
+                    ForEach(Array(chunks.enumerated()), id: \.offset) { index, chunk in
                         Text(chunk)
                             .font(.caption)
+                            .lineLimit(nil)
                             .foregroundStyle(
-                                index == recentChunks.count - 1 ? 
-                                Color(NSColor.labelColor) : 
+                                index == chunks.count - 1 ?
+                                Color(NSColor.labelColor) :
                                 Color(NSColor.labelColor).opacity(0.6)
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .id("chunk-\(state.streamingChunks.count - recentChunks.count + index)")
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .id(index) // Use stable index as ID
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
             }
-            .frame(height: 60)
-            .onChange(of: state.streamingChunks.count) { oldValue, newValue in
-                // Auto-scroll to latest chunk with smooth animation
-                if newValue > 0 {
-                    withAnimation(.easeOut(duration: 0.4)) {
-                        proxy.scrollTo("chunk-\(newValue - 1)", anchor: .bottom)
+            .frame(height: 56) // ~3 lines
+            .mask(
+                // Taller gradient mask to properly fade the top edge
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.35),
+                        .init(color: .black, location: 1.0)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .onChange(of: state.streamingChunks.count) { _, newCount in
+                guard newCount > 0 else { return }
+                
+                // Asynchronously scroll to ensure the view has updated before scrolling
+                DispatchQueue.main.async {
+                    withAnimation(.linear(duration: 0.2)) {
+                        proxy.scrollTo(newCount - 1, anchor: .bottom)
                     }
                 }
             }

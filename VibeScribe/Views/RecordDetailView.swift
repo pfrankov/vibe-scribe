@@ -724,20 +724,39 @@ struct RecordDetailView: View {
     
     // Функция для запуска суммаризации
     private func startSummarization() {
-        guard let srtText = record.transcriptionText, // Renamed for clarity, this is SRT
-              !srtText.isEmpty,
+        guard let transcriptionText = record.transcriptionText, // Can be either SRT or plain text
+              !transcriptionText.isEmpty,
               !isSummarizing else { return }
 
-        // Extract clean text from SRT first
-        let cleanText = WhisperTranscriptionManager.shared.extractTextFromSRT(srtText)
+        print("🔍 startSummarization - raw transcriptionText length: \(transcriptionText.count)")
+        print("🔍 startSummarization - raw transcriptionText preview: '\(transcriptionText.prefix(200))...'")
+        print("🔍 startSummarization - raw transcriptionText suffix: '...\(transcriptionText.suffix(100))'")
+
+        // Determine if this is SRT format or plain text and extract accordingly
+        let cleanText: String
+        if transcriptionText.contains("-->") && transcriptionText.contains("\n\n") {
+            // This looks like SRT format - extract text from it
+            print("📋 Detected SRT format, extracting clean text...")
+            cleanText = WhisperTranscriptionManager.shared.extractTextFromSRT(transcriptionText)
+        } else {
+            // This is already plain text (from SSE streaming)
+            print("📝 Detected plain text format, using as-is...")
+            cleanText = transcriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        print("🔍 startSummarization - cleanText length: \(cleanText.count)")
+        print("🔍 startSummarization - cleanText preview: '\(cleanText.prefix(200))...'")
+        print("🔍 startSummarization - cleanText suffix: '...\(cleanText.suffix(100))'")
 
         guard !cleanText.isEmpty else {
-            print("Error: Clean text extracted from SRT is empty for record: \(record.name)")
-            summaryError = "Error: Transcription text is empty after cleaning."
+            print("Error: Clean text is empty for record: \(record.name)")
+            summaryError = "Error: Transcription text is empty after processing."
             isSummarizing = false
             isAutomaticMode = false // Stop automatic mode
             return
         }
+        
+        print("📊 Starting summarization with \(cleanText.count) characters of clean text")
         
         isSummarizing = true
         summaryError = nil
@@ -763,7 +782,7 @@ struct RecordDetailView: View {
                         print("Chunk \(index) summarization completed")
                     case .failure(let error):
                         print("Chunk \(index) summarization error: \(error.localizedDescription)")
-                        summaryError = "Error summarizing chunk \(index): \(error.localizedDescription)"
+                        self.summaryError = "Error summarizing chunk \(index): \(error.localizedDescription)"
                         self.isAutomaticMode = false // Stop automatic mode on error
                     }
                     group.leave()
