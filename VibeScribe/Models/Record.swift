@@ -19,8 +19,9 @@ final class Record: Identifiable {
     var hasTranscription: Bool
     var transcriptionText: String?
     var summaryText: String?
+    var includesSystemAudio: Bool?
 
-    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false, transcriptionText: String? = nil, summaryText: String? = nil) {
+    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false, transcriptionText: String? = nil, summaryText: String? = nil, includesSystemAudio: Bool = false) {
         self.id = id
         self.name = name
         self.fileURL = fileURL // Store the URL object
@@ -29,12 +30,18 @@ final class Record: Identifiable {
         self.hasTranscription = hasTranscription
         self.transcriptionText = transcriptionText
         self.summaryText = summaryText
+        self.includesSystemAudio = includesSystemAudio
     }
 }
 
 // MARK: - Extensions
 
 extension Record {
+    /// Computed property to handle system audio flag with fallback
+    var hasSystemAudio: Bool {
+        return includesSystemAudio ?? false
+    }
+    
     /// Formatted duration string for display purposes
     var formattedDuration: String {
         formatDuration(duration)

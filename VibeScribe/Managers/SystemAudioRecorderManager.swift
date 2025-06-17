@@ -9,6 +9,7 @@ import Foundation
 import ScreenCaptureKit
 import AVFoundation
 import Combine // For ObservableObject
+import Darwin // For log10
 
 // Availability check for the entire class
 @MainActor // <<< Add @MainActor
@@ -397,8 +398,12 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         
         // Calculate RMS and convert to level (0...1)
         let rms = sqrtf(sumSquares)
-        // Normalize and apply some scaling for better visualization
-        let normalizedLevel = min(1.0, max(0.0, rms * 2.0)) // Adjusted scale factor
+        
+        // Convert RMS to decibels for consistency with microphone levels
+        let powerInDb = 20.0 * log10(Double(rms + 1e-10)) // Add epsilon to avoid log(0)
+        
+        // Use same normalization as microphone (typical range -10 to -30 dB for audio)
+        let normalizedLevel = Float(min(1.0, max(0.0, (powerInDb + 50) / 50)))
         
         // Update the levels on the main thread
         Task { @MainActor in

@@ -52,6 +52,14 @@ struct RecordRow: View {
                         .foregroundStyle(.secondary) // Use system token
                     Text(formatDuration(record.duration))
                         .foregroundStyle(.secondary) // Use system token
+                    
+                    // System audio indicator
+                    if record.hasSystemAudio {
+                        Text("•")
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "speaker.wave.2")
+                            .foregroundStyle(.blue)
+                    }
                 }
                 .font(.caption) // Standard caption for macOS
             }

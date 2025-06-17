@@ -305,7 +305,7 @@ class WhisperTranscriptionManager {
     }
     
     // Regular (non-streaming) transcription method
-    private func transcribeAudioRegular(audioURL: URL, whisperBaseURL: String, apiKey: String = "", model: String = "whisper-1", language: String = "ru", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
+    private func transcribeAudioRegular(audioURL: URL, whisperBaseURL: String, apiKey: String = "", model: String = "whisper-1", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
         // Check if the file exists
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             print("Error: Audio file not found at path: \(audioURL.path)")
@@ -354,10 +354,7 @@ class WhisperTranscriptionManager {
             body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(responseFormat)\r\n".data(using: .utf8)!)
             
-            // Add language parameter
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"language\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(language)\r\n".data(using: .utf8)!)
+            // Language parameter removed - let Whisper auto-detect
             
             // Add file
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -507,10 +504,7 @@ class WhisperTranscriptionManager {
         body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
         body.append("text\r\n".data(using: .utf8)!)
         
-        // Add language parameter
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"language\"\r\n\r\n".data(using: .utf8)!)
-        body.append("ru\r\n".data(using: .utf8)!)
+        // Language parameter removed - let Whisper auto-detect
         
         // Add audio file
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
