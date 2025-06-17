@@ -295,11 +295,11 @@ struct ProcessingProgressView: View {
         
         // Test SSE streaming with chunks
         ProcessingProgressView(state: .streamingTranscription([
-            "убедиться все-таки что это ну да",
-            "хочу убедиться все-таки, что это, ну, то есть",
-            "проверить работает ли стриминг",
-            "последние несколько слов транскрипции",
-            "финальный чанк для тестирования"
+            "I want to make sure that this actually works",
+            "let me verify that this is indeed working",
+            "checking if streaming functionality is operational",
+            "these are the last few words of transcription",
+            "final chunk for testing purposes"
         ]))
     }
     .padding()

@@ -55,6 +55,10 @@ struct RecordDetailView: View {
         if let text = record.transcriptionText, !text.isEmpty {
             print("🔍 transcriptionText computed - returning actual text: '\(text.prefix(50))'")
             return text
+        } else if record.hasTranscription && record.transcriptionText != nil {
+            // This means transcription was attempted but resulted in empty text
+            print("🔍 transcriptionText computed - returning 'empty result' message")
+            return "Transcription resulted in empty text. Try again with a different model or check audio quality."
         } else if record.hasTranscription {
             print("🔍 transcriptionText computed - returning 'processing' message")
             return "Transcription processing... Check back later."
@@ -77,8 +81,9 @@ struct RecordDetailView: View {
         case .error:
             return true // Show content on error so user can see retry buttons
         case .idle:
-            // Show content if we have any existing data to display
-            return record.hasTranscription || record.summaryText != nil
+            // Always show content in idle state so user can try transcription
+            // This allows users to retry even if previous transcription was empty
+            return true
         case .transcribing, .summarizing, .streamingTranscription:
             return false
         }
@@ -340,10 +345,10 @@ struct RecordDetailView: View {
                 }
             }
             
-            Spacer() // Добавляю Spacer чтобы контент прижимался к верху
+                                Spacer() // Add Spacer to push content to top
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Фиксирую alignment по верху
-        .padding(16) // Более компактный общий отступ
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Fix alignment to top
+        .padding(16) // More compact general padding
         .animation(.easeInOut(duration: 0.4), value: shouldShowContent)
         .onAppear {
             // Initialize processing state based on current record state
@@ -382,7 +387,7 @@ struct RecordDetailView: View {
         }
         .onDisappear {
             playerManager.stopAndCleanup()
-            // Отменяем все подписки при закрытии окна
+            // Cancel all subscriptions when closing window
             cancellables.forEach { $0.cancel() }
             cancellables.removeAll()
         }
@@ -443,7 +448,7 @@ struct RecordDetailView: View {
             processingState = .summarizing
             print("📋 Set state to summarizing")
         } else if isAutomaticMode && record.hasTranscription && record.summaryText == nil {
-            // В автоматическом режиме между транскрипцией и суммаризацией показываем summarizing
+            // In automatic mode, show summarizing between transcription and summarization
             processingState = .summarizing
             print("🤖 Set state to summarizing (automatic mode)")
         } else if record.hasTranscription && record.summaryText != nil {
@@ -546,7 +551,19 @@ struct RecordDetailView: View {
                             self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
                         }
                     } else {
-                        print("⚠️ No SSE full text to save - this might be a problem!")
+                        print("⚠️ SSE transcription resulted in empty text")
+                        self.transcriptionError = "Error: Empty transcription received from SSE. Please try again with different model or check your audio quality."
+                        
+                        // Still mark as having transcription attempt so UI shows properly
+                        self.record.hasTranscription = true
+                        self.record.transcriptionText = "" // Store empty string
+                        
+                        do {
+                            try self.modelContext.save()
+                            print("💾 Saved empty SSE transcription result with error state")
+                        } catch {
+                            print("❌ Error saving empty SSE transcription state: \(error.localizedDescription)")
+                        }
                     }
                     
                     // Clear state AFTER saving
@@ -695,17 +712,28 @@ struct RecordDetailView: View {
             receiveValue: { transcription in
                 print("📝 Received regular transcription of length: \(transcription.count) characters")
                 
-                // Проверяем, что транскрипция не пустая
-                guard !transcription.isEmpty else {
-                    self.transcriptionError = "Error: Empty transcription received"
+                // Check that transcription is not empty
+                if transcription.isEmpty {
+                    self.transcriptionError = "Error: Empty transcription received. Please try again with different model or check your audio quality."
                     print("❌ Error: Empty transcription received")
+                    
+                    // Still mark as having transcription attempt so UI shows properly
+                    self.record.hasTranscription = true
+                    self.record.transcriptionText = "" // Store empty string
+                    
+                    do {
+                        try self.modelContext.save()
+                        print("💾 Saved empty transcription result with error state")
+                    } catch {
+                        print("❌ Error saving empty transcription state: \(error.localizedDescription)")
+                    }
                     return
                 }
                 
-                // Всегда сохраняем оригинальный результат
+                // Always save original result
                 print("💾 Saving regular transcription result")
                 
-                // Сохраняем только если текст не пустой
+                // Save only if text is not empty
                 self.record.transcriptionText = transcription
                 self.record.hasTranscription = true
                 do {
@@ -720,7 +748,7 @@ struct RecordDetailView: View {
         .store(in: &cancellables)
     }
     
-    // Функция для запуска суммаризации
+    // Function to start summarization
     private func startSummarization() {
         guard let transcriptionText = record.transcriptionText, // Can be either SRT or plain text
               !transcriptionText.isEmpty,
@@ -984,7 +1012,7 @@ struct RecordDetailView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
     
-    // Функция для запуска автоматического пайплайна
+    // Function to start automatic pipeline
     private func startAutomaticPipeline() {
         guard isAutomaticMode else { return }
         
@@ -994,7 +1022,7 @@ struct RecordDetailView: View {
         startTranscription()
     }
     
-    // Функция для запуска real-time транскрипции с промежуточными обновлениями
+    // Function to start real-time transcription with intermediate updates
     private func startRealTimeTranscription() {
         guard let fileURL = record.fileURL, !isTranscribing else { return }
         

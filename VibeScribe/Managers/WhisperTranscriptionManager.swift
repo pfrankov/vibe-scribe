@@ -573,7 +573,7 @@ class WhisperTranscriptionManager {
     }
 }
 
-// Extension для Data для удобства работы с multipart/form-data
+// Extension for Data for convenient work with multipart/form-data
 extension Data {
     mutating func append(_ string: String) {
         if let data = string.data(using: .utf8) {

@@ -8,7 +8,7 @@
 import SwiftUI
 import AppKit
 
-/// Нативный macOS PopUpButton, обернутый в SwiftUI
+/// Native macOS PopUpButton wrapped in SwiftUI
 struct ComboBoxView: NSViewRepresentable {
     var placeholder: String
     var options: [String]
@@ -19,7 +19,7 @@ struct ComboBoxView: NSViewRepresentable {
         popUpButton.target = context.coordinator
         popUpButton.action = #selector(Coordinator.selectionChanged(_:))
         
-        // Добавляем опцию для ввода своего значения
+        // Add option for entering custom value
         popUpButton.menu?.addItem(NSMenuItem.separator())
         
         let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
@@ -32,14 +32,14 @@ struct ComboBoxView: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: NSPopUpButton, context: Context) {
-        // Обновляем список опций
+        // Update options list
         nsView.removeAllItems()
         
         for option in options {
             nsView.addItem(withTitle: option)
         }
         
-        // Добавляем опцию для ввода своего значения
+        // Add option for entering custom value
         nsView.menu?.addItem(NSMenuItem.separator())
         
         let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
@@ -48,15 +48,15 @@ struct ComboBoxView: NSViewRepresentable {
         customItem.action = #selector(Coordinator.customOptionSelected(_:))
         nsView.menu?.addItem(customItem)
         
-        // Если выбранное значение есть в списке, выбираем его
+        // If selected value exists in list, select it
         if let index = options.firstIndex(of: selectedOption) {
             nsView.selectItem(at: index)
         } else if !selectedOption.isEmpty {
-            // Если значение не в списке, но не пустое, добавляем его временно и выбираем
+            // If value is not in list but not empty, add it temporarily and select
             nsView.insertItem(withTitle: selectedOption, at: 0)
             nsView.selectItem(at: 0)
         } else if !placeholder.isEmpty {
-            // Если значение пустое, но есть плейсхолдер, используем его
+            // If value is empty but placeholder exists, use it
             nsView.insertItem(withTitle: placeholder, at: 0)
             nsView.selectItem(at: 0)
             nsView.item(at: 0)?.isEnabled = false
@@ -77,7 +77,7 @@ struct ComboBoxView: NSViewRepresentable {
         @objc func selectionChanged(_ sender: NSPopUpButton) {
             guard let selectedTitle = sender.selectedItem?.title else { return }
             
-            // Не меняем значение, если выбран плейсхолдер
+            // Don't change value if placeholder is selected
             if selectedTitle == parent.placeholder {
                 return
             }
@@ -86,7 +86,7 @@ struct ComboBoxView: NSViewRepresentable {
         }
         
         @objc func customOptionSelected(_ sender: NSMenuItem) {
-            // Создаем диалоговое окно для ввода значения
+            // Create dialog window for value input
             let alert = NSAlert()
             alert.messageText = "Enter custom value"
             alert.addButton(withTitle: "OK")
@@ -98,7 +98,7 @@ struct ComboBoxView: NSViewRepresentable {
             
             alert.accessoryView = textField
             
-            // Показываем диалог и обрабатываем результат
+            // Show dialog and handle result
             if alert.runModal() == .alertFirstButtonReturn {
                 let customValue = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !customValue.isEmpty {
