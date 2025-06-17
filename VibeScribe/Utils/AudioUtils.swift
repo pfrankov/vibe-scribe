@@ -77,6 +77,149 @@ struct AudioUtils {
         }
     }
     
+    // MARK: - Audio Conversion
+    
+    /// Converts audio file to app's standard format (m4a)
+    /// - Parameters:
+    ///   - inputURL: URL of the input audio file
+    ///   - completion: Completion handler that returns the URL of the converted file or an error
+    static func convertAudioToStandardFormat(inputURL: URL, completion: @escaping (Result<URL, Error>) -> Void) {
+        Logger.info("Converting audio file to standard format: \(inputURL.lastPathComponent)", category: .audio)
+        
+        // Validate input file exists
+        guard FileManager.default.fileExists(atPath: inputURL.path) else {
+            completion(.failure(AudioUtilsError.fileNotFound("Input audio file not found")))
+            return
+        }
+        
+        let asset = AVURLAsset(url: inputURL)
+        
+        Task {
+            do {
+                // Check if file already has audio tracks
+                let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+                guard !audioTracks.isEmpty else {
+                    throw AudioUtilsError.trackLoadingFailed("No audio tracks found in file")
+                }
+                
+                // Generate unique output URL
+                let timestamp = Int(Date().timeIntervalSince1970)
+                let recordingsDir = try AudioUtils.getRecordingsDirectory()
+                let outputURL = recordingsDir.appendingPathComponent("imported_\(timestamp).m4a")
+                
+                // Remove existing file if it exists
+                if FileManager.default.fileExists(atPath: outputURL.path) {
+                    try FileManager.default.removeItem(at: outputURL)
+                }
+                
+                // Create export session
+                guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+                    throw AudioUtilsError.exportFailed("Could not create export session")
+                }
+                
+                exportSession.outputURL = outputURL
+                exportSession.outputFileType = .m4a
+                
+                // Perform the export
+                await exportSession.export()
+                
+                // Check export status
+                switch exportSession.status {
+                case .completed:
+                    Logger.info("Audio conversion completed successfully: \(outputURL.path)", category: .audio)
+                    completion(.success(outputURL))
+                case .failed:
+                    let error = exportSession.error ?? AudioUtilsError.exportFailed("Export session failed with unknown error")
+                    Logger.error("Audio conversion failed", error: error, category: .audio)
+                    completion(.failure(error))
+                case .cancelled:
+                    Logger.warning("Audio conversion cancelled", category: .audio)
+                    completion(.failure(AudioUtilsError.exportCancelled))
+                default:
+                    completion(.failure(AudioUtilsError.exportFailed("Export session ended with unexpected status: \(exportSession.status)")))
+                }
+                
+            } catch {
+                Logger.error("Error during audio conversion process", error: error, category: .audio)
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    /// Gets duration of audio file
+    /// - Parameter url: URL of the audio file
+    /// - Returns: Duration in seconds or 0 if unable to determine
+    static func getAudioDuration(url: URL) -> TimeInterval {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            Logger.warning("Audio file not found for duration calculation: \(url.path)", category: .audio)
+            return 0
+        }
+        
+        let asset = AVURLAsset(url: url)
+        
+        // Use the newer async API when possible, fallback to deprecated sync version
+        let duration: CMTime
+        if #available(macOS 13.0, *) {
+            // For newer versions, we'd use async load, but for simplicity keeping sync for now
+            duration = asset.duration
+        } else {
+            duration = asset.duration
+        }
+        
+        let durationSeconds = CMTimeGetSeconds(duration)
+        
+        // Validate duration is valid
+        guard durationSeconds.isFinite && durationSeconds > 0 else {
+            Logger.warning("Invalid duration for audio file: \(url.lastPathComponent)", category: .audio)
+            return 0
+        }
+        
+        return durationSeconds
+    }
+    
+    /// Validates if a file is a valid audio file
+    /// - Parameter url: URL of the file to validate
+    /// - Returns: True if the file contains valid audio tracks
+    static func isValidAudioFile(url: URL) async -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return false
+        }
+        
+        let asset = AVURLAsset(url: url)
+        
+        do {
+            let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+            return !audioTracks.isEmpty
+        } catch {
+            Logger.warning("Failed to validate audio file: \(url.lastPathComponent) - \(error.localizedDescription)", category: .audio)
+            return false
+        }
+    }
+    
+    /// Gets the directory for storing recordings
+    /// - Returns: URL to the recordings directory
+    /// - Throws: AudioUtilsError if unable to create or access the directory
+    static func getRecordingsDirectory() throws -> URL {
+        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw AudioUtilsError.exportFailed("Unable to access documents directory")
+        }
+        
+        let recordingsDirectory = documentsDirectory.appendingPathComponent("Recordings")
+        
+        // Create directory if it doesn't exist
+        if !FileManager.default.fileExists(atPath: recordingsDirectory.path) {
+            do {
+                try FileManager.default.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true, attributes: nil)
+                Logger.info("Created recordings directory: \(recordingsDirectory.path)", category: .audio)
+            } catch {
+                Logger.error("Failed to create recordings directory", error: error, category: .audio)
+                throw AudioUtilsError.exportFailed("Failed to create recordings directory: \(error.localizedDescription)")
+            }
+        }
+        
+        return recordingsDirectory
+    }
+    
     // MARK: - Private Methods
     
     private static func exportComposition(_ composition: AVMutableComposition, completion: @escaping (Result<URL, Error>) -> Void) async throws {

@@ -67,6 +67,7 @@ extension Logger {
         case network
         case data
         case security
+        case llm
         
         var osLog: OSLog {
             switch self {
@@ -77,6 +78,7 @@ extension Logger {
             case .network: return Logger.network
             case .data: return Logger.data
             case .security: return Logger.security
+            case .llm: return Logger.llm
             }
         }
     }

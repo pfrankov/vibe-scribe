@@ -952,6 +952,7 @@ struct RecordDetailView: View {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
             // Add API Key if provided
+            let maskedAPIKey = settings.openAIAPIKey.isEmpty ? "None" : SecurityUtils.maskAPIKey(settings.openAIAPIKey)
             if !settings.openAIAPIKey.isEmpty {
                 request.setValue("Bearer \(settings.openAIAPIKey)", forHTTPHeaderField: "Authorization")
             }
@@ -960,10 +961,19 @@ struct RecordDetailView: View {
             let requestBody: [String: Any] = [
                 "model": settings.openAIModel,
                 "messages": [
-                    ["role": "system", "content": "You are a helpful assistant."],
                     ["role": "user", "content": prompt]
                 ]
             ]
+            
+            // 🚀 LOG FULL REQUEST DETAILS
+            Logger.info("🤖 LLM API Request Details:", category: .llm)
+            Logger.info("📍 Endpoint: \(url.absoluteString)", category: .llm)
+            Logger.info("🔑 API Key: \(maskedAPIKey)", category: .llm) 
+            Logger.info("🧠 Model: \(settings.openAIModel)", category: .llm)
+            Logger.info("📜 User Prompt (Length: \(prompt.count) chars):", category: .llm)
+            Logger.info("═══════════════════════════════════════", category: .llm)
+            Logger.info(prompt, category: .llm)
+            Logger.info("═══════════════════════════════════════", category: .llm)
             
             do {
                 request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
@@ -975,11 +985,21 @@ struct RecordDetailView: View {
             // Send request
             URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error = error {
+                    Logger.error("❌ LLM API Network Error: \(error.localizedDescription)", category: .llm)
                     promise(.failure(error))
                     return
                 }
                 
+                // Log HTTP response details
+                if let httpResponse = response as? HTTPURLResponse {
+                    Logger.info("📡 LLM API HTTP Response Status: \(httpResponse.statusCode)", category: .llm)
+                    if httpResponse.statusCode >= 400 {
+                        Logger.error("❌ LLM API HTTP Error: \(httpResponse.statusCode)", category: .llm)
+                    }
+                }
+                
                 guard let data = data else {
+                    Logger.error("❌ No data received from LLM API", category: .llm)
                     promise(.failure(NSError(domain: "No data received", code: -1)))
                     return
                 }
@@ -991,14 +1011,34 @@ struct RecordDetailView: View {
                        let message = firstChoice["message"] as? [String: Any],
                        let content = message["content"] as? String {
                         
+                        // 🚀 LOG RESPONSE DETAILS
+                        Logger.info("✅ LLM API Response received:", category: .llm)
+                        Logger.info("📊 Response Length: \(content.count) chars", category: .llm)
+                        Logger.info("📝 Response Content:", category: .llm)
+                        Logger.info("═══════════════════════════════════════", category: .llm)
+                        Logger.info(content, category: .llm)
+                        Logger.info("═══════════════════════════════════════", category: .llm)
+                        
+                        // Log usage info if available
+                        if let usage = json["usage"] as? [String: Any] {
+                            let promptTokens = usage["prompt_tokens"] as? Int ?? 0
+                            let completionTokens = usage["completion_tokens"] as? Int ?? 0
+                            let totalTokens = usage["total_tokens"] as? Int ?? 0
+                            Logger.info("📈 Token Usage - Prompt: \(promptTokens), Completion: \(completionTokens), Total: \(totalTokens)", category: .llm)
+                        }
+                        
                         promise(.success(content))
                     } else {
-                        if let jsonStr = String(data: data, encoding: .utf8) {
-                            print("Unexpected response format: \(jsonStr)")
-                        }
+                        let jsonStr = String(data: data, encoding: .utf8) ?? "Invalid UTF-8 data"
+                        Logger.error("❌ LLM API unexpected response format:", category: .llm)
+                        Logger.error("Raw response: \(jsonStr)", category: .llm)
                         promise(.failure(NSError(domain: "Invalid response format", code: -1)))
                     }
                 } catch {
+                    Logger.error("❌ LLM API JSON parsing error: \(error.localizedDescription)", category: .llm)
+                    if let jsonStr = String(data: data, encoding: .utf8) {
+                        Logger.error("Raw response: \(jsonStr)", category: .llm)
+                    }
                     promise(.failure(error))
                 }
             }.resume()

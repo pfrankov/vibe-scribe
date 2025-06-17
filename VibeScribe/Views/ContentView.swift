@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var isShowingRecordingSheet = false
     @State private var isShowingSettings = false
     @State private var shouldScrollToSelectedRecord = false
+    @StateObject private var importManager = AudioFileImportManager()
+    @State private var isDragOver = false
 
     @Query(sort: \Record.date, order: .reverse) private var records: [Record]
 
@@ -111,6 +113,14 @@ struct ContentView: View {
             SettingsView()
                 .frame(width: 600, height: 500)
         }
+        .onDrop(of: ["public.file-url"], isTargeted: $isDragOver) { providers -> Bool in
+            handleDroppedFiles(providers: providers)
+        }
+        .overlay(
+            // Drag overlay
+            isDragOver || importManager.isImporting ? 
+            dragOverlay : nil
+        )
     }
     
     // MARK: - Subviews
@@ -229,6 +239,178 @@ struct ContentView: View {
             print("Record \(recordToDelete.name) deleted successfully.")
         } catch {
             print("Error deleting record: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Drag and Drop Methods
+    
+    private func handleDroppedFiles(providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        
+        Task {
+            do {
+                let urls = try await loadURLsFromProviders(providers)
+                
+                await MainActor.run {
+                    let supportedAudioFiles = AudioFileImportManager.filterSupportedAudioFiles(urls: urls)
+                    
+                    if !supportedAudioFiles.isEmpty {
+                        Logger.info("Processing \(supportedAudioFiles.count) dropped audio files", category: .audio)
+                        importManager.importAudioFiles(urls: supportedAudioFiles, modelContext: modelContext)
+                    } else {
+                        Logger.warning("No supported audio files found in dropped items", category: .audio)
+                        // Show user feedback for unsupported files
+                        showUnsupportedFilesAlert(totalCount: urls.count)
+                    }
+                }
+            } catch {
+                Logger.error("Failed to process dropped files", error: error, category: .general)
+            }
+        }
+        
+        return true
+    }
+    
+    /// Loads URLs from NSItemProviders using modern async/await
+    private func loadURLsFromProviders(_ providers: [NSItemProvider]) async throws -> [URL] {
+        return try await withThrowingTaskGroup(of: URL?.self) { group in
+            for provider in providers {
+                group.addTask {
+                    return try await self.loadURLFromProvider(provider)
+                }
+            }
+            
+            var urls: [URL] = []
+            for try await url in group {
+                if let url = url {
+                    urls.append(url)
+                }
+            }
+            return urls
+        }
+    }
+    
+    /// Loads a single URL from an NSItemProvider
+    private func loadURLFromProvider(_ provider: NSItemProvider) async throws -> URL? {
+        return try await withCheckedThrowingContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil),
+                      url.isFileURL else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                continuation.resume(returning: url)
+            }
+        }
+    }
+    
+    /// Shows alert for unsupported files
+    private func showUnsupportedFilesAlert(totalCount: Int) {
+        // Could be implemented to show user-friendly message
+        // For now, just log the information
+        Logger.info("Dropped \(totalCount) files but none were supported audio formats", category: .general)
+    }
+    
+    @ViewBuilder
+    private var dragOverlay: some View {
+        Rectangle()
+            .fill(Color.accentColor.opacity(0.1))
+            .overlay(
+                DragOverlayContent(
+                    isImporting: importManager.isImporting,
+                    importProgress: importManager.importProgress,
+                    hasError: importManager.error != nil
+                )
+            )
+            .animation(.easeInOut(duration: 0.3), value: isDragOver)
+            .animation(.easeInOut(duration: 0.3), value: importManager.isImporting)
+    }
+}
+
+// MARK: - Drag Overlay Content
+
+struct DragOverlayContent: View {
+    let isImporting: Bool
+    let importProgress: String
+    let hasError: Bool
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            if isImporting {
+                importingContent
+            } else if hasError {
+                errorContent
+            } else {
+                dropZoneContent
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+                .stroke(strokeColor, lineWidth: 2)
+        )
+    }
+    
+    @ViewBuilder
+    private var importingContent: some View {
+        ProgressView()
+            .scaleEffect(1.2)
+        
+        Text(importProgress)
+            .font(.headline)
+            .foregroundColor(.primary)
+            .multilineTextAlignment(.center)
+    }
+    
+    @ViewBuilder
+    private var errorContent: some View {
+        Image(systemName: "exclamationmark.triangle")
+            .font(.system(size: 48))
+            .foregroundColor(.orange)
+            .symbolRenderingMode(.hierarchical)
+        
+        Text("Import Error")
+            .font(.headline)
+            .foregroundColor(.primary)
+        
+        Text("Check file format and try again")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+    }
+    
+    @ViewBuilder
+    private var dropZoneContent: some View {
+        Image(systemName: "waveform.and.arrow.down")
+            .font(.system(size: 64))
+            .foregroundColor(.accentColor)
+            .symbolRenderingMode(.hierarchical)
+        
+        Text("Drop Audio Files Here")
+            .font(.title2)
+            .fontWeight(.semibold)
+            .foregroundColor(.primary)
+        
+        Text("Supported formats: MP3, WAV, M4A, AAC, OGG, FLAC")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+    }
+    
+    private var strokeColor: Color {
+        if hasError {
+            return .orange
+        } else if isImporting {
+            return .blue
+        } else {
+            return .accentColor
         }
     }
 }

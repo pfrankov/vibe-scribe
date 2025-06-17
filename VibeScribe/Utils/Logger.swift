@@ -28,6 +28,9 @@ struct Logger {
     /// Security-related operations
     static let security = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "VibeScribe", category: "Security")
     
+    /// LLM API interactions and prompt logging
+    static let llm = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "VibeScribe", category: "LLM")
+    
     // MARK: - Logging Methods
     
     /// Log debug information
@@ -149,4 +152,5 @@ extension OSLog {
     static let network = Logger.network
     static let data = Logger.data
     static let security = Logger.security
+    static let llm = Logger.llm
 } 
