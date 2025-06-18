@@ -2,13 +2,12 @@
 //  WhisperTranscriptionManager.swift
 //  VibeScribe
 //
-//  Created by System on 15.04.2025.
+//  Created by Pavel Frankov on 15.04.2025.
 //
 
 import Foundation
 import Combine
 import AVFoundation
-import EventSource
 
 // Error types for transcription process
 enum TranscriptionError: Error {
@@ -19,7 +18,7 @@ enum TranscriptionError: Error {
     case unknownError
     case dataParsingError(String)
     case streamingNotSupported
-    case eventSourceError(String)
+    case streamingError(String)
     
     var description: String {
         switch self {
@@ -37,8 +36,8 @@ enum TranscriptionError: Error {
             return "Data parsing error: \(message)"
         case .streamingNotSupported:
             return "Server doesn't support SSE streaming"
-        case .eventSourceError(let message):
-            return "EventSource error: \(message)"
+        case .streamingError(let message):
+            return "Streaming error: \(message)"
         }
     }
 }
@@ -58,15 +57,44 @@ struct TranscriptionUpdate: Sendable {
 
 // MARK: - WhisperTranscriptionManager
 
-// Manager class for working with Whisper API with SSE support via EventSource
-class WhisperTranscriptionManager {
+// Manager class for working with Whisper API with custom SSE support
+class WhisperTranscriptionManager: NSObject {
     static let shared = WhisperTranscriptionManager()
     
     // Cache for server SSE support to avoid repeated checks
     private var serverSupportsSSE: [String: Bool] = [:]
     private let cacheQueue = DispatchQueue(label: "whisper.cache.queue", attributes: .concurrent)
     
-    private init() {}
+    // Custom URLSession with no timeout for long transcription tasks
+    private var urlSession: URLSession!
+    
+    // SSE streaming support
+    private var streamingCompletions: [Int: (Result<String, TranscriptionError>) -> Void] = [:]
+    private var streamingSubjects: [Int: PassthroughSubject<TranscriptionUpdate, TranscriptionError>] = [:]
+    private var streamingBuffers: [Int: String] = [:]
+    private var streamingTexts: [Int: String] = [:]
+    
+    // Retry support  
+    private var streamingRetryInfo: [Int: StreamingRetryInfo] = [:]
+    
+    // Struct to hold retry information
+    private struct StreamingRetryInfo {
+        let audioURL: URL
+        let serverURL: URL  
+        let apiKey: String
+        let model: String
+        let subject: PassthroughSubject<TranscriptionUpdate, TranscriptionError>
+        let maxRetries: Int
+        let currentRetry: Int
+    }
+    
+    override init() {
+        super.init()
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 0  // No timeout
+        config.timeoutIntervalForResource = 0  // No timeout
+        self.urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    }
     
     // MARK: - Main API Methods
     
@@ -113,7 +141,7 @@ class WhisperTranscriptionManager {
         .eraseToAnyPublisher()
     }
     
-    // Real-time streaming method with intermediate updates using EventSource
+    // Real-time streaming method with intermediate updates using custom SSE
     func transcribeAudioRealTime(audioURL: URL, settings: AppSettings) -> AnyPublisher<TranscriptionUpdate, TranscriptionError> {
         print("⚡ Starting REAL-TIME streaming transcription for: \(audioURL.lastPathComponent)")
         
@@ -133,71 +161,14 @@ class WhisperTranscriptionManager {
         let subject = PassthroughSubject<TranscriptionUpdate, TranscriptionError>()
         
         Task {
-            do {
-                let request = try self.buildStreamingRequest(
-                    url: serverURL,
-                    audioURL: audioURL,
-                    apiKey: settings.whisperAPIKey,
-                    model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
-                )
-                
-                // Use EventSource for clean SSE handling
-                let eventSource = EventSource(mode: .dataOnly)
-                let dataTask = await eventSource.dataTask(for: request)
-                
-                var responseText = ""
-                
-                for await event in await dataTask.events() {
-                    switch event {
-                    case .open:
-                        print("✅ Real-time SSE connection established")
-                        
-                    case .event(let sseEvent):
-                        if let eventData = sseEvent.data {
-                            print("📨 Real-time SSE Event: '\(eventData)'")
-                            
-                            // Parse the streaming data
-                            if let update = self.parseStreamingData(eventData) {
-                                // Accumulate text for final result
-                                if !update.text.isEmpty {
-                                    responseText += (responseText.isEmpty ? "" : " ") + update.text
-                                    print("🔄 Real-time accumulated: \(responseText.count) chars")
-                                }
-                                
-                                // Send each update for real-time display
-                                subject.send(update)
-                                
-                                // Don't cancel on partial updates - wait for connection to close
-                                // Only cancel if we get explicit final signal
-                                if !update.isPartial {
-                                    print("✅ Real-time transcription completed: \(update.text)")
-                                    await dataTask.cancel()
-                                    subject.send(completion: .finished)
-                                    return
-                                }
-                            }
-                        }
-                        
-                    case .error(let error):
-                        print("❌ Real-time SSE error: \(error.localizedDescription)")
-                        subject.send(completion: .failure(.eventSourceError(error.localizedDescription)))
-                        return
-                        
-                    case .closed:
-                        print("📡 Real-time SSE connection closed")
-                        if !responseText.isEmpty {
-                            let finalUpdate = TranscriptionUpdate(isPartial: false, text: responseText)
-                            subject.send(finalUpdate)
-                        }
-                        subject.send(completion: .finished)
-                        return
-                    }
-                }
-                
-            } catch {
-                print("❌ Real-time transcription setup failed: \(error.localizedDescription)")
-                subject.send(completion: .failure(.networkError(error)))
-            }
+            await self.startStreamingWithRetry(
+                audioURL: audioURL,
+                serverURL: serverURL,
+                apiKey: settings.whisperAPIKey,
+                model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel,
+                subject: subject,
+                maxRetries: 3
+            )
         }
         
         return subject.eraseToAnyPublisher()
@@ -205,7 +176,7 @@ class WhisperTranscriptionManager {
     
     // MARK: - Private Methods
     
-    // SSE streaming transcription using EventSource
+    // SSE streaming transcription using custom SSE implementation
     private func transcribeAudioStreaming(
         audioURL: URL,
         whisperBaseURL: String,
@@ -236,64 +207,18 @@ class WhisperTranscriptionManager {
                         model: model
                     )
                     
-                    // Use EventSource for clean SSE handling
-                    let eventSource = EventSource(mode: .dataOnly)
-                    let dataTask = await eventSource.dataTask(for: request)
+                    // Use custom SSE implementation with URLSessionDataDelegate
+                    let dataTask = self.urlSession.dataTask(with: request)
+                    let taskId = dataTask.taskIdentifier
                     
-                    var responseText = ""
-                    
-                    for await event in await dataTask.events() {
-                        switch event {
-                        case .open:
-                            print("✅ SSE streaming connection established successfully")
-                            // Cache that this server supports SSE
-                            self.setCachedSSESupport(for: whisperBaseURL, supports: true)
-                            
-                        case .event(let sseEvent):
-                            if let eventData = sseEvent.data {
-                                print("📨 SSE Event: '\(eventData)'")
-                                
-                                // Parse the streaming data
-                                if let update = self.parseStreamingData(eventData) {
-                                    // Accumulate all text instead of replacing
-                                    if !update.text.isEmpty {
-                                        responseText += (responseText.isEmpty ? "" : " ") + update.text
-                                        print("🔄 Accumulated text: \(responseText.count) chars, latest: \(update.text.prefix(50))...")
-                                    }
-                                    
-                                    // Don't close on individual chunks - let connection close naturally
-                                    // if !update.isPartial {
-                                    //     print("✅ Streaming transcription completed")
-                                    //     await dataTask.cancel()
-                                    //     promise(.success(responseText))
-                                    //     return
-                                    // }
-                                }
-                            }
-                            
-                        case .error(let error):
-                            print("❌ SSE streaming error: \(error.localizedDescription)")
-                            
-                            // Check if this is a "streaming not supported" error
-                            if error.localizedDescription.contains("text/plain") || 
-                               error.localizedDescription.contains("application/json") {
-                                print("⚠️ Server returned non-SSE content type, falling back")
-                                promise(.failure(.streamingNotSupported))
-                            } else {
-                                promise(.failure(.eventSourceError(error.localizedDescription)))
-                            }
-                            return
-                            
-                        case .closed:
-                            print("📡 SSE connection closed")
-                            if !responseText.isEmpty {
-                                promise(.success(responseText))
-                            } else {
-                                promise(.failure(.streamingNotSupported))
-                            }
-                            return
-                        }
+                    // Store the completion handler for this task
+                    self.streamingCompletions[taskId] = { result in
+                        promise(result)
                     }
+                    
+                    // Start the task
+                    dataTask.resume()
+                    print("✅ SSE streaming started, task ID: \(taskId)")
                     
                 } catch {
                     print("❌ Streaming transcription setup failed: \(error.localizedDescription)")
@@ -303,6 +228,8 @@ class WhisperTranscriptionManager {
         }
         .eraseToAnyPublisher()
     }
+    
+
     
     // Regular (non-streaming) transcription method
     private func transcribeAudioRegular(audioURL: URL, whisperBaseURL: String, apiKey: String = "", model: String = "whisper-1", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
@@ -369,7 +296,7 @@ class WhisperTranscriptionManager {
             print("Request headers: \(request.allHTTPHeaderFields ?? [:])")
             print("Request body size: \(ByteCountFormatter.string(fromByteCount: Int64(body.count), countStyle: .file))")
             
-            return URLSession.shared.dataTaskPublisher(for: request)
+            return urlSession.dataTaskPublisher(for: request)
                 .tryMap { data, response -> Data in
                     guard let httpResponse = response as? HTTPURLResponse else {
                         print("Error: Invalid response type")
@@ -571,6 +498,70 @@ class WhisperTranscriptionManager {
             print("📋 Cached SSE support for \(server): \(supports)")
         }
     }
+    
+    // MARK: - Retry Logic for Streaming
+    
+    private func startStreamingWithRetry(
+        audioURL: URL,
+        serverURL: URL,
+        apiKey: String,
+        model: String,
+        subject: PassthroughSubject<TranscriptionUpdate, TranscriptionError>,
+        maxRetries: Int,
+        currentRetry: Int = 0
+    ) async {
+        do {
+            let request = try self.buildStreamingRequest(
+                url: serverURL,
+                audioURL: audioURL,
+                apiKey: apiKey,
+                model: model
+            )
+            
+            // Use custom SSE implementation with URLSessionDataDelegate
+            let dataTask = self.urlSession.dataTask(with: request)
+            let taskId = dataTask.taskIdentifier
+            
+            // Store the subject for this task
+            self.streamingSubjects[taskId] = subject
+            
+            // Store retry info for this task
+            self.streamingRetryInfo[taskId] = StreamingRetryInfo(
+                audioURL: audioURL,
+                serverURL: serverURL,
+                apiKey: apiKey,
+                model: model,
+                subject: subject,
+                maxRetries: maxRetries,
+                currentRetry: currentRetry
+            )
+            
+            // Start the task
+            dataTask.resume()
+            print("✅ Real-time SSE streaming started, task ID: \(taskId), retry: \(currentRetry)/\(maxRetries)")
+            
+        } catch {
+            print("❌ Real-time transcription setup failed: \(error.localizedDescription)")
+            if currentRetry < maxRetries {
+                let delay = Double(currentRetry + 1) * 2.0 // 2, 4, 6 seconds
+                print("🔄 Retrying in \(delay) seconds... (\(currentRetry + 1)/\(maxRetries))")
+                
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                await startStreamingWithRetry(
+                    audioURL: audioURL,
+                    serverURL: serverURL,
+                    apiKey: apiKey,
+                    model: model,
+                    subject: subject,
+                    maxRetries: maxRetries,
+                    currentRetry: currentRetry + 1
+                )
+            } else {
+                print("❌ All retries exhausted, failing transcription")
+                subject.send(completion: .failure(.networkError(error)))
+            }
+        }
+    }
 }
 
 // Extension for Data for convenient work with multipart/form-data
@@ -579,5 +570,182 @@ extension Data {
         if let data = string.data(using: .utf8) {
             append(data)
         }
+    }
+}
+
+// MARK: - URLSessionDataDelegate
+extension WhisperTranscriptionManager: URLSessionDataDelegate {
+    
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let taskId = dataTask.taskIdentifier as Int? else { return }
+        
+        // Convert data to string
+        guard let sseData = String(data: data, encoding: .utf8) else { return }
+        
+        // Append to buffer
+        if streamingBuffers[taskId] == nil {
+            streamingBuffers[taskId] = ""
+        }
+        streamingBuffers[taskId]! += sseData
+        
+        // Process SSE events
+        if let events = parseSSEBuffer(streamingBuffers[taskId]!) {
+            // Update buffer with remaining data
+            streamingBuffers[taskId] = events.remainder
+            
+            // Process each complete event
+            for eventData in events.events {
+                print("📨 SSE Event: '\(eventData)'")
+                
+                if let update = parseStreamingData(eventData) {
+                    // Send update to subject for real-time display
+                    if let subject = streamingSubjects[taskId] {
+                        subject.send(update)
+                    }
+                    
+                    // Accumulate text for completion handlers
+                    if streamingTexts[taskId] == nil {
+                        streamingTexts[taskId] = ""
+                    }
+                    if !update.text.isEmpty {
+                        streamingTexts[taskId]! += (streamingTexts[taskId]!.isEmpty ? "" : " ") + update.text
+                        print("🔄 Accumulated: \(streamingTexts[taskId]!.count) chars")
+                    }
+                }
+            }
+        }
+    }
+    
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let taskId = task.taskIdentifier as Int? else { return }
+        
+        if let error = error {
+            print("❌ SSE task \(taskId) completed with error: \(error.localizedDescription)")
+            
+            // Check if we should retry this connection
+            if let retryInfo = streamingRetryInfo[taskId], 
+               retryInfo.currentRetry < retryInfo.maxRetries {
+                
+                let nextRetry = retryInfo.currentRetry + 1
+                let delay = Double(nextRetry) * 2.0 // 2, 4, 6 seconds
+                print("🔄 Connection lost, retrying in \(delay) seconds... (\(nextRetry)/\(retryInfo.maxRetries))")
+                
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    await startStreamingWithRetry(
+                        audioURL: retryInfo.audioURL,
+                        serverURL: retryInfo.serverURL,
+                        apiKey: retryInfo.apiKey,
+                        model: retryInfo.model,
+                        subject: retryInfo.subject,
+                        maxRetries: retryInfo.maxRetries,
+                        currentRetry: nextRetry
+                    )
+                }
+                
+                // Only cleanup buffers for this attempt, keep subject/completion for retry
+                streamingBuffers.removeValue(forKey: taskId)
+                streamingTexts.removeValue(forKey: taskId)
+                streamingRetryInfo.removeValue(forKey: taskId)
+                return
+            }
+            
+            // No more retries, notify about failure
+            if let subject = streamingSubjects[taskId] {
+                subject.send(completion: .failure(.streamingError(error.localizedDescription)))
+            }
+            
+            if let completion = streamingCompletions[taskId] {
+                completion(.failure(.streamingError(error.localizedDescription)))
+            }
+        } else {
+            print("📡 SSE task \(taskId) completed successfully")
+            
+            // Process any remaining buffer content (last chunk might be here!)
+            if let buffer = streamingBuffers[taskId], !buffer.isEmpty {
+                print("🔍 Processing final buffer content: '\(buffer)'")
+                
+                // Parse any remaining SSE data in buffer
+                let lines = buffer.components(separatedBy: "\n")
+                for line in lines {
+                    if line.hasPrefix("data: ") {
+                        let eventData = String(line.dropFirst(6)) // Remove "data: " prefix
+                        print("📨 Final SSE Event: '\(eventData)'")
+                        
+                        if let update = parseStreamingData(eventData) {
+                            // Send update to subject for real-time display
+                            if let subject = streamingSubjects[taskId] {
+                                subject.send(update)
+                            }
+                            
+                            // Accumulate text for completion handlers
+                            if streamingTexts[taskId] == nil {
+                                streamingTexts[taskId] = ""
+                            }
+                            if !update.text.isEmpty {
+                                streamingTexts[taskId]! += (streamingTexts[taskId]!.isEmpty ? "" : " ") + update.text
+                                print("🔄 Final accumulated: \(streamingTexts[taskId]!.count) chars")
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Send final accumulated text
+            let finalText = streamingTexts[taskId] ?? ""
+            
+            if let subject = streamingSubjects[taskId] {
+                if !finalText.isEmpty {
+                    let finalUpdate = TranscriptionUpdate(isPartial: false, text: finalText)
+                    subject.send(finalUpdate)
+                }
+                subject.send(completion: .finished)
+            }
+            
+            if let completion = streamingCompletions[taskId] {
+                if !finalText.isEmpty {
+                    completion(.success(finalText))
+                } else {
+                    completion(.failure(.streamingNotSupported))
+                }
+            }
+        }
+        
+        // Clean up
+        streamingCompletions.removeValue(forKey: taskId)
+        streamingSubjects.removeValue(forKey: taskId)
+        streamingBuffers.removeValue(forKey: taskId)
+        streamingTexts.removeValue(forKey: taskId)
+        streamingRetryInfo.removeValue(forKey: taskId)
+    }
+    
+    // Parse SSE buffer and extract complete events
+    private func parseSSEBuffer(_ buffer: String) -> (events: [String], remainder: String)? {
+        var events: [String] = []
+        var remainder = buffer
+        
+        // Split by double newlines (SSE event separator)
+        let eventBlocks = buffer.components(separatedBy: "\n\n")
+        
+        // Process all complete events (all but the last block)
+        for i in 0..<eventBlocks.count - 1 {
+            let block = eventBlocks[i]
+            
+            // Extract data from SSE block
+            let lines = block.components(separatedBy: "\n")
+            for line in lines {
+                if line.hasPrefix("data: ") {
+                    let eventData = String(line.dropFirst(6)) // Remove "data: " prefix
+                    events.append(eventData)
+                }
+            }
+        }
+        
+        // Keep the last block as remainder (might be incomplete)
+        if let lastBlock = eventBlocks.last {
+            remainder = lastBlock
+        }
+        
+        return events.isEmpty ? nil : (events: events, remainder: remainder)
     }
 } 

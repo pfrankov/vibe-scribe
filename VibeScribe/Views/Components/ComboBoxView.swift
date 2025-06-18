@@ -2,7 +2,7 @@
 //  ComboBoxView.swift
 //  VibeScribe
 //
-//  Created by System on 16.04.2025.
+//  Created by Pavel Frankov on 16.04.2025.
 //
 
 import SwiftUI

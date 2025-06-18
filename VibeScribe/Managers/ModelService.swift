@@ -2,7 +2,7 @@
 //  ModelService.swift
 //  VibeScribe
 //
-//  Created by System on 14.04.2025.
+//  Created by Pavel Frankov on 14.04.2025.
 //
 
 import Foundation

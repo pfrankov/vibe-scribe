@@ -2,15 +2,11 @@
 //  AudioRecorderManager.swift
 //  VibeScribe
 //
-//  Created by System on 13.04.2025.
+//  Created by Pavel Frankov on 13.04.2025.
 //
 
 import Foundation
 import AVFoundation
-
-#if os(macOS)
-import AVKit // Make sure we have AVKit for AVCaptureDevice on macOS
-#endif
 
 // --- Audio Recorder Logic --- 
 class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate {
@@ -158,9 +154,7 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
             // Recording failed to start, even though setup was successful
             print("Error: recorder.record() returned false.")
             self.error = NSError(domain: "AudioRecorderError", code: 7, userInfo: [NSLocalizedDescriptionKey: "Failed to start recording after setup."])
-            isRecording = false
-            // Clean up recorder instance if start failed? Maybe not necessary here, handled by stop/cancel.
-            // audioRecorder = nil 
+            isRecording = false 
         }
     }
 

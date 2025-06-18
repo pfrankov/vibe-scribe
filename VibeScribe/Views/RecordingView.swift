@@ -2,12 +2,11 @@
 //  RecordingView.swift
 //  VibeScribe
 //
-//  Created by System on 13.04.2025.
+//  Created by Pavel Frankov on 13.04.2025.
 //
 
 import SwiftUI
 import SwiftData
-import ScreenCaptureKit
 
 // --- Updated Recording View --- 
 struct RecordingView: View {

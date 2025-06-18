@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  VibeScribe
 //
-//  Created by System on 13.04.2025.
+//  Created by Pavel Frankov on 13.04.2025.
 //
 
 import SwiftUI
@@ -313,8 +313,6 @@ struct ContentView: View {
     
     /// Shows alert for unsupported files
     private func showUnsupportedFilesAlert(totalCount: Int) {
-        // Could be implemented to show user-friendly message
-        // For now, just log the information
         Logger.info("Dropped \(totalCount) files but none were supported audio formats", category: .general)
     }
     

@@ -2,7 +2,7 @@
 //  SystemAudioRecorderManager.swift
 //  VibeScribe
 //
-//  Created by Your Name on \(Date()) // Or replace with actual logic if needed
+//  Created by Pavel Frankov on 15.04.2025.
 //
 
 import Foundation

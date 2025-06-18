@@ -2,7 +2,7 @@
 //  CombinedAudioRecorderManager.swift
 //  VibeScribe
 //
-//  Created by System on 15.04.2025.
+//  Created by Pavel Frankov on 15.04.2025.
 //
 
 import Foundation

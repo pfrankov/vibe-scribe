@@ -2,7 +2,7 @@
 //  AudioFileImportManager.swift
 //  VibeScribe
 //
-//  Created by System on 13.04.2025.
+//  Created by Pavel Frankov on 13.04.2025.
 //
 
 import Foundation

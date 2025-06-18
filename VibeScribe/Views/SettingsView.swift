@@ -2,7 +2,7 @@
 //  SettingsView.swift
 //  VibeScribe
 //
-//  Created by System on 13.04.2025.
+//  Created by Pavel Frankov on 13.04.2025.
 //
 
 import SwiftUI
@@ -368,21 +368,21 @@ struct SettingsView: View {
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("Final summary prompt")
+            Text("Prompt")
                 .font(.system(size: UIConstants.fontSize))
             
             styledTextEditor(
                 text: Binding(
-                    get: { settings.summaryPrompt },
+                    get: { settings.chunkPrompt },
                     set: { newValue in
-                        settings.summaryPrompt = newValue
+                        settings.chunkPrompt = newValue
                         trySave()
                     }
                 ),
-                focusField: .summaryPromptEditor
+                focusField: .chunkPromptEditor
             )
             
-            captionText("Use {transcription} as a placeholder for the text to be processed.")
+            captionText("Use {transcription} as a placeholder for the individual chunk text.")
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
@@ -404,21 +404,21 @@ struct SettingsView: View {
         
         if settings.useChunking {
             VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-                Text("Prompt for individual chunks")
+                Text("Final summary prompt")
                     .font(.system(size: UIConstants.fontSize))
                 
                 styledTextEditor(
                     text: Binding(
-                        get: { settings.chunkPrompt },
+                        get: { settings.summaryPrompt },
                         set: { newValue in
-                            settings.chunkPrompt = newValue
+                            settings.summaryPrompt = newValue
                             trySave()
                         }
                     ),
-                    focusField: .chunkPromptEditor
+                    focusField: .summaryPromptEditor
                 )
                 
-                captionText("Use {transcription} as a placeholder for the individual chunk text.")
+                captionText("Use {transcription} as a placeholder for the text to be processed.")
             }
             
             VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {

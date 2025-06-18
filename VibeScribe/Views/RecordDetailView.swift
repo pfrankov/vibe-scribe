@@ -2,7 +2,7 @@
 //  RecordDetailView.swift
 //  VibeScribe
 //
-//  Created by System on 13.04.2025.
+//  Created by Pavel Frankov on 13.04.2025.
 //
 
 import SwiftUI
@@ -50,10 +50,12 @@ struct RecordDetailView: View {
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
         print("🔍 transcriptionText computed - record.transcriptionText: '\(record.transcriptionText?.prefix(50) ?? "nil")'")
+        print("🔍 transcriptionText computed - record.transcriptionText FULL LENGTH: \(record.transcriptionText?.count ?? 0)")
         print("🔍 transcriptionText computed - record.hasTranscription: \(record.hasTranscription)")
         
         if let text = record.transcriptionText, !text.isEmpty {
             print("🔍 transcriptionText computed - returning actual text: '\(text.prefix(50))'")
+            print("🔍 transcriptionText computed - returning actual text FULL LENGTH: \(text.count)")
             return text
         } else if record.hasTranscription && record.transcriptionText != nil {
             // This means transcription was attempted but resulted in empty text
@@ -536,6 +538,7 @@ struct RecordDetailView: View {
                         self.record.hasTranscription = true
                         
                         print("🔍 BEFORE SAVE - record.transcriptionText: '\(self.record.transcriptionText?.prefix(100) ?? "nil")'")
+                        print("🔍 BEFORE SAVE - record.transcriptionText FULL LENGTH: \(self.record.transcriptionText?.count ?? 0)")
                         print("🔍 BEFORE SAVE - record.hasTranscription: \(self.record.hasTranscription)")
                         
                         do {
@@ -544,6 +547,7 @@ struct RecordDetailView: View {
                             
                             // Verify what was actually saved
                             print("🔍 AFTER SAVE - record.transcriptionText: '\(self.record.transcriptionText?.prefix(100) ?? "nil")'")
+                            print("🔍 AFTER SAVE - record.transcriptionText FULL LENGTH: \(self.record.transcriptionText?.count ?? 0)")
                             print("🔍 AFTER SAVE - record.hasTranscription: \(self.record.hasTranscription)")
                             print("🔍 AFTER SAVE - transcriptionText computed property: '\(self.transcriptionText.prefix(100))'")
                         } catch {
@@ -609,9 +613,9 @@ struct RecordDetailView: View {
                     print("🧹 Cleaned text length: \(cleanText.count), content: '\(cleanText.prefix(100))'")
                     
                     if !cleanText.isEmpty && cleanText.count > 5 {
-                        // 1. Update full text (this is what we'll save)
-                        self.sseFullText = cleanText
-                        print("💾 Updated full text: \(self.sseFullText.count) characters")
+                        // 1. Accumulate full text (this is what we'll save)
+                        self.sseFullText += cleanText
+                        print("💾 Accumulated full text: \(self.sseFullText.count) characters")
                         
                         // 2. For UI preview, extract last few words as a chunk
                         let words = cleanText.split(separator: " ")
@@ -645,12 +649,12 @@ struct RecordDetailView: View {
                     print("✅ Final SSE transcription chunk received: \(update.text.count) characters")
                     print("📝 Final chunk preview: \(update.text.prefix(100))...")
                     
-                    // This is the final chunk - update our full text
+                    // This is the final chunk - it contains complete transcription
                     let cleanText = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !cleanText.isEmpty {
-                        // Update full text with final result
+                        // Final chunk contains complete transcription, so replace
                         self.sseFullText = cleanText
-                        print("💾 Updated full text with final chunk: \(self.sseFullText.count) characters")
+                        print("💾 Set complete transcription from final chunk: \(self.sseFullText.count) characters")
                         
                         // Also add final preview chunk for UI
                         if cleanText.count > 5 {
@@ -885,7 +889,7 @@ struct RecordDetailView: View {
     // Process summary as single text (no chunking)
     private func processSummaryAsSingleText(_ text: String) {
         // Use the summary prompt directly for single text
-        let prompt = settings.summaryPrompt.replacingOccurrences(of: "{transcription}", with: text)
+        let prompt = settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: text)
         
         callOpenAIAPI(prompt: prompt, url: settings.openAIBaseURL).sink(
             receiveCompletion: { completion in
@@ -949,6 +953,7 @@ struct RecordDetailView: View {
             
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
+            request.timeoutInterval = 0  // No timeout for LLM requests
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
             // Add API Key if provided
@@ -982,8 +987,13 @@ struct RecordDetailView: View {
                 return
             }
             
-            // Send request
-            URLSession.shared.dataTask(with: request) { data, response, error in
+            // Send request with custom session that has no timeout
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 0
+            config.timeoutIntervalForResource = 0
+            let session = URLSession(configuration: config)
+            
+            session.dataTask(with: request) { data, response, error in
                 if let error = error {
                     Logger.error("❌ LLM API Network Error: \(error.localizedDescription)", category: .llm)
                     promise(.failure(error))
@@ -1106,8 +1116,6 @@ struct RecordDetailView: View {
             receiveValue: { update in
                 if update.isPartial {
                     print("🔄 Partial update: \(update.text.prefix(50))...")
-                    // You could update UI here to show partial results
-                    // For now, just logging
                 } else {
                     print("✅ Final transcription update: \(update.text.count) characters")
                     
