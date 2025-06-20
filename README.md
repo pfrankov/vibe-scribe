@@ -1,5 +1,8 @@
 # VibeScribe
-VibeScribe is a macOS menu bar application for recording, transcribing, and summarizing audio.
+VibeScribe is a macOS application for recording, transcribing, and summarizing audio.
+<img width="700" alt="screenshot" src="https://github.com/user-attachments/assets/53b42ce6-f0d6-405e-b5a1-b3b19fc56c90" />
+
+
 
 ## Features
 - Records audio from your microphone
