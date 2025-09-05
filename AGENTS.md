@@ -14,7 +14,7 @@
 - Swift 5+, 4‑space indentation, no trailing whitespace. Prefer SwiftUI idioms.
 - Types: PascalCase (`AudioRecorderManager`), methods/properties: lowerCamelCase, constants: lowerCamelCase with `let`.
 - Files match primary type (`SettingsView.swift`, `WhisperTranscriptionManager.swift`).
-- Use the existing logging helpers in `Utils/Logger.swift` or `Utils/DebugLogger.swift` instead of `print`.
+- Use the centralized logging helpers in `Utils/Logger.swift` instead of `print`.
 
 ## Testing Guidelines
 - Framework: XCTest. Place tests under `<ProjectName>Tests/` mirroring source paths (e.g., `VibeScribeTests/Managers/...`).

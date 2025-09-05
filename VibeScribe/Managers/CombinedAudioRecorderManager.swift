@@ -106,7 +106,15 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
             if hasPermission {
                 Logger.info("System audio permission available - starting system audio recording", category: .audio)
                 let timestamp = Int(Date().timeIntervalSince1970)
-                let recordingsDir = getRecordingsDirectory()
+                let recordingsDir: URL
+                if let dir = try? AudioUtils.getRecordingsDirectory() {
+                    recordingsDir = dir
+                } else {
+                    let fm = FileManager.default
+                    let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+                    let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
+                    recordingsDir = docs.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
+                }
                 let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp).caf")
                 await MainActor.run {
                     self.systemAudioOutputURL = sysURL
@@ -195,13 +203,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         systemAudioOutputURL = nil
     }
     
-    private func getRecordingsDirectory() -> URL {
-        if let url = try? AudioUtils.getRecordingsDirectory() { return url }
-        let fm = FileManager.default
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-        return docs.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
-    }
+    // Removed redundant local directory helper; use central AudioUtils.getRecordingsDirectory()
     
     private func cleanupTemporaryFiles(urls: [URL]) {
         for url in urls {

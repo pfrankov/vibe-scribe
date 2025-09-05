@@ -99,10 +99,8 @@ class ModelService: ObservableObject {
             request.setValue("VibeScribe/1.0", forHTTPHeaderField: "User-Agent")
             
             if !apiKey.isEmpty {
-                // Validate API key format to prevent header injection
-                let cleanAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: "\n", with: "")
-                    .replacingOccurrences(of: "\r", with: "")
+                // Sanitize API key to prevent header injection
+                let cleanAPIKey = SecurityUtils.sanitizeAPIKey(apiKey)
                 request.setValue("Bearer \(cleanAPIKey)", forHTTPHeaderField: "Authorization")
             }
             

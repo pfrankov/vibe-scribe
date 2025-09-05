@@ -163,7 +163,7 @@ class AudioFileImportManager: ObservableObject {
         let convertedURL = try await convertToStandardFormat(url: url)
         
         // Get duration
-        let duration = AudioUtils.getAudioDuration(url: convertedURL)
+        let duration = await AudioUtils.getAudioDuration(url: convertedURL)
         
         // Validate duration is reasonable
         guard duration > 0 else {

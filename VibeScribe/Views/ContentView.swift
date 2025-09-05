@@ -114,7 +114,11 @@ struct ContentView: View {
                 .frame(width: 600, height: 500)
         }
         .onDrop(of: ["public.file-url"], isTargeted: $isDragOver) { providers -> Bool in
-            handleDroppedFiles(providers: providers)
+            // Process provider objects on the main actor to avoid Sendable warnings
+            Task { @MainActor in
+                _ = handleDroppedFiles(providers: providers)
+            }
+            return true
         }
         .overlay(
             // Drag overlay
@@ -272,22 +276,15 @@ struct ContentView: View {
     }
     
     /// Loads URLs from NSItemProviders using modern async/await
+    @MainActor
     private func loadURLsFromProviders(_ providers: [NSItemProvider]) async throws -> [URL] {
-        return try await withThrowingTaskGroup(of: URL?.self) { group in
-            for provider in providers {
-                group.addTask {
-                    return try await self.loadURLFromProvider(provider)
-                }
+        var urls: [URL] = []
+        for provider in providers {
+            if let url = try await self.loadURLFromProvider(provider) {
+                urls.append(url)
             }
-            
-            var urls: [URL] = []
-            for try await url in group {
-                if let url = url {
-                    urls.append(url)
-                }
-            }
-            return urls
         }
+        return urls
     }
     
     /// Loads a single URL from an NSItemProvider

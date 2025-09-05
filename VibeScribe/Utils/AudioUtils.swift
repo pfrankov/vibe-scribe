@@ -7,6 +7,7 @@
 
 import Foundation
 import AVFoundation
+import UniformTypeIdentifiers
 
 struct AudioUtils {
     
@@ -112,31 +113,17 @@ struct AudioUtils {
                     try FileManager.default.removeItem(at: outputURL)
                 }
                 
-                // Create export session
+                // Create export session and perform export using modern API (macOS 15+)
                 guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
                     throw AudioUtilsError.exportFailed("Could not create export session")
                 }
-                
-                exportSession.outputURL = outputURL
-                exportSession.outputFileType = .m4a
-                
-                // Perform the export
-                await exportSession.export()
-                
-                // Check export status
-                switch exportSession.status {
-                case .completed:
+                do {
+                    try await exportSession.export(to: outputURL, as: .m4a)
                     Logger.info("Audio conversion completed successfully: \(outputURL.path)", category: .audio)
                     completion(.success(outputURL))
-                case .failed:
-                    let error = exportSession.error ?? AudioUtilsError.exportFailed("Export session failed with unknown error")
+                } catch {
                     Logger.error("Audio conversion failed", error: error, category: .audio)
                     completion(.failure(error))
-                case .cancelled:
-                    Logger.warning("Audio conversion cancelled", category: .audio)
-                    completion(.failure(AudioUtilsError.exportCancelled))
-                default:
-                    completion(.failure(AudioUtilsError.exportFailed("Export session ended with unexpected status: \(exportSession.status)")))
                 }
                 
             } catch {
@@ -149,7 +136,7 @@ struct AudioUtils {
     /// Gets duration of audio file
     /// - Parameter url: URL of the audio file
     /// - Returns: Duration in seconds or 0 if unable to determine
-    static func getAudioDuration(url: URL) -> TimeInterval {
+    static func getAudioDuration(url: URL) async -> TimeInterval {
         guard FileManager.default.fileExists(atPath: url.path) else {
             Logger.warning("Audio file not found for duration calculation: \(url.path)", category: .audio)
             return 0
@@ -157,8 +144,14 @@ struct AudioUtils {
         
         let asset = AVURLAsset(url: url)
         
-        // Synchronously read duration (macOS 12.3+)
-        let duration: CMTime = asset.duration
+        // Load duration via modern async API (macOS 13+)
+        let duration: CMTime
+        do {
+            duration = try await asset.load(.duration)
+        } catch {
+            Logger.warning("Failed to load duration for audio file: \(url.lastPathComponent)", category: .audio)
+            return 0
+        }
         
         let durationSeconds = CMTimeGetSeconds(duration)
         
@@ -251,27 +244,13 @@ struct AudioUtils {
             try FileManager.default.removeItem(at: outputURL)
         }
         
-        // Configure export session
-        exportSession.outputURL = outputURL
-        exportSession.outputFileType = .m4a
-        
-        // Perform the export asynchronously
-        await exportSession.export()
-        
-        // Check export status
-        switch exportSession.status {
-        case .completed:
+        do {
+            try await exportSession.export(to: outputURL, as: .m4a)
             Logger.info("Audio merge completed successfully: \(outputURL.path)", category: .audio)
             completion(.success(outputURL))
-        case .failed:
-            let error = exportSession.error ?? AudioUtilsError.exportFailed("Export session failed with unknown error")
+        } catch {
             Logger.error("Audio merge failed", error: error, category: .audio)
             completion(.failure(error))
-        case .cancelled:
-            Logger.warning("Audio merge cancelled", category: .audio)
-            completion(.failure(AudioUtilsError.exportCancelled))
-        default:
-            completion(.failure(AudioUtilsError.exportFailed("Export session ended with unexpected status: \(exportSession.status)")))
         }
     }
 }
