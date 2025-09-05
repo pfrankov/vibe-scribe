@@ -157,14 +157,8 @@ struct AudioUtils {
         
         let asset = AVURLAsset(url: url)
         
-        // Use the newer async API when possible, fallback to deprecated sync version
-        let duration: CMTime
-        if #available(macOS 13.0, *) {
-            // For newer versions, we'd use async load, but for simplicity keeping sync for now
-            duration = asset.duration
-        } else {
-            duration = asset.duration
-        }
+        // Synchronously read duration (macOS 12.3+)
+        let duration: CMTime = asset.duration
         
         let durationSeconds = CMTimeGetSeconds(duration)
         
@@ -200,13 +194,34 @@ struct AudioUtils {
     /// - Returns: URL to the recordings directory
     /// - Throws: AudioUtilsError if unable to create or access the directory
     static func getRecordingsDirectory() throws -> URL {
+        // Prefer Application Support/<bundleID>/Recordings to avoid iCloud/backups and be consistent across app
+        let fm = FileManager.default
+        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
+            let base = appSupport.appendingPathComponent(bundleID, isDirectory: true)
+            let dir = base.appendingPathComponent("Recordings", isDirectory: true)
+            if !fm.fileExists(atPath: dir.path) {
+                do {
+                    try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+                    Logger.info("Created recordings directory: \(dir.path)", category: .audio)
+                } catch {
+                    Logger.error("Failed to create recordings directory", error: error, category: .audio)
+                    // fall back to Documents below
+                }
+            }
+            if fm.fileExists(atPath: dir.path) {
+                return dir
+            }
+        }
+        
+        // Fallback: Documents/<bundleID>/Recordings
         guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             throw AudioUtilsError.exportFailed("Unable to access documents directory")
         }
-        
-        let recordingsDirectory = documentsDirectory.appendingPathComponent("Recordings")
-        
-        // Create directory if it doesn't exist
+        let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
+        let recordingsDirectory = documentsDirectory
+            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("Recordings", isDirectory: true)
         if !FileManager.default.fileExists(atPath: recordingsDirectory.path) {
             do {
                 try FileManager.default.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true, attributes: nil)
@@ -216,7 +231,6 @@ struct AudioUtils {
                 throw AudioUtilsError.exportFailed("Failed to create recordings directory: \(error.localizedDescription)")
             }
         }
-        
         return recordingsDirectory
     }
     
@@ -229,11 +243,8 @@ struct AudioUtils {
         
         // Generate unique output URL for merged file
         let timestamp = Int(Date().timeIntervalSince1970)
-        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            throw AudioUtilsError.exportFailed("Could not access documents directory")
-        }
-        
-        let outputURL = documentsDirectory.appendingPathComponent("merged_\(timestamp).m4a")
+        let recordingsDir = try AudioUtils.getRecordingsDirectory()
+        let outputURL = recordingsDir.appendingPathComponent("merged_\(timestamp).m4a")
         
         // Remove existing file if it exists
         if FileManager.default.fileExists(atPath: outputURL.path) {

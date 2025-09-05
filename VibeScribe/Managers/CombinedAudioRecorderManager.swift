@@ -63,7 +63,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         
         systemRecorderManager.$error
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] error in
+            .sink { error in
                 if let error = error {
                     Logger.warning("System audio recording error (continuing with microphone only): \(error.localizedDescription)", category: .audio)
                     // Don't set main error - continue with microphone only
@@ -100,28 +100,20 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         // Always start microphone recording first
         micRecorderManager.startRecording()
         
-        // Try to start system audio recording if available
+        // Start system audio recording when permission is available (macOS 12.3+)
         Task {
-            if #available(macOS 12.3, *) {
-                let hasPermission = await systemRecorderManager.hasScreenCapturePermission()
-                
-                if hasPermission {
-                    Logger.info("System audio permission available - starting system audio recording", category: .audio)
-                    
-                    // Generate unique URL for system audio
-                    let timestamp = Int(Date().timeIntervalSince1970)
-                    let recordingsDir = getRecordingsDirectory()
-                    let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp).caf")
-                    
-                    await MainActor.run {
-                        self.systemAudioOutputURL = sysURL
-                        self.systemRecorderManager.startRecording(outputURL: sysURL)
-                    }
-                } else {
-                    Logger.info("System audio permission not available - recording microphone only", category: .audio)
+            let hasPermission = await systemRecorderManager.hasScreenCapturePermission()
+            if hasPermission {
+                Logger.info("System audio permission available - starting system audio recording", category: .audio)
+                let timestamp = Int(Date().timeIntervalSince1970)
+                let recordingsDir = getRecordingsDirectory()
+                let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp).caf")
+                await MainActor.run {
+                    self.systemAudioOutputURL = sysURL
+                    self.systemRecorderManager.startRecording(outputURL: sysURL)
                 }
             } else {
-                Logger.info("System audio recording not available on this macOS version - recording microphone only", category: .audio)
+                Logger.info("System audio permission not available - recording microphone only", category: .audio)
             }
         }
     }
@@ -204,25 +196,11 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     }
     
     private func getRecordingsDirectory() -> URL {
-        let fileManager = FileManager.default
-        let urls = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-        guard let appSupportURL = urls.first else {
-            let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-            return documentsURL.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
-        }
-        
+        if let url = try? AudioUtils.getRecordingsDirectory() { return url }
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
         let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-        let recordingsURL = appSupportURL.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
-
-        if !fileManager.fileExists(atPath: recordingsURL.path) {
-            do {
-                try fileManager.createDirectory(at: recordingsURL, withIntermediateDirectories: true, attributes: nil)
-            } catch {
-                Logger.error("Error creating recordings directory", error: error, category: .audio)
-            }
-        }
-        return recordingsURL
+        return docs.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
     }
     
     private func cleanupTemporaryFiles(urls: [URL]) {

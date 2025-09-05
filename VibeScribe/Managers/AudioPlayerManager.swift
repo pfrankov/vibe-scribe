@@ -8,38 +8,39 @@
 import Foundation
 import AVFoundation
 
-// --- Audio Player Logic --- 
+/// Simple audio player manager with minimal surface area.
+/// Behavior preserved; internal logs unified via Logger.
 class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var isPlaying = false
-    @Published var currentTime: TimeInterval = 0.0
-    @Published var duration: TimeInterval = 0.0
+    @Published var currentTime: TimeInterval = 0
+    @Published var duration: TimeInterval = 0
     @Published var player: AVAudioPlayer?
     
     private var timer: Timer?
-    var wasPlayingBeforeScrub = false
+    private var resumeAfterSeek = false
+
+    // MARK: - Public API
 
     func setupPlayer(url: URL) {
+        stopAndCleanup()
         do {
-            // Stop existing player/timer if any
-            stopAndCleanup()
-            
-            player = try AVAudioPlayer(contentsOf: url)
-            player?.delegate = self
-            player?.prepareToPlay()
-            duration = player?.duration ?? 0.0
-            currentTime = 0.0 // Reset time
-            print("Audio player setup complete. Duration: \(duration)")
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.delegate = self
+            player.prepareToPlay()
+            self.player = player
+            self.duration = player.duration
+            self.currentTime = 0
+            Logger.info("Audio player setup. Duration: \(duration)", category: .audio)
         } catch {
-            print("Error setting up audio player: \(error.localizedDescription)")
-            player = nil
-            duration = 0.0
-            currentTime = 0.0
+            Logger.error("Failed to setup audio player", error: error, category: .audio)
+            self.player = nil
+            self.duration = 0
+            self.currentTime = 0
         }
     }
 
     func togglePlayPause() {
-        guard let player = player else { return }
-        
+        guard let player else { return }
         if player.isPlaying {
             player.pause()
             isPlaying = false
@@ -52,46 +53,49 @@ class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func seek(to time: TimeInterval) {
-        guard let player = player else { return }
-        player.currentTime = max(0, min(time, duration)) // Clamp value
-        self.currentTime = player.currentTime // Update published value immediately
-        if !isPlaying && wasPlayingBeforeScrub {
-             // If paused due to scrubbing, resume playback after seeking
-             player.play()
-             isPlaying = true
-             startTimer()
-             wasPlayingBeforeScrub = false // Reset flag
-         }
+        guard let player else { return }
+        player.currentTime = max(0, min(time, duration))
+        currentTime = player.currentTime
+        if !isPlaying && resumeAfterSeek {
+            player.play()
+            isPlaying = true
+            startTimer()
+            resumeAfterSeek = false
+        }
     }
-    
-    // Call this when user starts dragging the slider
+
+    // Call when user starts dragging the slider
     func scrubbingStarted() {
-         guard let player = player else { return }
-         wasPlayingBeforeScrub = player.isPlaying
-         if isPlaying {
-             player.pause()
-             isPlaying = false
-             stopTimer()
-         }
-     }
+        guard let player else { return }
+        resumeAfterSeek = player.isPlaying
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+            stopTimer()
+        }
+    }
 
     func stopAndCleanup() {
         player?.stop()
         stopTimer()
         player = nil
         isPlaying = false
-        currentTime = 0.0
-        duration = 0.0
-        wasPlayingBeforeScrub = false
-        print("Player stopped and cleaned up")
+        currentTime = 0
+        duration = 0
+        resumeAfterSeek = false
+        Logger.debug("Player stopped and cleaned up", category: .audio)
     }
 
+    // MARK: - Internal
+
     private func startTimer() {
-        stopTimer() // Ensure no duplicates
-        
-        // Use standard Timer
+        stopTimer()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            self?.updateProgress()
+            guard let self, let player = self.player, player.isPlaying else { return }
+            let newTime = player.currentTime
+            if newTime != self.currentTime {
+                self.currentTime = newTime
+            }
         }
     }
 
@@ -100,35 +104,23 @@ class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         timer = nil
     }
 
-    @objc private func updateProgress() {
-        guard let player = player else { return }
-        // Only update if playing and time has actually changed
-        if player.isPlaying && self.currentTime != player.currentTime {
-            self.currentTime = player.currentTime
-        }
-    }
-    
-    // MARK: - AVAudioPlayerDelegate Methods
-    
+    // MARK: - AVAudioPlayerDelegate
+
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        print("Playback finished. Success: \(flag)")
-        // Ensure UI updates on main thread if delegate methods aren't guaranteed
+        Logger.debug("Playback finished. Success: \(flag)", category: .audio)
         DispatchQueue.main.async {
             self.isPlaying = false
             self.stopTimer()
-            // Reset progress to the beginning
-            self.currentTime = 0.0
-            player.currentTime = 0.0 // Ensure player time resets too
+            self.currentTime = 0
+            player.currentTime = 0
         }
     }
-    
+
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        print("Audio player decode error: \(error?.localizedDescription ?? "Unknown error")")
-        // Ensure UI updates on main thread
+        Logger.error("Audio player decode error", error: error, category: .audio)
         DispatchQueue.main.async {
             self.isPlaying = false
             self.stopTimer()
-            // Handle error appropriately - maybe show an alert
         }
     }
-} 
+}

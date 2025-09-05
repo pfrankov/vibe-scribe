@@ -19,54 +19,20 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     private var timer: Timer?
     private var audioFileURL: URL?
 
-    // Get the directory to save recordings
+    // Get the directory to save recordings (centralized in AudioUtils)
     private func getRecordingsDirectory() -> URL {
-        let fileManager = FileManager.default
-        let urls = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-        guard let appSupportURL = urls.first else {
-            // Fallback to Documents directory if Application Support is not available
-            let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-            return documentsURL.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
-        }
-        
-        // Append your app's bundle identifier and a 'Recordings' subdirectory
+        if let dir = try? AudioUtils.getRecordingsDirectory() { return dir }
+        // Fallback to Documents if creation failed
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
         let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-        let recordingsURL = appSupportURL.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
-
-        // Create the directory if it doesn't exist
-        if !fileManager.fileExists(atPath: recordingsURL.path) {
-            do {
-                try fileManager.createDirectory(at: recordingsURL, withIntermediateDirectories: true, attributes: nil)
-                Logger.info("Created recordings directory at: \(recordingsURL.path)", category: .audio)
-            } catch {
-                Logger.error("Error creating recordings directory", error: error, category: .audio)
-                // Return a fallback directory in Documents
-                let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-                return documentsURL.appendingPathComponent("VibeScribe-Recordings")
-            }
-        }
-        return recordingsURL
+        return docs.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
     }
 
     // Setup the audio recorder
     private func setupRecorder() -> Bool {
-        #if os(iOS)
-        // iOS specific code for setting up audio session
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [])
-            try session.setActive(true)
-            print("Audio session activated on iOS.")
-        } catch {
-            print("Error setting up iOS audio session: \(error.localizedDescription)")
-            self.error = error
-            return false
-        }
-        #else
         // macOS doesn't require AVAudioSession setup for basic recording
-        print("Setting up recorder on macOS (no AVAudioSession needed).")
-        #endif
+        Logger.debug("Setting up recorder on macOS (no AVAudioSession needed).", category: .audio)
         
         do {
             // --- Updated Recording Settings to use AAC (more compatible) ---
@@ -85,33 +51,29 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
             audioFileURL = getRecordingsDirectory().appendingPathComponent(fileName)
 
             guard let url = audioFileURL else {
-                print("Error: Audio File URL is nil.")
+                Logger.error("Audio File URL is nil", category: .audio)
                 self.error = NSError(domain: "AudioRecorderError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio file URL."])
                 return false
             }
             
-            print("Attempting to record to: \(url.path)")
+            Logger.info("Attempting to record to: \(url.path)", category: .audio)
 
             audioRecorder = try AVAudioRecorder(url: url, settings: recordingSettings)
             audioRecorder?.delegate = self
             audioRecorder?.isMeteringEnabled = true // Enable metering if you want to show levels
             
             if audioRecorder?.prepareToRecord() == true {
-                 print("Audio recorder prepared successfully.")
+                 Logger.info("Audio recorder prepared successfully.", category: .audio)
                  return true
              } else {
-                 print("Error: Audio recorder failed to prepare.")
+                 Logger.error("Audio recorder failed to prepare.", category: .audio)
                  self.error = NSError(domain: "AudioRecorderError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Audio recorder failed to prepare."])
                  return false
              }
 
         } catch {
-            print("Error setting up audio recorder: \(error.localizedDescription)")
+            Logger.error("Error setting up audio recorder: \(error.localizedDescription)", error: error, category: .audio)
             self.error = error
-            #if os(iOS)
-            // Attempt to deactivate session on error for iOS
-            try? AVAudioSession.sharedInstance().setActive(false)
-            #endif
             return false
         }
     }
@@ -120,26 +82,26 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     func startRecording() {
         // Check if already recording
         if audioRecorder?.isRecording == true {
-            print("Already recording.")
+            Logger.info("Already recording", category: .audio)
             return
         }
 
         // Clear previous error
         self.error = nil
         
-        print("Attempting to start recording...") // Updated log message
+        Logger.info("Attempting to start recording...", category: .audio)
 
         // Setup the recorder
         if !setupRecorder() {
             // Error should already be set by setupRecorder()
-            print("Failed to setup recorder.")
+            Logger.error("Failed to setup recorder.", category: .audio)
             isRecording = false // Ensure state is correct
             return
         }
 
         // Recorder should be non-nil if setupRecorder returned true
         guard let recorder = audioRecorder else {
-            print("Error: Recorder is nil after successful setup.")
+            Logger.error("Recorder is nil after successful setup.", category: .audio)
             self.error = NSError(domain: "AudioRecorderError", code: 6, userInfo: [NSLocalizedDescriptionKey: "Internal error: Recorder became nil."])
             isRecording = false
             return
@@ -149,19 +111,19 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         if recorder.record() {
             isRecording = true
             startTimer() // Start updating recordingTime
-            print("Recording started successfully.")
+            Logger.info("Recording started successfully.", category: .audio)
         } else {
             // Recording failed to start, even though setup was successful
-            print("Error: recorder.record() returned false.")
+            Logger.error("recorder.record() returned false.", category: .audio)
             self.error = NSError(domain: "AudioRecorderError", code: 7, userInfo: [NSLocalizedDescriptionKey: "Failed to start recording after setup."])
-            isRecording = false 
+            isRecording = false
         }
     }
 
     func stopRecording() -> (url: URL, duration: TimeInterval)? {
         guard let recorder = audioRecorder, isRecording else { return nil }
 
-        print("Stopping recording...")
+        Logger.info("Stopping recording...", category: .audio)
         let duration = recorder.currentTime
         recorder.stop()
         stopTimer()
@@ -171,22 +133,11 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         audioRecorder = nil // Release the recorder
         audioFileURL = nil // Clear the file URL
         
-        #if os(iOS)
-        // Deactivate the audio session after recording on iOS
-        do {
-            try AVAudioSession.sharedInstance().setActive(false)
-            print("Audio session deactivated.")
-        } catch {
-            print("Error deactivating audio session: \(error.localizedDescription)")
-            // Don't necessarily set self.error here, as recording succeeded
-        }
-        #endif
-
         if let url = savedURL {
-            print("Recording stopped. File saved at: \(url.path), Duration: \(duration)")
+            Logger.info("Recording stopped. File saved at: \(url.path), Duration: \(duration)", category: .audio)
             return (url, duration)
         } else {
-            print("Error: Recorded file URL was nil after stopping.")
+            Logger.error("Recorded file URL was nil after stopping.", category: .audio)
             self.error = NSError(domain: "AudioRecorderError", code: 3, userInfo: [NSLocalizedDescriptionKey: "Recorded file URL was lost."])
             return nil
         }
@@ -195,7 +146,7 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     func cancelRecording() {
         guard let recorder = audioRecorder, isRecording else { return }
         
-        print("Cancelling recording...")
+        Logger.info("Cancelling recording...", category: .audio)
         recorder.stop()
         stopTimer()
         isRecording = false
@@ -203,25 +154,16 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
 
         // Delete the partially recorded file
         if let url = audioFileURL {
-            print("Deleting temporary file: \(url.path)")
+            Logger.info("Deleting temporary file: \(url.path)", category: .audio)
             recorder.deleteRecording() // This deletes the file at recorder's URL
         } else {
-            print("Warning: Could not find file URL to delete for cancelled recording.")
+            Logger.warning("Could not find file URL to delete for cancelled recording.", category: .audio)
         }
         
         audioRecorder = nil
         audioFileURL = nil
         error = nil // Clear error state on cancellation
         
-        #if os(iOS)
-        // Deactivate the audio session on iOS
-        do {
-            try AVAudioSession.sharedInstance().setActive(false)
-            print("Audio session deactivated.")
-        } catch {
-            print("Error deactivating audio session: \(error.localizedDescription)")
-        }
-        #endif
     }
 
     private func startTimer() {
@@ -268,45 +210,26 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         // Update state on main thread
         DispatchQueue.main.async {
             if !flag {
-                print("Recording finished unsuccessfully.")
+                Logger.warning("Recording finished unsuccessfully.", category: .audio)
                 // This might happen due to interruption or error. Stop timer etc.
                 self.stopTimer()
                 self.isRecording = false
                 self.recordingTime = 0.0
                 self.error = NSError(domain: "AudioRecorderError", code: 4, userInfo: [NSLocalizedDescriptionKey: "Recording did not finish successfully."])
                 
-                #if os(iOS)
-                // Deactivate session on iOS
-                do {
-                    try AVAudioSession.sharedInstance().setActive(false)
-                    print("Audio session deactivated after unsuccessful recording.")
-                } catch {
-                    print("Error deactivating audio session: \(error.localizedDescription)")
-                }
-                #endif
             }
             // Note: We handle successful completion within stopRecording()
         }
     }
 
     func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        print("Audio recorder encode error: \(error?.localizedDescription ?? "Unknown error")")
+        Logger.error("Audio recorder encode error: \(error?.localizedDescription ?? "Unknown error")", error: error, category: .audio)
         // Update state on main thread
         DispatchQueue.main.async {
             self.stopTimer()
             self.isRecording = false
             self.recordingTime = 0.0
             self.error = error ?? NSError(domain: "AudioRecorderError", code: 5, userInfo: [NSLocalizedDescriptionKey: "Encoding error occurred."])
-            
-            #if os(iOS)
-            // Deactivate session on iOS
-            do {
-                try AVAudioSession.sharedInstance().setActive(false)
-                print("Audio session deactivated after encode error.")
-            } catch {
-                print("Error deactivating audio session: \(error.localizedDescription)")
-            }
-            #endif
         }
     }
     
@@ -316,6 +239,6 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         if isRecording {
             cancelRecording() // Cancel if still recording
         }
-        print("AudioRecorderManager deinitialized")
+        Logger.debug("AudioRecorderManager deinitialized", category: .audio)
     }
 } 
