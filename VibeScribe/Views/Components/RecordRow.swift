@@ -50,7 +50,7 @@ struct RecordRow: View {
                         .foregroundStyle(.secondary) // Use system token instead of manual color
                     Text("•") // Bullet separator instead of dash
                         .foregroundStyle(.secondary) // Use system token
-                    Text(formatDuration(record.duration))
+                    Text(record.duration.clockString)
                         .foregroundStyle(.secondary) // Use system token
                     
                     // System audio indicator

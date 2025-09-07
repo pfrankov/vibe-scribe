@@ -44,7 +44,7 @@ extension Record {
     
     /// Formatted duration string for display purposes
     var formattedDuration: String {
-        formatDuration(duration)
+        duration.clockString
     }
     
     /// Check if the record has a valid file
@@ -65,13 +65,4 @@ extension Record {
     }
 }
 
-// Helper to format duration
-func formatDuration(_ duration: TimeInterval) -> String {
-    guard duration.isFinite && duration >= 0 else { return "0s" }
-    
-    let formatter = DateComponentsFormatter()
-    formatter.allowedUnits = [.minute, .second]
-    formatter.unitsStyle = .abbreviated
-    formatter.zeroFormattingBehavior = .dropLeading
-    return formatter.string(from: duration) ?? "0s"
-} 
+// Removed legacy formatDuration helper in favor of TimeInterval.clockString

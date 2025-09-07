@@ -87,24 +87,5 @@ extension AppSettings {
         return !openAIBaseURL.isEmpty && APIURLBuilder.isValidBaseURL(openAIBaseURL)
     }
     
-    /// Use the chunk size as-is without validation
-    var validatedChunkSize: Int {
-        return chunkSize
-    }
-    
-    /// Clean API key without leading/trailing whitespace
-    var cleanWhisperAPIKey: String {
-        return whisperAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    /// Clean API key without leading/trailing whitespace
-    var cleanOpenAIAPIKey: String {
-        return openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    /// Should we chunk this text based on settings?
-    /// Simple: just check if chunking is enabled
-    var shouldChunkText: Bool {
-        return useChunking
-    }
+    // Convenience flags remain above; removed redundant helpers in earlier edit
 } 

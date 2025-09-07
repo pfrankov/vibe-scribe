@@ -35,7 +35,6 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         Logger.debug("Setting up recorder on macOS (no AVAudioSession needed).", category: .audio)
         
         do {
-            // --- Updated Recording Settings to use AAC (more compatible) ---
             let recordingSettings: [String: Any] = [
                 AVFormatIDKey: Int(kAudioFormatMPEG4AAC),   // Changed to AAC format 
                 AVSampleRateKey: 44100,                     // Standard rate
@@ -47,7 +46,7 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
             let dateString = dateFormatter.string(from: Date())
-            let fileName = "recording_\(dateString).m4a" // Changed extension back to m4a
+            let fileName = "recording_\(dateString).m4a"
             audioFileURL = getRecordingsDirectory().appendingPathComponent(fileName)
 
             guard let url = audioFileURL else {

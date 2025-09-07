@@ -564,20 +564,11 @@ class WhisperTranscriptionManager: NSObject {
     }
 }
 
-// Extension for Data for convenient work with multipart/form-data
-extension Data {
-    mutating func append(_ string: String) {
-        if let data = string.data(using: .utf8) {
-            append(data)
-        }
-    }
-}
-
 // MARK: - URLSessionDataDelegate
 extension WhisperTranscriptionManager: URLSessionDataDelegate {
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let taskId = dataTask.taskIdentifier as Int? else { return }
+        let taskId = dataTask.taskIdentifier
         
         // Convert data to string
         guard let sseData = String(data: data, encoding: .utf8) else { return }
@@ -617,7 +608,7 @@ extension WhisperTranscriptionManager: URLSessionDataDelegate {
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let taskId = task.taskIdentifier as Int? else { return }
+        let taskId = task.taskIdentifier
         
         if let error = error {
             print("❌ SSE task \(taskId) completed with error: \(error.localizedDescription)")

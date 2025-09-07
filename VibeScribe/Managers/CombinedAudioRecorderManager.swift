@@ -203,8 +203,6 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         systemAudioOutputURL = nil
     }
     
-    // Removed redundant local directory helper; use central AudioUtils.getRecordingsDirectory()
-    
     private func cleanupTemporaryFiles(urls: [URL]) {
         for url in urls {
             do {

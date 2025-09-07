@@ -75,7 +75,7 @@ struct RecordingView: View {
             }
 
             // Display recording time
-            Text(formatTime(recorderManager.recordingTime))
+            Text(recorderManager.recordingTime.clockString)
                 .font(.system(.title2, design: .monospaced))
                 .fontWeight(.medium)
                 .padding(.bottom, 8)
@@ -202,10 +202,4 @@ struct RecordingView: View {
 
 
 
-    // Re-use the time formatter from RecordDetailView
-    private func formatTime(_ time: TimeInterval) -> String {
-        let minutes = Int(time) / 60
-        let seconds = Int(time) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
 } 

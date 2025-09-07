@@ -290,8 +290,6 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         return pcmBuffer
     }
 
-    // (Removed unused FourCC helper to simplify code)
-
     // MARK: - SCStreamDelegate
 
     nonisolated

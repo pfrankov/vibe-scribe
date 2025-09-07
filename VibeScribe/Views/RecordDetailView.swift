@@ -9,9 +9,8 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import Combine
-@_exported import Foundation // Import for WhisperTranscriptionManager access
 
-// Detail view for a single record - Refactored to use AudioPlayerManager
+// Detail view for a single record
 struct RecordDetailView: View {
     // Use @Bindable for direct modification of @Model properties
     @Bindable var record: Record
@@ -155,14 +154,14 @@ struct RecordDetailView: View {
                         
                         // Time Label with equal space on both sides for better alignment
                         HStack {
-                            Text(formatTime(playerManager.currentTime))
+                            Text(playerManager.currentTime.clockString)
                                 .font(.caption)
                                 .foregroundStyle(Color(NSColor.secondaryLabelColor))
                                 .monospacedDigit()
                             
                             Spacer()
                             
-                            Text(formatTime(playerManager.duration))
+                            Text(playerManager.duration.clockString)
                                 .font(.caption)
                                 .foregroundStyle(Color(NSColor.secondaryLabelColor))
                                 .monospacedDigit()
@@ -794,9 +793,9 @@ struct RecordDetailView: View {
         print("Starting summarization for: \(record.name), using OpenAI compatible API at URL: \(settings.openAIBaseURL)")
         
         // Check if we should chunk the text based on settings
-        if settings.shouldChunkText {
+        if settings.useChunking {
             print("📊 Chunking enabled - splitting text (\(cleanText.count) characters) into chunks")
-            let chunks = TextChunker.chunkText(cleanText, maxChunkSize: settings.validatedChunkSize, forceChunking: false)
+            let chunks = TextChunker.chunkText(cleanText, maxChunkSize: settings.chunkSize, forceChunking: false)
             print("Split text into \(chunks.count) chunks using intelligent boundaries")
             processSummaryWithChunks(chunks)
         } else {
@@ -1055,13 +1054,6 @@ struct RecordDetailView: View {
         }.eraseToAnyPublisher()
     }
     
-    // Helper to format time like MM:SS
-    private func formatTime(_ time: TimeInterval) -> String {
-        let minutes = Int(time) / 60
-        let seconds = Int(time) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-    
     // Function to start automatic pipeline
     private func startAutomaticPipeline() {
         guard isAutomaticMode else { return }
@@ -1070,68 +1062,5 @@ struct RecordDetailView: View {
         
         // Start transcription first
         startTranscription()
-    }
-    
-    // Function to start real-time transcription with intermediate updates
-    private func startRealTimeTranscription() {
-        guard let fileURL = record.fileURL, !isTranscribing else { return }
-        
-        isTranscribing = true
-        transcriptionError = nil
-        
-        print("🚀 Starting REAL-TIME transcription for: \(record.name)")
-        
-        let whisperManager = WhisperTranscriptionManager.shared
-        
-        // Use real-time streaming method
-        whisperManager.transcribeAudioRealTime(audioURL: fileURL, settings: settings)
-        .receive(on: DispatchQueue.main)
-        .sink(
-            receiveCompletion: { completion in
-                self.isTranscribing = false
-                
-                switch completion {
-                case .finished:
-                    print("✅ Real-time transcription completed successfully")
-                    
-                    // In automatic mode, start summarization after transcription completes
-                    if self.isAutomaticMode {
-                        print("🔄 Automatic mode: Starting summarization after real-time transcription")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.startSummarization()
-                        }
-                    }
-                case .failure(let error):
-                    if case .streamingNotSupported = error {
-                        print("⚠️ Real-time streaming not supported, falling back to regular transcription")
-                        // Fallback to regular transcription
-                        self.startTranscription()
-                    } else {
-                        self.transcriptionError = "Real-time error: \(error.description)"
-                        print("❌ Real-time transcription error: \(error.description)")
-                        self.isAutomaticMode = false
-                    }
-                }
-            },
-            receiveValue: { update in
-                if update.isPartial {
-                    print("🔄 Partial update: \(update.text.prefix(50))...")
-                } else {
-                    print("✅ Final transcription update: \(update.text.count) characters")
-                    
-                    // Save final result
-                    self.record.transcriptionText = update.text
-                    self.record.hasTranscription = true
-                    do {
-                        try self.modelContext.save()
-                        print("✅ Real-time transcription saved successfully")
-                    } catch {
-                        print("❌ Error saving real-time transcription: \(error.localizedDescription)")
-                        self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
-                    }
-                }
-            }
-        )
-        .store(in: &cancellables)
     }
 } 
