@@ -11,6 +11,7 @@ import AVFoundation
 // --- Audio Recorder Logic --- 
 class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate {
     @Published var isRecording = false
+    @Published var isPaused = false
     @Published var recordingTime: TimeInterval = 0.0
     @Published var error: Error? = nil // To report errors
     @Published var audioLevels: [Float] = Array(repeating: 0.0, count: 10) // Array to store audio levels for visualization
@@ -18,6 +19,13 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     private var audioRecorder: AVAudioRecorder?
     private var timer: Timer?
     private var audioFileURL: URL?
+    
+    // Aggregated level logging (mic)
+    private var levelLogMinDb: Float = 100
+    private var levelLogMaxDb: Float = -100
+    private var levelLogSumDb: Double = 0
+    private var levelLogCount: Int = 0
+    private var levelLogLastTime: CFAbsoluteTime = 0
 
     // Get the directory to save recordings (centralized in AudioUtils)
     private func getRecordingsDirectory() -> URL {
@@ -120,13 +128,14 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     }
 
     func stopRecording() -> (url: URL, duration: TimeInterval)? {
-        guard let recorder = audioRecorder, isRecording else { return nil }
+        guard let recorder = audioRecorder else { return nil }
 
         Logger.info("Stopping recording...", category: .audio)
         let duration = recorder.currentTime
         recorder.stop()
         stopTimer()
         isRecording = false
+        isPaused = false
         recordingTime = 0.0
         let savedURL = audioFileURL
         audioRecorder = nil // Release the recorder
@@ -143,12 +152,13 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     }
 
     func cancelRecording() {
-        guard let recorder = audioRecorder, isRecording else { return }
+        guard let recorder = audioRecorder else { return }
         
         Logger.info("Cancelling recording...", category: .audio)
         recorder.stop()
         stopTimer()
         isRecording = false
+        isPaused = false
         recordingTime = 0.0
 
         // Delete the partially recorded file
@@ -163,6 +173,27 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         audioFileURL = nil
         error = nil // Clear error state on cancellation
         
+    }
+
+    // MARK: - Pause/Resume
+    func pauseRecording() {
+        guard let recorder = audioRecorder, isRecording else { return }
+        recorder.pause()
+        stopTimer()
+        isPaused = true
+        isRecording = false
+    }
+
+    func resumeRecording() {
+        guard let recorder = audioRecorder, isPaused else { return }
+        if recorder.record() {
+            isPaused = false
+            isRecording = true
+            startTimer()
+        } else {
+            // If resume fails, mark error but keep state consistent
+            self.error = NSError(domain: "AudioRecorderError", code: 8, userInfo: [NSLocalizedDescriptionKey: "Failed to resume recording."])
+        }
     }
 
     private func startTimer() {
@@ -193,14 +224,34 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
         
         // Get the power of the audio signal (in decibels)
         let power = recorder.averagePower(forChannel: 0)
-        
-        // Convert from decibels (-160...0) to a value (0...1)
-        // Typical voice is around -10 to -30 dB, so we normalize for a better visual
-        let normalizedValue = min(1.0, max(0.0, (power + 50) / 50))
+
+        // Visual normalization on dB scale: very sensitive to quiet sounds
+        let minDb: Float = -80
+        let clipped = max(minDb, Float(power))
+        let normalizedDb = (clipped - minDb) / (-minDb) // 0..1
+        let normalizedValue = max(0.0, min(1.0, pow(normalizedDb, 1.1)))
         
         // Add new value to the end and remove the oldest one
         audioLevels.removeFirst()
         audioLevels.append(Float(normalizedValue))
+
+        #if DEBUG
+        // Aggregate and log every 0.5s for diagnostics
+        levelLogMinDb = min(levelLogMinDb, power)
+        levelLogMaxDb = max(levelLogMaxDb, power)
+        levelLogSumDb += Double(power)
+        levelLogCount += 1
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - levelLogLastTime > 1.0, levelLogCount > 0 {
+            let avg = levelLogSumDb / Double(levelLogCount)
+            Logger.debug(String(format: "Mic level dB min/avg/max: %.1f / %.1f / %.1f | norm(avg) %.2f", levelLogMinDb, Float(avg), levelLogMaxDb, normalizedValue), category: .audio)
+            levelLogMinDb = 100
+            levelLogMaxDb = -100
+            levelLogSumDb = 0
+            levelLogCount = 0
+            levelLogLastTime = now
+        }
+        #endif
     }
 
     // MARK: - AVAudioRecorderDelegate Methods

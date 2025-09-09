@@ -8,12 +8,21 @@ import Darwin
 class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegate {
 
     @Published var isRecording = false
+    @Published var isPaused = false
     @Published var error: Error?
     @Published var audioLevels: [Float] = Array(repeating: 0.0, count: 10)
 
     private var stream: SCStream?
     private var audioFile: AVAudioFile?
     private var outputURL: URL?
+    private var didLogFirstFormat = false
+    
+    // Aggregated level logging (system audio)
+    private var levelLogMinDb: Double = 100
+    private var levelLogMaxDb: Double = -100
+    private var levelLogSumDb: Double = 0
+    private var levelLogCount: Int = 0
+    private var levelLogLastTime: CFAbsoluteTime = 0
 
     // Check if screen capture permissions are available
     func hasScreenCapturePermission() async -> Bool {
@@ -135,6 +144,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             return
         }
 
+        // Update audio levels (visualization). Writing to file is still gated on MainActor below.
         updateAudioLevels(from: sampleBuffer)
 
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
@@ -146,12 +156,12 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             }
             return
         }
-        var streamDesc = asbdPtr.pointee
+        let streamDesc = asbdPtr.pointee
 
         let frameCount = AVAudioFrameCount(numSamples)
 
         Task { @MainActor in
-            guard self.isRecording else {
+            guard self.isRecording && !self.isPaused else {
                 return
             }
 
@@ -163,15 +173,17 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
                     return
                 }
 
-                guard let avFormat = AVAudioFormat(streamDescription: &streamDesc) else {
-                    Logger.error("[MainActor Task] Could not create AVAudioFormat from streamDesc.", category: .audio)
-                    self.error = NSError(domain: "SystemAudioRecorderManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create AVAudioFormat."])
+                // Create a mono float32 target format to downmix into
+                let sampleRate = Double(streamDesc.mSampleRate)
+                guard let monoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false) else {
+                    Logger.error("[MainActor Task] Failed to create mono AVAudioFormat.", category: .audio)
+                    self.error = NSError(domain: "SystemAudioRecorderManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create mono AVAudioFormat."])
                     self.stopRecording()
                     return
                 }
 
                 do {
-                    self.audioFile = try AVAudioFile(forWriting: outputURL, settings: avFormat.settings)
+                    self.audioFile = try AVAudioFile(forWriting: outputURL, settings: monoFormat.settings)
                 } catch {
                     Logger.error("[MainActor Task] Failed to create AVAudioFile", error: error, category: .audio)
                     self.error = error
@@ -185,14 +197,14 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
             }
 
             do {
-                guard let pcmBuffer = try createPCMBufferFrom(sampleBuffer: sampleBuffer,
-                                                              format: audioFile.processingFormat,
-                                                              frameCount: frameCount) else {
-                    Logger.error("[MainActor Task] Failed to create PCM buffer from sample buffer.", category: .audio)
+                guard let monoBuffer = createMonoFloatBuffer(from: sampleBuffer,
+                                                             frameCount: frameCount,
+                                                             sampleRate: audioFile.processingFormat.sampleRate) else {
+                    Logger.error("[MainActor Task] Failed to create mono PCM buffer from sample buffer.", category: .audio)
                     return
                 }
 
-                try audioFile.write(from: pcmBuffer)
+                try audioFile.write(from: monoBuffer)
 
             } catch {
                 Logger.error("[MainActor Task] Failed to process or write audio buffer", error: error, category: .audio)
@@ -208,86 +220,102 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         // Just allow ScreenCaptureKit to have a place to send them
     }
 
-    // New helper function to create an AVAudioPCMBuffer from a CMSampleBuffer
-    private nonisolated func createPCMBufferFrom(sampleBuffer: CMSampleBuffer,
-                                                 format: AVAudioFormat,
-                                                 frameCount: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
-        guard let sourceFormatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let _ = CMAudioFormatDescriptionGetStreamBasicDescription(sourceFormatDesc) else {
-            Logger.error("[createPCMBufferFrom] Failed to get source ASBD from sampleBuffer.", category: .audio)
-            return nil
-        }
+    // Create a mono Float32 AVAudioPCMBuffer from a CMSampleBuffer (handles float32 and int16 sources)
+    private nonisolated func createMonoFloatBuffer(from sampleBuffer: CMSampleBuffer,
+                                                   frameCount: AVAudioFrameCount,
+                                                   sampleRate: Double) -> AVAudioPCMBuffer? {
+        var neededSize = 0
+        let flags = UInt32(kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment)
+        var blockBuffer: CMBlockBuffer?
+        // Query size
+        guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: &neededSize,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: flags,
+            blockBufferOut: &blockBuffer
+        ) == noErr, neededSize > 0 else { return nil }
 
-        guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            Logger.error("[createPCMBufferFrom] Failed to create AVAudioPCMBuffer with target format.", category: .audio)
-            return nil
-        }
-        pcmBuffer.frameLength = frameCount
+        // Allocate ABL
+        let ablRaw = UnsafeMutableRawPointer.allocate(byteCount: neededSize, alignment: 16)
+        defer { ablRaw.deallocate() }
+        guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: ablRaw.assumingMemoryBound(to: AudioBufferList.self),
+            bufferListSize: neededSize,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: flags,
+            blockBufferOut: &blockBuffer
+        ) == noErr else { return nil }
+        let ablPtr = ablRaw.assumingMemoryBound(to: AudioBufferList.self)
+        let audioBufferList = UnsafeMutableAudioBufferListPointer(ablPtr)
 
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
-            Logger.error("[createPCMBufferFrom] Failed to get data buffer (CMBlockBuffer).", category: .audio)
-            return nil
-        }
+        // Target mono Float32 format
+        guard let monoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false) else { return nil }
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: frameCount) else { return nil }
+        pcm.frameLength = frameCount
+        guard let out = pcm.floatChannelData?[0] else { return nil }
 
-        var dataLength: size_t = 0
-        var dataPointer: UnsafeMutablePointer<Int8>? = nil
+        // Determine source numeric format from the first buffer
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee else { return nil }
+        let bitsPerChannel = Int(asbd.mBitsPerChannel)
 
-        let status = CMBlockBufferGetDataPointer(
-            dataBuffer,
-            atOffset: 0,
-            lengthAtOffsetOut: &dataLength,
-            totalLengthOut: nil,
-            dataPointerOut: &dataPointer
-        )
+        // Clear output
+        let framesI = Int(frameCount)
+        for i in 0..<framesI { out[i] = 0 }
+        var contributingChannels = 0
 
-        if status != kCMBlockBufferNoErr {
-            Logger.error("[createPCMBufferFrom] Failed to get data pointer from block buffer: \(status).", category: .audio)
-            return nil
-        }
+        // Mix down all channels from all buffers
+        for buffer in audioBufferList {
+            guard let mData = buffer.mData else { continue }
+            let channelsInBuffer = Int(buffer.mNumberChannels)
+            if channelsInBuffer == 0 { continue }
+            let sampleCount = Int(buffer.mDataByteSize) / max(1, bitsPerChannel/8)
+            if sampleCount == 0 { continue }
 
-        guard let sourceDataPtr = dataPointer else {
-            Logger.error("[createPCMBufferFrom] dataPointer is nil after CMBlockBufferGetDataPointer.", category: .audio)
-            return nil
-        }
-
-        let targetChannelCount = Int(format.channelCount)
-        let targetIsFloat = format.commonFormat == .pcmFormatFloat32
-
-        if targetIsFloat, let targetFloatChannelData = pcmBuffer.floatChannelData {
-            let samplesPerChannel = Int(frameCount)
-
-            for channel in 0..<targetChannelCount {
-                let destinationChannelBuffer = targetFloatChannelData[channel]
-                let sourceChannelMemoryOffset = channel * samplesPerChannel * MemoryLayout<Float>.size
-
-                for frame in 0..<samplesPerChannel {
-                    let sourceSampleMemoryOffsetInChannel = frame * MemoryLayout<Float>.size
-                    let finalSourceSampleMemoryOffset = sourceChannelMemoryOffset + sourceSampleMemoryOffsetInChannel
-
-                    if finalSourceSampleMemoryOffset + MemoryLayout<Float>.size <= dataLength {
-                        let sampleValue = sourceDataPtr.advanced(by: finalSourceSampleMemoryOffset).withMemoryRebound(to: Float.self, capacity: 1) { $0.pointee }
-                        destinationChannelBuffer[frame] = sampleValue
-                    } else {
-                        Logger.warning("[createPCMBufferFrom] Read out of bounds or dataLength insufficient. channel=\(channel), frame=\(frame), offset=\(finalSourceSampleMemoryOffset), dataLength=\(dataLength). Filling with 0.", category: .audio)
-                        destinationChannelBuffer[frame] = 0.0
+            if bitsPerChannel == 32 {
+                let ptr = mData.assumingMemoryBound(to: Float.self)
+                if channelsInBuffer == 1 {
+                    for i in 0..<min(framesI, sampleCount) { out[i] += ptr[i] }
+                } else {
+                    for i in 0..<min(framesI, sampleCount/channelsInBuffer) {
+                        var sum: Float = 0
+                        let base = i * channelsInBuffer
+                        for ch in 0..<channelsInBuffer { sum += ptr[base + ch] }
+                        out[i] += sum / Float(channelsInBuffer)
                     }
                 }
-            }
-        } else if format.commonFormat == .pcmFormatInt16, let targetInt16ChannelData = pcmBuffer.int16ChannelData {
-            Logger.warning("[createPCMBufferFrom] Using int16ChannelData. CAUTION: Untested/Unexpected path for float source.", category: .audio)
-            let samplesPerChannel = Int(frameCount)
-            for channel in 0..<targetChannelCount {
-                let destinationChannelBuffer = targetInt16ChannelData[channel]
-                for frame in 0..<samplesPerChannel {
-                    destinationChannelBuffer[frame] = 0
+                contributingChannels += channelsInBuffer
+            } else if bitsPerChannel == 16 {
+                let ptr = mData.assumingMemoryBound(to: Int16.self)
+                let scale = 1.0 / Float(Int16.max)
+                if channelsInBuffer == 1 {
+                    for i in 0..<min(framesI, sampleCount) { out[i] += Float(ptr[i]) * scale }
+                } else {
+                    for i in 0..<min(framesI, sampleCount/channelsInBuffer) {
+                        var sum: Float = 0
+                        let base = i * channelsInBuffer
+                        for ch in 0..<channelsInBuffer { sum += Float(ptr[base + ch]) * scale }
+                        out[i] += sum / Float(channelsInBuffer)
+                    }
                 }
+                contributingChannels += channelsInBuffer
             }
-        } else {
-            Logger.error("[createPCMBufferFrom] PCM buffer data pointers (float/int16) are nil or format is unsupported for direct copy. Target Format: \(format.commonFormat).", category: .audio)
-            return nil
         }
 
-        return pcmBuffer
+        // If multiple buffers contributed, average by buffer count to avoid over-amplification
+        if contributingChannels > 1 {
+            let scale = 1.0 / Float(contributingChannels)
+            for i in 0..<framesI { out[i] *= scale }
+        }
+
+        return pcm
     }
 
     // MARK: - SCStreamDelegate
@@ -303,80 +331,145 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         }
     }
 
-    // Calculate and update audio levels from the sample buffer
+    // Calculate and update audio levels from CMSampleBuffer using AudioBufferList.
+    // This path is robust for ScreenCaptureKit audio and yields consistent levels.
     private nonisolated func updateAudioLevels(from sampleBuffer: CMSampleBuffer) {
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
             return
         }
-
-        var dataLength: size_t = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-
-        let status = CMBlockBufferGetDataPointer(
-            dataBuffer,
-            atOffset: 0,
-            lengthAtOffsetOut: &dataLength,
-            totalLengthOut: nil,
-            dataPointerOut: &dataPointer
-        )
-
-        if status != kCMBlockBufferNoErr || dataPointer == nil {
-            return
-        }
-
-        // Get the audio data to calculate RMS power
-        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format) else {
-            return
-        }
-
-        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
-        if frameCount == 0 { return }
-        let channelCount = Int(asbd.pointee.mChannelsPerFrame)
-        if channelCount == 0 { return }
-
-        var sumSquares: Float = 0.0
-
-        // Assuming audio data is 32-bit float
-        if (asbd.pointee.mFormatFlags & kAudioFormatFlagIsFloat) != 0 && asbd.pointee.mBitsPerChannel == 32 {
-            let floatDataPointer = UnsafeRawPointer(dataPointer!)!.assumingMemoryBound(to: Float.self)
-            let sampleCount = frameCount * channelCount
-
-            if dataLength < sampleCount * MemoryLayout<Float>.size {
-                return
-            }
-
-            let sampleStep = max(1, sampleCount / 1024)
-            var actualSampleCount = 0
-
-            for i in stride(from: 0, to: sampleCount, by: sampleStep) {
-                let sampleValue = floatDataPointer[i]
-                sumSquares += sampleValue * sampleValue
-                actualSampleCount += 1
-            }
-
-            if actualSampleCount > 0 {
-                sumSquares /= Float(actualSampleCount)
-            }
-        } else {
-            Task { @MainActor in
-                if self.audioLevels.count == 10 {
-                    self.audioLevels.removeFirst()
-                }
-                self.audioLevels.append(0.0)
-            }
-            return
-        }
-
-        let rms = sqrtf(sumSquares)
-        let powerInDb = 20.0 * log10(Double(rms + 1e-10))
-        let normalizedLevel = Float(min(1.0, max(0.0, (powerInDb + 50) / 50)))
-
+        let asbd = asbdPtr.pointee
+        let srConst = asbd.mSampleRate
+        let chConst = Int(asbd.mChannelsPerFrame)
+        let bitsConst = Int(asbd.mBitsPerChannel)
+        let flagsConst = asbd.mFormatFlags
         Task { @MainActor in
-            if self.audioLevels.count == 10 {
-                self.audioLevels.removeFirst()
+            if !self.didLogFirstFormat {
+                Logger.info(String(format: "System ASBD — sr: %.0f, ch: %d, bits: %d, flags: 0x%X", srConst, chConst, bitsConst, flagsConst), category: .audio)
+                self.didLogFirstFormat = true
             }
-            self.audioLevels.append(normalizedLevel)
         }
+        let frames = CMSampleBufferGetNumSamples(sampleBuffer)
+        if frames == 0 { return }
+
+        // Query required size for AudioBufferList
+        var neededSize = 0
+        let flags = UInt32(kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment)
+        let queryStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: &neededSize,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: flags,
+            blockBufferOut: nil
+        )
+        if queryStatus != noErr || neededSize <= 0 { return }
+
+        // Allocate aligned memory for AudioBufferList
+        let ablRaw = UnsafeMutableRawPointer.allocate(byteCount: neededSize, alignment: 16)
+        defer { ablRaw.deallocate() }
+        var blockBuffer: CMBlockBuffer?
+        let fetchStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: ablRaw.assumingMemoryBound(to: AudioBufferList.self),
+            bufferListSize: neededSize,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: flags,
+            blockBufferOut: &blockBuffer
+        )
+        if fetchStatus != noErr { return }
+
+        let ablPtr = ablRaw.assumingMemoryBound(to: AudioBufferList.self)
+        let audioBufferList = UnsafeMutableAudioBufferListPointer(ablPtr)
+        let bufferCountConst = audioBufferList.count
+        let channelCountConst = Int(asbd.mChannelsPerFrame)
+
+        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let bitsPerChannel = Int(asbd.mBitsPerChannel)
+        let bytesPerSample = max(1, bitsPerChannel / 8)
+
+        var sumSquares: Double = 0
+        var counted: Int = 0
+
+        for buffer in audioBufferList {
+            guard let mData = buffer.mData else { continue }
+            let byteSize = Int(buffer.mDataByteSize)
+            let sampleCount = byteSize / bytesPerSample
+            if sampleCount == 0 { continue }
+            let step = max(1, sampleCount / 1024) // subsample for efficiency
+
+            if isFloat && bitsPerChannel == 32 {
+                let ptr = mData.assumingMemoryBound(to: Float.self)
+                for i in stride(from: 0, to: sampleCount, by: step) {
+                    let v = Double(ptr[i])
+                    sumSquares += v * v
+                    counted += 1
+                }
+            } else if bitsPerChannel == 16 {
+                let ptr = mData.assumingMemoryBound(to: Int16.self)
+                let scale = 1.0 / Double(Int16.max)
+                for i in stride(from: 0, to: sampleCount, by: step) {
+                    let v = Double(ptr[i]) * scale
+                    sumSquares += v * v
+                    counted += 1
+                }
+            }
+        }
+
+        if counted == 0 { return }
+        let meanSquare = sumSquares / Double(counted)
+        let rms = sqrt(meanSquare)
+        let powerDb = 20.0 * log10(rms + 1e-12)
+        
+        // Unified visual curve (matches mic path)
+        let minDb: Double = -80
+        let clipped = max(minDb, powerDb)
+        let normalizedDb = (clipped - minDb) / (-minDb) // 0..1
+        let level = max(0.0, min(1.0, pow(normalizedDb, 1.1)))
+
+        #if DEBUG
+        Task { @MainActor in
+            if self.audioLevels.count == 10 { self.audioLevels.removeFirst() }
+            self.audioLevels.append(Float(level))
+
+            // Aggregate and log every 0.5s for diagnostics
+            self.levelLogMinDb = min(self.levelLogMinDb, powerDb)
+            self.levelLogMaxDb = max(self.levelLogMaxDb, powerDb)
+            self.levelLogSumDb += powerDb
+            self.levelLogCount += 1
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - self.levelLogLastTime > 1.0, self.levelLogCount > 0 {
+                let avg = self.levelLogSumDb / Double(self.levelLogCount)
+                Logger.debug(String(format: "System level dB min/avg/max: %.1f / %.1f / %.1f | buffers:%d ch:%d | active:%@ paused:%@", self.levelLogMinDb, avg, self.levelLogMaxDb, bufferCountConst, channelCountConst, self.isRecording.description, self.isPaused.description), category: .audio)
+                self.levelLogMinDb = 100
+                self.levelLogMaxDb = -100
+                self.levelLogSumDb = 0
+                self.levelLogCount = 0
+                self.levelLogLastTime = now
+            }
+        }
+        #else
+        Task { @MainActor in
+            if self.audioLevels.count == 10 { self.audioLevels.removeFirst() }
+            self.audioLevels.append(Float(level))
+        }
+        #endif
+    }
+}
+
+// MARK: - Pause/Resume
+extension SystemAudioRecorderManager {
+    func pauseRecording() {
+        guard isRecording, !isPaused else { return }
+        isPaused = true
+    }
+
+    func resumeRecording() {
+        guard isRecording, isPaused else { return }
+        isPaused = false
     }
 }

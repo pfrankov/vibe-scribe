@@ -12,16 +12,23 @@ import Combine
 
 @MainActor
 class CombinedAudioRecorderManager: NSObject, ObservableObject {
+    // Represents an active session (recording or paused)
     @Published var isRecording = false
+    @Published var isPaused = false
     @Published var recordingTime: TimeInterval = 0.0
     @Published var error: Error? = nil
     @Published var audioLevels: [Float] = Array(repeating: 0.0, count: 10)
-    @Published var isSystemAudioRecording = false // Indicates if system audio is being recorded
+    @Published var isSystemAudioRecording = false // Internal write state
+    @Published var isSystemAudioEnabled = false   // UI source indicator
     
     private var micRecorderManager = AudioRecorderManager()
     private var systemRecorderManager = SystemAudioRecorderManager()
     private var systemAudioOutputURL: URL?
     private var cancellables = Set<AnyCancellable>()
+    
+    // Display smoothing (fast attack, slower release). No auto-gain — full scale preserved.
+    private let smoothAttack: Float = 0.55
+    private let smoothRelease: Float = 0.20
     
     override init() {
         super.init()
@@ -29,13 +36,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     }
     
     private func setupObservers() {
-        // Observe microphone recorder state
-        micRecorderManager.$isRecording
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isRecording in
-                self?.isRecording = isRecording
-            }
-            .store(in: &cancellables)
+        // Observe microphone time and errors (session state is managed here)
         
         micRecorderManager.$recordingTime
             .receive(on: DispatchQueue.main)
@@ -78,17 +79,28 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         )
         .receive(on: DispatchQueue.main)
         .sink { [weak self] micLevels, systemLevels in
-            if self?.isSystemAudioRecording == true {
-                // Combine levels by adding squared values (energy) and taking square root
-                // This gives a more accurate representation of combined audio
-                self?.audioLevels = zip(micLevels, systemLevels).map { mic, sys in
-                    let combinedEnergy = mic * mic + sys * sys
-                    return Float(sqrt(Double(combinedEnergy)))
+            guard let self else { return }
+            let combined: [Float]
+            if self.isSystemAudioRecording {
+                // Energy sum to combine sources consistently
+                combined = zip(micLevels, systemLevels).map { mic, sys in
+                    let energy = mic * mic + sys * sys
+                    return Float(sqrt(Double(energy)))
                 }
             } else {
-                // Use only microphone levels
-                self?.audioLevels = micLevels
+                combined = micLevels
             }
+
+            // Preserve full scale (0..1). Apply only smoothing for visual stability.
+            let unclipped = combined.map { min(1.0, max(0.0, $0)) }
+            var smoothed: [Float] = Array(repeating: 0, count: unclipped.count)
+            for i in 0..<unclipped.count {
+                let prev = (i < self.audioLevels.count) ? self.audioLevels[i] : 0
+                let next = unclipped[i]
+                let alpha = next > prev ? self.smoothAttack : self.smoothRelease
+                smoothed[i] = prev + alpha * (next - prev)
+            }
+            self.audioLevels = smoothed
         }
         .store(in: &cancellables)
     }
@@ -96,7 +108,8 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     func startRecording() {
         Logger.info("Starting combined audio recording", category: .audio)
         error = nil
-        
+        isPaused = false
+
         // Always start microphone recording first
         micRecorderManager.startRecording()
         
@@ -105,6 +118,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
             let hasPermission = await systemRecorderManager.hasScreenCapturePermission()
             if hasPermission {
                 Logger.info("System audio permission available - starting system audio recording", category: .audio)
+                self.isSystemAudioEnabled = true
                 let timestamp = Int(Date().timeIntervalSince1970)
                 let recordingsDir: URL
                 if let dir = try? AudioUtils.getRecordingsDirectory() {
@@ -122,14 +136,16 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
                 }
             } else {
                 Logger.info("System audio permission not available - recording microphone only", category: .audio)
+                self.isSystemAudioEnabled = false
             }
         }
+        isRecording = true
     }
     
     func stopRecording() -> (url: URL, duration: TimeInterval, includesSystemAudio: Bool)? {
         Logger.info("Stopping combined audio recording", category: .audio)
         
-        // Stop microphone recording
+        // Stop microphone recording (works from active or paused states)
         guard let micResult = micRecorderManager.stopRecording() else {
             Logger.error("Failed to stop microphone recording", category: .audio)
             return nil
@@ -172,6 +188,8 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
             if let finalURL = mergedURL {
                 // Clean up temporary files
                 cleanupTemporaryFiles(urls: [micResult.url, sysURL])
+                isRecording = false
+                isPaused = false
                 return (finalURL, micResult.duration, true)
             } else {
                 // Merge failed, use microphone only
@@ -179,11 +197,15 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
                     Logger.error("Using microphone-only recording due to merge failure", error: error, category: .audio)
                 }
                 cleanupTemporaryFiles(urls: [sysURL]) // Clean up system audio file
+                isRecording = false
+                isPaused = false
                 return (micResult.url, micResult.duration, false)
             }
         } else {
             // Only microphone recording
             Logger.info("Saving microphone-only recording", category: .audio)
+            isRecording = false
+            isPaused = false
             return (micResult.url, micResult.duration, false)
         }
     }
@@ -201,6 +223,22 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         }
         
         systemAudioOutputURL = nil
+        isPaused = false
+        isRecording = false
+    }
+
+    func pauseRecording() {
+        guard isRecording, !isPaused else { return }
+        micRecorderManager.pauseRecording()
+        systemRecorderManager.pauseRecording()
+        isPaused = true
+    }
+
+    func resumeRecording() {
+        guard isRecording, isPaused else { return }
+        micRecorderManager.resumeRecording()
+        systemRecorderManager.resumeRecording()
+        isPaused = false
     }
     
     private func cleanupTemporaryFiles(urls: [URL]) {

@@ -48,23 +48,14 @@ struct RecordDetailView: View {
     
     // Computed property for transcription text for easier access
     private var transcriptionText: String {
-        print("🔍 transcriptionText computed - record.transcriptionText: '\(record.transcriptionText?.prefix(50) ?? "nil")'")
-        print("🔍 transcriptionText computed - record.transcriptionText FULL LENGTH: \(record.transcriptionText?.count ?? 0)")
-        print("🔍 transcriptionText computed - record.hasTranscription: \(record.hasTranscription)")
-        
         if let text = record.transcriptionText, !text.isEmpty {
-            print("🔍 transcriptionText computed - returning actual text: '\(text.prefix(50))'")
-            print("🔍 transcriptionText computed - returning actual text FULL LENGTH: \(text.count)")
             return text
         } else if record.hasTranscription && record.transcriptionText != nil {
-            // This means transcription was attempted but resulted in empty text
-            print("🔍 transcriptionText computed - returning 'empty result' message")
+            // Transcription attempt finished but text is empty
             return "Transcription resulted in empty text. Try again with a different model or check audio quality."
         } else if record.hasTranscription {
-            print("🔍 transcriptionText computed - returning 'processing' message")
             return "Transcription processing... Check back later."
         } else {
-            print("🔍 transcriptionText computed - returning 'not available' message")
             return "Transcription not available yet."
         }
     }
@@ -548,7 +539,9 @@ struct RecordDetailView: View {
                             print("🔍 AFTER SAVE - record.transcriptionText: '\(self.record.transcriptionText?.prefix(100) ?? "nil")'")
                             print("🔍 AFTER SAVE - record.transcriptionText FULL LENGTH: \(self.record.transcriptionText?.count ?? 0)")
                             print("🔍 AFTER SAVE - record.hasTranscription: \(self.record.hasTranscription)")
-                            print("🔍 AFTER SAVE - transcriptionText computed property: '\(self.transcriptionText.prefix(100))'")
+                        #if DEBUG
+                        Logger.debug("After save: preview of transcriptionText computed property", category: .transcription)
+                        #endif
                         } catch {
                             print("❌ Error saving final SSE transcription: \(error.localizedDescription)")
                             self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"

@@ -30,7 +30,7 @@ struct ContentView: View {
                 Spacer()
                 
                 Button {
-                    isShowingRecordingSheet = true
+                    presentRecordingOverlay()
                 } label: {
                     Label("New Recording", systemImage: "plus.circle.fill")
                         .font(.body)
@@ -67,7 +67,7 @@ struct ContentView: View {
             Divider()
             
             Button {
-                isShowingRecordingSheet = true
+                presentRecordingOverlay()
             } label: {
                 Label("New Recording", systemImage: "plus.circle.fill")
             }
@@ -78,6 +78,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowSettings"))) { _ in
             isShowingSettings = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StartRecording"))) { _ in
+            presentRecordingOverlay()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
             if let recordId = notification.userInfo?["recordId"] as? UUID {
@@ -105,10 +108,7 @@ struct ContentView: View {
                 print("ContentView: Auto-selected first record without scrolling")
             }
         }
-        .sheet(isPresented: $isShowingRecordingSheet) {
-            RecordingView() 
-                .frame(width: 350, height: 320)
-        }
+        // Legacy sheet flow kept disabled; overlay replaces it
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
                 .frame(width: 600, height: 500)
@@ -313,6 +313,13 @@ struct ContentView: View {
         Logger.info("Dropped \(totalCount) files but none were supported audio formats", category: .general)
     }
     
+    private func presentRecordingOverlay() {
+        // Present floating overlay window with recording controls
+        OverlayWindowManager.shared.show(content: {
+            AnyView(RecordingOverlayView().environment(\.modelContext, modelContext))
+        })
+    }
+
     @ViewBuilder
     private var dragOverlay: some View {
         Rectangle()
