@@ -21,6 +21,5 @@ struct SecurityUtils {
         let suffix = String(key.suffix(4))
         return "\(prefix)***\(suffix)"
     }
-}
+  }
 
-// (Intentionally no constants: previously unused identifiers removed)

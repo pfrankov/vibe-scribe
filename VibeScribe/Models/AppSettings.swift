@@ -87,5 +87,4 @@ extension AppSettings {
         return !openAIBaseURL.isEmpty && APIURLBuilder.isValidBaseURL(openAIBaseURL)
     }
     
-    // Convenience flags remain above; removed redundant helpers in earlier edit
-} 
+  }

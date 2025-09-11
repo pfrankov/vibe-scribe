@@ -15,7 +15,6 @@ struct RecordingOverlayView: View {
     private let edgePadding: CGFloat = 18
     private let controlHeight: CGFloat = 46
     private let contentWidth: CGFloat = 300
-    private let softStopBackground = Color(red: 1.0, green: 0.92, blue: 0.92) // solid, light red
 
     var body: some View {
         ZStack {
@@ -141,7 +140,12 @@ struct RecordingOverlayView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(PillFilledButtonStyle(color: softStopBackground, height: controlHeight, textColor: .red))
+                .buttonStyle(
+                    PillTintedButtonStyle(
+                        color: .red,
+                        height: controlHeight
+                    )
+                )
                 .keyboardShortcut(.escape)
             }
         }
@@ -224,20 +228,22 @@ private struct PillFilledButtonStyle: ButtonStyle {
 private struct PillTintedButtonStyle: ButtonStyle {
     var color: Color
     var height: CGFloat
+    // Slightly opaque tint that remains readable over material backgrounds
+    var fillOpacityLight: Double = 0.16
+    var fillOpacityDark: Double = 0.22
+    @Environment(\.colorScheme) private var colorScheme
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let fillOpacity = colorScheme == .dark ? fillOpacityDark : fillOpacityLight
+        return configuration.label
             .font(.system(size: 15, weight: .regular))
             .foregroundStyle(color)
             .padding(.horizontal, 16)
             .frame(height: height)
             .background(
                 Capsule()
-                    .fill(color.opacity(0.10))
+                    .fill(color.opacity(fillOpacity))
             )
-            .overlay(
-                Capsule()
-                    .strokeBorder(color.opacity(0.14), lineWidth: 1)
-            )
+            // No shadow per request
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }

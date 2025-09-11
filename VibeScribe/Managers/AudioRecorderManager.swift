@@ -39,8 +39,7 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
 
     // Setup the audio recorder
     private func setupRecorder() -> Bool {
-        // macOS doesn't require AVAudioSession setup for basic recording
-        Logger.debug("Setting up recorder on macOS (no AVAudioSession needed).", category: .audio)
+        Logger.debug("Setting up recorder", category: .audio)
         
         do {
             let recordingSettings: [String: Any] = [

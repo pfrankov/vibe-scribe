@@ -281,8 +281,7 @@ class WhisperTranscriptionManager: NSObject {
             body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(responseFormat)\r\n".data(using: .utf8)!)
             
-            // Language parameter removed - let Whisper auto-detect
-            
+
             // Add file
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
@@ -430,8 +429,6 @@ class WhisperTranscriptionManager: NSObject {
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
         body.append("text\r\n".data(using: .utf8)!)
-        
-        // Language parameter removed - let Whisper auto-detect
         
         // Add audio file
         body.append("--\(boundary)\r\n".data(using: .utf8)!)

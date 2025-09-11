@@ -113,7 +113,6 @@ struct AudioUtils {
                     try FileManager.default.removeItem(at: outputURL)
                 }
                 
-                // Create export session and perform export using modern API (macOS 15+)
                 guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
                     throw AudioUtilsError.exportFailed("Could not create export session")
                 }
@@ -144,7 +143,6 @@ struct AudioUtils {
         
         let asset = AVURLAsset(url: url)
         
-        // Load duration via modern async API (macOS 13+)
         let duration: CMTime
         do {
             duration = try await asset.load(.duration)

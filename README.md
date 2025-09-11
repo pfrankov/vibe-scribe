@@ -20,7 +20,7 @@ Turn your spoken words into organized text with live transcription and AI summar
 
 ## 📋 What You Need
 
-- macOS 12.0+ (12.3+ for computer audio recording)
+- macOS 15.0 or later
 - Whisper server (local or remote) - try [WhisperServer](https://github.com/pfrankov/whisper-server) for easy local setup
 - OpenAI-compatible API for summaries
 

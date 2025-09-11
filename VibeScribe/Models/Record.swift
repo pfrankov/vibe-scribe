@@ -65,4 +65,3 @@ extension Record {
     }
 }
 
-// Removed legacy formatDuration helper in favor of TimeInterval.clockString

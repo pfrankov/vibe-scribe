@@ -64,9 +64,8 @@ struct RecordRow: View {
                 .font(.caption) // Standard caption for macOS
             }
             Spacer()
-            // Disclosure indicator removed as per design decision
-        }
-        .padding(.vertical, 8) // Increase padding for better readability
+          }
+          .padding(.vertical, 8) // Increase padding for better readability
         .contentShape(Rectangle()) // Ensures that the entire row is clickable
         // Detect when the text field loses focus to cancel editing
         .onChange(of: isNameFieldFocused) { oldValue, newValue in

@@ -113,7 +113,6 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         // Always start microphone recording first
         micRecorderManager.startRecording()
         
-        // Start system audio recording when permission is available (macOS 12.3+)
         Task {
             let hasPermission = await systemRecorderManager.hasScreenCapturePermission()
             if hasPermission {
