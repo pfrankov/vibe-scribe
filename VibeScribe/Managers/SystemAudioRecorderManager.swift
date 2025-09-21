@@ -67,10 +67,7 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
                 // Configuration for the stream
                 let config = SCStreamConfiguration()
-                config.width = 2
-                config.height = 2
                 config.capturesAudio = true
-                config.showsCursor = false
                 config.excludesCurrentProcessAudio = true
 
                 // Filter for the selected display (required for stream setup)
@@ -80,7 +77,6 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
                 let audioSampleHandlerQueue = DispatchQueue(label: "com.vibescribe.audioSampleHandlerQueue")
                 try stream?.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioSampleHandlerQueue)
-                try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global(qos: .utility))
 
                 try await stream?.startCapture()
 
@@ -129,12 +125,6 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
 
     nonisolated
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        // Process video frames
-        if type == .screen {
-            processVideoSampleBuffer(sampleBuffer)
-            return
-        }
-
         // Process audio frames
         guard type == .audio else { return }
 
@@ -213,12 +203,6 @@ class SystemAudioRecorderManager: NSObject, ObservableObject, SCStreamOutput, SC
         }
     }
 
-    // Video frame handler - simply ignore them but prevent errors
-    nonisolated
-    func processVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // Empty implementation - we don't need video frames
-        // Just allow ScreenCaptureKit to have a place to send them
-    }
 
     // Create a mono Float32 AVAudioPCMBuffer from a CMSampleBuffer (handles float32 and int16 sources)
     private nonisolated func createMonoFloatBuffer(from sampleBuffer: CMSampleBuffer,
