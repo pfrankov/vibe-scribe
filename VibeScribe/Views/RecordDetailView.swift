@@ -9,11 +9,14 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import Combine
+import AppKit
+import UniformTypeIdentifiers
 
 // Detail view for a single record
 struct RecordDetailView: View {
     // Use @Bindable for direct modification of @Model properties
     @Bindable var record: Record
+    var onRecordDeleted: ((UUID) -> Void)? = nil
     @Environment(\.modelContext) private var modelContext
     @Query private var appSettings: [AppSettings]
     
@@ -26,10 +29,10 @@ struct RecordDetailView: View {
     @State private var isSummarizing = false // Track summarization status
     @State private var summaryError: String? = nil
     @State private var isAutomaticMode = false // Track if this is a new record that should auto-process
-    
+
     // Processing state for the beautiful loader
     @State private var processingState: ProcessingState = .idle
-    
+
     // SSE streaming chunks for real-time preview  
     @State private var sseStreamingChunks: [String] = [] // For UI preview (last few lines)
     @State private var sseFullText: String = "" // For accumulating full transcription text
@@ -39,6 +42,10 @@ struct RecordDetailView: View {
     @State private var isEditingTitle: Bool = false
     @State private var editingTitle: String = ""
     @FocusState private var isTitleFieldFocused: Bool
+
+    // Action menu state
+    @State private var isShowingDeleteConfirmation = false
+    @State private var isDownloading = false
     
     // Enum for tabs
     enum Tab {
@@ -105,6 +112,44 @@ struct RecordDetailView: View {
                         }
                 }
                 Spacer()
+
+                Menu {
+                    Button {
+                        triggerDownload()
+                    } label: {
+                        Label("Download Audio", systemImage: "arrow.down.to.line")
+                    }
+                    .disabled(record.fileURL == nil || isDownloading)
+
+                    Button {
+                        startEditingTitle()
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    .disabled(isEditingTitle)
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        isShowingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    if isDownloading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.9)
+                            .frame(width: 24, height: 24)
+                    } else {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .frame(width: 28, height: 28)
             }
             .padding(.bottom, 4)
             
@@ -408,6 +453,14 @@ struct RecordDetailView: View {
         .onChange(of: isSSEStreaming) { oldValue, newValue in
             updateProcessingState()
         }
+        .alert("Delete Recording?", isPresented: $isShowingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                deleteCurrentRecord()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will permanently remove the recording, transcription, and summary. This action cannot be undone.")
+        }
     }
 
     // --- Helper Functions --- 
@@ -485,13 +538,187 @@ struct RecordDetailView: View {
             print("Transcription copied to clipboard.")
         }
     }
-    
+
     private func copySummary() {
         if let text = record.summaryText {
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
             print("Summary copied to clipboard.")
+        }
+    }
+
+    @MainActor
+    private func triggerDownload() {
+        guard !isDownloading else { return }
+        guard let sourceURL = record.fileURL else {
+            Logger.warning("Attempted to export record without file URL", category: .audio)
+            presentAlert(title: "Export Unavailable", message: "The original audio file could not be located.", style: .warning)
+            return
+        }
+
+        Task { await exportRecording(from: sourceURL, suggestedName: record.name) }
+    }
+
+    @MainActor
+    private func exportRecording(from sourceURL: URL, suggestedName: String) async {
+        isDownloading = true
+        defer { isDownloading = false }
+
+        do {
+            guard let destinationURL = await presentSavePanel(suggestedName: suggestedName) else {
+                Logger.info("User cancelled save panel for export", category: .audio)
+                return
+            }
+
+            let convertedURL = try await createTemporaryM4A(from: sourceURL)
+            try persistConvertedFile(at: convertedURL, to: destinationURL)
+
+            presentAlert(
+                title: "Audio Exported",
+                message: "Recording saved to \(destinationURL.path)",
+                style: .informational
+            )
+        } catch {
+            Logger.error("Failed to export recording", error: error, category: .audio)
+            presentAlert(
+                title: "Export Failed",
+                message: error.localizedDescription,
+                style: .critical
+            )
+        }
+    }
+
+    private func createTemporaryM4A(from inputURL: URL) async throws -> URL {
+        let asset = AVURLAsset(url: inputURL)
+
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw AudioUtilsError.exportFailed("Unable to create export session")
+        }
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("m4a")
+
+        exportSession.outputURL = tempURL
+        exportSession.outputFileType = .m4a
+        exportSession.audioTimePitchAlgorithm = .timeDomain
+        exportSession.shouldOptimizeForNetworkUse = false
+
+        return try await withCheckedThrowingContinuation { continuation in
+            exportSession.exportAsynchronously {
+                switch exportSession.status {
+                case .completed:
+                    continuation.resume(returning: tempURL)
+                case .failed:
+                    let exportError = exportSession.error ?? AudioUtilsError.exportFailed("Unknown export error")
+                    continuation.resume(throwing: exportError)
+                case .cancelled:
+                    continuation.resume(throwing: AudioUtilsError.exportCancelled)
+                default:
+                    let exportError = exportSession.error ?? AudioUtilsError.exportFailed("Export did not complete")
+                    continuation.resume(throwing: exportError)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func presentSavePanel(suggestedName: String) async -> URL? {
+        let panel = NSSavePanel()
+        panel.title = "Save Recording"
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = defaultFileName(for: suggestedName)
+        panel.allowedContentTypes = [UTType.mpeg4Audio]
+        panel.isExtensionHidden = false
+
+        return await withCheckedContinuation { continuation in
+            let completion: (NSApplication.ModalResponse) -> Void = { response in
+                continuation.resume(returning: response == .OK ? panel.url : nil)
+            }
+
+            if let window = NSApplication.shared.mainWindow {
+                panel.beginSheetModal(for: window, completionHandler: completion)
+            } else {
+                panel.begin(completionHandler: completion)
+            }
+        }
+    }
+
+    private func persistConvertedFile(at tempURL: URL, to destinationURL: URL) throws {
+        let fileManager = FileManager.default
+
+        defer {
+            try? fileManager.removeItem(at: tempURL)
+        }
+
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+
+        let destinationDirectory = destinationURL.deletingLastPathComponent()
+        if !fileManager.fileExists(atPath: destinationDirectory.path) {
+            try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        }
+
+        try fileManager.copyItem(at: tempURL, to: destinationURL)
+        Logger.info("Recording exported to \(destinationURL.path)", category: .audio)
+    }
+
+    private func defaultFileName(for baseName: String) -> String {
+        let sanitized = baseName
+            .components(separatedBy: CharacterSet(charactersIn: "\\/:?\"<>|"))
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let fileName = sanitized.isEmpty ? "Recording" : sanitized
+        return fileName.lowercased().hasSuffix(".m4a") ? fileName : "\(fileName).m4a"
+    }
+
+    @MainActor
+    private func presentAlert(title: String, message: String, style: NSAlert.Style) {
+        let alert = NSAlert()
+        alert.alertStyle = style
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+
+        if let window = NSApplication.shared.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    @MainActor
+    private func deleteCurrentRecord() {
+        playerManager.stopAndCleanup()
+
+        let recordId = record.id
+        if let fileURL = record.fileURL {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                Logger.info("Deleted audio file at \(fileURL.path)", category: .audio)
+            } catch {
+                Logger.error("Failed to delete audio file", error: error, category: .audio)
+            }
+        } else {
+            Logger.warning("Deleting record without associated file URL", category: .audio)
+        }
+
+        modelContext.delete(record)
+
+        do {
+            try modelContext.save()
+            Logger.info("Record \(recordId) deleted", category: .general)
+            onRecordDeleted?(recordId)
+        } catch {
+            Logger.error("Failed to delete record", error: error, category: .general)
+            presentAlert(
+                title: "Deletion Failed",
+                message: error.localizedDescription,
+                style: .critical
+            )
         }
     }
     

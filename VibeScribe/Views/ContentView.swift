@@ -140,13 +140,6 @@ struct ContentView: View {
                         RecordRow(record: record)
                             .tag(record)
                             .id(record.id)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    deleteRecord(record)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     }
                 }
@@ -189,8 +182,10 @@ struct ContentView: View {
     @ViewBuilder
     private var recordDetail: some View {
         if let selectedRecord = selectedRecord {
-            RecordDetailView(record: selectedRecord)
-                .id(selectedRecord.id)
+            RecordDetailView(record: selectedRecord) { _ in
+                self.selectedRecord = nil
+            }
+            .id(selectedRecord.id)
         } else {
             VStack {
                 Spacer()
