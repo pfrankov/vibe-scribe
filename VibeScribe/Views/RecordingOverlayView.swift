@@ -119,8 +119,8 @@ struct RecordingOverlayView: View {
                     sendAndFinish()
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "arrow.up")
-                        Text("Send")
+                        Image(systemName: "square.and.arrow.down")
+                        Text("Save")
                             .lineLimit(1)
                             .minimumScaleFactor(0.9)
                     }
