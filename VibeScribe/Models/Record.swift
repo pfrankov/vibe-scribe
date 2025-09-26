@@ -41,6 +41,14 @@ extension Record {
     var hasSystemAudio: Bool {
         return includesSystemAudio ?? false
     }
+
+    /// Indicates whether the record already has a non-empty summary
+    var hasSummary: Bool {
+        guard let summaryText, !summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        return true
+    }
     
     /// Formatted duration string for display purposes
     var formattedDuration: String {
@@ -64,4 +72,3 @@ extension Record {
         }
     }
 }
-

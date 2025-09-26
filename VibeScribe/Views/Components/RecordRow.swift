@@ -18,54 +18,47 @@ struct RecordRow: View {
     @FocusState private var isNameFieldFocused: Bool
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) { // Reduced spacing to 4pt
-                // ZStack to overlay TextField on Text for editing
-                ZStack(alignment: .leading) {
-                    // --- TextField (Visible when editing) ---
-                    TextField("Name", text: $editingName)
-                        .textFieldStyle(.plain) // Standard plain style
-                        .focused($isNameFieldFocused)
-                        .onSubmit { // Handle Enter key press
-                            saveName()
-                        }
-                        // Prevent clicks on TextField from selecting the row
-                        .onTapGesture {}
-                        // Apply same font/padding as Text for alignment
-                        .font(.headline) // Standard headline
-                        // Make TextField visible only when editing
-                        .opacity(isEditing ? 1 : 0)
-                        .disabled(!isEditing) // Disable when not editing
+        VStack(alignment: .leading, spacing: 4) {
+            // ZStack to overlay TextField on Text for editing
+            ZStack(alignment: .leading) {
+                // --- TextField (Visible when editing) ---
+                TextField("Name", text: $editingName)
+                    .textFieldStyle(.plain) // Standard plain style
+                    .focused($isNameFieldFocused)
+                    .onSubmit { // Handle Enter key press
+                        saveName()
+                    }
+                    // Prevent clicks on TextField from selecting the row
+                    .onTapGesture {}
+                    // Apply same font/padding as Text for alignment
+                    .font(.headline) // Standard headline
+                    // Make TextField visible only when editing
+                    .opacity(isEditing ? 1 : 0)
+                    .disabled(!isEditing) // Disable when not editing
 
-                    // --- Text (Visible when not editing) ---
-                    Text(record.name)
-                        .font(.headline) // Standard headline
-                        .lineLimit(1) // Limit to one line
-                        // Make Text visible only when *not* editing
-                        .opacity(isEditing ? 0 : 1)
-                }
+                // --- Text (Visible when not editing) ---
+                Text(record.name)
+                    .font(.headline) // Standard headline
+                    .lineLimit(1) // Limit to one line
+                    // Make Text visible only when *not* editing
+                    .opacity(isEditing ? 0 : 1)
+            }
 
-                HStack(spacing: 4) { // Reduced spacing for details
+            HStack(alignment: .center, spacing: 8) {
+                HStack(spacing: 8) {
                     Text(formattedDateTime(record.date))
                         .foregroundStyle(.secondary) // Use system token instead of manual color
-                    Text("•") // Bullet separator instead of dash
-                        .foregroundStyle(.secondary) // Use system token
                     Text(record.duration.clockString)
                         .foregroundStyle(.secondary) // Use system token
-                    
-                    // System audio indicator
-                    if record.hasSystemAudio {
-                        Text("•")
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "speaker.wave.2")
-                            .foregroundStyle(.blue)
-                    }
                 }
-                .font(.caption) // Standard caption for macOS
+                .font(.caption)
+
+                Spacer(minLength: 0)
+
+                iconGroup
             }
-            Spacer()
-          }
-          .padding(.vertical, 8) // Increase padding for better readability
+        }
+        .padding(.vertical, 8) // Increase padding for better readability
         .contentShape(Rectangle()) // Ensures that the entire row is clickable
         // Detect when the text field loses focus to cancel editing
         .onChange(of: isNameFieldFocused) { oldValue, newValue in
@@ -74,6 +67,34 @@ struct RecordRow: View {
                 cancelEditing()
             }
         }
+    }
+
+    @ViewBuilder
+    private var iconGroup: some View {
+        let showsSummary = record.hasSummary
+        let showsTranscription = !showsSummary && record.hasTranscription
+
+        HStack(spacing: 6) {
+            if record.hasSystemAudio {
+                icon(systemName: "speaker.wave.2", helpText: "Includes system audio")
+            }
+
+            if showsSummary {
+                icon(systemName: "sparkles", helpText: "Summary available")
+            } else if showsTranscription {
+                icon(systemName: "text.alignleft", helpText: "Transcription available")
+            }
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.secondary)
+    }
+
+    private func icon(systemName: String, helpText: String) -> some View {
+        Image(systemName: systemName)
+            .imageScale(.small)
+            .frame(width: 12, height: 12)
+            .help(helpText)
+            .accessibilityLabel(Text(helpText))
     }
 
     private func startEditing() {
