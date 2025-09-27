@@ -11,7 +11,6 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var selectedRecord: Record? = nil
-    @State private var isShowingRecordingSheet = false
     @State private var isShowingSettings = false
     @State private var shouldScrollToSelectedRecord = false
     @StateObject private var importManager = AudioFileImportManager()
@@ -21,32 +20,14 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack(alignment: .center) {
-                Text("All Recordings")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-                Spacer()
-                
-                Button {
-                    presentRecordingOverlay()
-                } label: {
-                    Label("New Recording", systemImage: "plus.circle.fill")
-                        .font(.body)
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.regular)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            
-            Divider()
-                .padding(.horizontal, 12)
-
             // Main content
             NavigationSplitView {
-                recordsList
+                RecordsSidebarView(
+                    records: records,
+                    selectedRecord: $selectedRecord,
+                    shouldScrollToSelectedRecord: $shouldScrollToSelectedRecord,
+                    onCreateRecording: presentRecordingOverlay
+                )
             } detail: {
                 recordDetail
             }
@@ -83,30 +64,19 @@ struct ContentView: View {
             presentRecordingOverlay()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
-            if let recordId = notification.userInfo?["recordId"] as? UUID {
-                // Fetch the record directly from the model context to ensure it's found
-                let fetchDescriptor = FetchDescriptor<Record>(predicate: #Predicate { record in record.id == recordId })
-                do {
-                    let matchingRecords = try modelContext.fetch(fetchDescriptor)
-                    if let newRecord = matchingRecords.first {
-                        shouldScrollToSelectedRecord = true // Set flag to scroll for new records
-                        selectedRecord = newRecord
-                        print("ContentView: Auto-selected new record by fetching ID: \(newRecord.id) Name: \(newRecord.name)")
-                    } else {
-                        // This case should ideally not happen if the record was saved successfully
-                        print("ContentView ERROR: New record with ID \(recordId) not found via fetch immediately after creation.")
-                    }
-                } catch {
-                    print("ContentView ERROR: Failed to fetch new record by ID \(recordId): \(error.localizedDescription)")
-                }
+            guard let recordId = notification.userInfo?["recordId"] as? UUID else { return }
+            guard let newRecord = fetchRecord(with: recordId) else {
+                Logger.error("New record with ID \(recordId) not found immediately after creation", category: .data)
+                return
             }
+
+            selectRecord(newRecord, shouldScroll: true)
+            Logger.info("Auto-selected newly created record: \(newRecord.name)", category: .ui)
         }
         .onChange(of: records) { _, newRecords in
-            if selectedRecord == nil && !newRecords.isEmpty {
-                // Don't scroll when auto-selecting first record on app launch
-                selectedRecord = newRecords.first
-                print("ContentView: Auto-selected first record without scrolling")
-            }
+            guard selectedRecord == nil, let first = newRecords.first else { return }
+            selectRecord(first, shouldScroll: false)
+            Logger.debug("Auto-selected first record without scrolling", category: .ui)
         }
         // Legacy sheet flow kept disabled; overlay replaces it
         .sheet(isPresented: $isShowingSettings) {
@@ -130,56 +100,6 @@ struct ContentView: View {
     // MARK: - Subviews
     
     @ViewBuilder
-    private var recordsList: some View {
-        if records.isEmpty {
-            emptyState
-        } else {
-            ScrollViewReader { proxy in
-                List(selection: $selectedRecord) {
-                    ForEach(records) { record in
-                        RecordRow(record: record)
-                            .tag(record)
-                            .id(record.id)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                    }
-                }
-                .listStyle(.plain)
-                .scrollDismissesKeyboard(.immediately)
-                .onChange(of: selectedRecord) { oldValue, newValue in
-                    if let recordToScrollTo = newValue, shouldScrollToSelectedRecord {
-                        print("ContentView: selectedRecord changed to \(recordToScrollTo.name) (ID: \(recordToScrollTo.id)), scrolling to new record.")
-                        withAnimation {
-                            proxy.scrollTo(recordToScrollTo.id, anchor: .top)
-                        }
-                        shouldScrollToSelectedRecord = false // Reset flag after scrolling
-                    } else if newValue != nil {
-                        print("ContentView: selectedRecord changed to \(newValue!.name) (ID: \(newValue!.id)), not scrolling (user selection).")
-                    }
-                }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "waveform.slash")
-                .font(.system(size: 40))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                .padding(.bottom, 4)
-            Text("No recordings yet")
-                .font(.headline)
-                .foregroundColor(Color(NSColor.labelColor))
-            Text("Click + to create your first recording")
-                .font(.subheadline)
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    
-    @ViewBuilder
     private var recordDetail: some View {
         if let selectedRecord = selectedRecord {
             RecordDetailView(record: selectedRecord) { _ in
@@ -196,48 +116,61 @@ struct ContentView: View {
             }
         }
     }
-    
+
     // MARK: - Helper Methods
     
     private func assignMainWindow() {
         if let window = NSApplication.shared.windows.first(where: { $0.isMainWindow }) {
             (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = window
-            print("Main window assigned to AppDelegate.")
+            Logger.info("Assigned main window to AppDelegate", category: .ui)
         } else if let anyWindow = NSApplication.shared.windows.first {
             (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = anyWindow
-            print("Fallback window assigned to AppDelegate.")
+            Logger.warning("Assigned fallback window to AppDelegate", category: .ui)
         } else {
-            print("ContentView onAppear: No window found to assign to AppDelegate.")
+            Logger.error("No window found to assign to AppDelegate", category: .ui)
         }
     }
     
     private func selectFirstRecordIfNeeded() {
-        if selectedRecord == nil && !records.isEmpty {
-            // Don't scroll when auto-selecting first record on app launch
-            selectedRecord = records.first
-            print("ContentView: selectFirstRecordIfNeeded - Auto-selected first record without scrolling")
-        }
+        guard selectedRecord == nil, let first = records.first else { return }
+        selectRecord(first, shouldScroll: false)
+        Logger.debug("Auto-selected first record on appear", category: .ui)
     }
 
     private func deleteRecord(_ recordToDelete: Record) {
         if let fileURL = recordToDelete.fileURL {
             do {
                 try FileManager.default.removeItem(at: fileURL)
-                print("Successfully deleted audio file: \(fileURL.path)")
+                Logger.info("Deleted audio file: \(fileURL.lastPathComponent)", category: .data)
             } catch {
-                print("Error deleting audio file \(fileURL.path): \(error.localizedDescription)")
+                Logger.error("Failed to delete audio file at \(fileURL.path)", error: error, category: .data)
             }
         } else {
-            print("Record \(recordToDelete.name) has no associated fileURL.")
+            Logger.warning("Record \(recordToDelete.name) has no associated file URL", category: .data)
         }
 
         modelContext.delete(recordToDelete)
         
         do {
             try modelContext.save()
-            print("Record \(recordToDelete.name) deleted successfully.")
+            Logger.info("Record \(recordToDelete.name) deleted", category: .data)
         } catch {
-            print("Error deleting record: \(error.localizedDescription)")
+            Logger.error("Failed to delete record \(recordToDelete.name)", error: error, category: .data)
+        }
+    }
+
+    private func selectRecord(_ record: Record, shouldScroll: Bool) {
+        shouldScrollToSelectedRecord = shouldScroll
+        selectedRecord = record
+    }
+
+    private func fetchRecord(with id: UUID) -> Record? {
+        let descriptor = FetchDescriptor<Record>(predicate: #Predicate { record in record.id == id })
+        do {
+            return try modelContext.fetch(descriptor).first
+        } catch {
+            Logger.error("Failed to fetch record with ID \(id)", error: error, category: .data)
+            return nil
         }
     }
     
@@ -332,6 +265,91 @@ struct ContentView: View {
 }
 
 // MARK: - Drag Overlay Content
+
+private struct RecordsSidebarView: View {
+    let records: [Record]
+    @Binding var selectedRecord: Record?
+    @Binding var shouldScrollToSelectedRecord: Bool
+    let onCreateRecording: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SidebarHeader(onCreateRecording: onCreateRecording)
+            Divider()
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if records.isEmpty {
+            RecordingsEmptyState()
+        } else {
+            ScrollViewReader { proxy in
+                List(selection: $selectedRecord) {
+                    ForEach(records) { record in
+                        RecordRow(record: record)
+                            .tag(record)
+                            .id(record.id)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    }
+                }
+                .listStyle(.plain)
+                .scrollDismissesKeyboard(.immediately)
+                .onChange(of: selectedRecord) { _, newValue in
+                    guard shouldScrollToSelectedRecord, let recordToScroll = newValue else { return }
+                    withAnimation {
+                        proxy.scrollTo(recordToScroll.id, anchor: .top)
+                    }
+                    shouldScrollToSelectedRecord = false
+                }
+            }
+        }
+    }
+}
+
+private struct SidebarHeader: View {
+    let onCreateRecording: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center) {
+            Text("All Recordings")
+                .font(.title3)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+            Spacer()
+
+            Button(action: onCreateRecording) {
+                Label("New Recording", systemImage: "plus.circle.fill")
+                    .font(.body)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.regular)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct RecordingsEmptyState: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "waveform.slash")
+                .font(.system(size: 40))
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .padding(.bottom, 4)
+            Text("No recordings yet")
+                .font(.headline)
+                .foregroundColor(Color(NSColor.labelColor))
+            Text("Click + to create your first recording")
+                .font(.subheadline)
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 struct DragOverlayContent: View {
     let isImporting: Bool
