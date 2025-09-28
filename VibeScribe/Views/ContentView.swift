@@ -287,11 +287,15 @@ private struct RecordsSidebarView: View {
         } else {
             ScrollViewReader { proxy in
                 List(selection: $selectedRecord) {
-                    ForEach(records) { record in
-                        RecordRow(record: record)
-                            .tag(record)
-                            .id(record.id)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    ForEach(groupedRecords) { section in
+                        Section(header: sectionHeader(title: section.title)) {
+                            ForEach(section.records) { record in
+                                RecordRow(record: record)
+                                    .tag(record)
+                                    .id(record.id)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            }
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -306,6 +310,176 @@ private struct RecordsSidebarView: View {
             }
         }
     }
+
+    private var groupedRecords: [RecordSection] {
+        let localeIdentifier = Bundle.main.preferredLocalizations.first(where: { $0 != "Base" })
+            ?? Locale.current.identifier
+        let locale = Locale(identifier: localeIdentifier)
+
+        let calculationCalendar = Calendar.autoupdatingCurrent
+
+        let relativeFormatter = Self.makeRelativeFormatter(
+            calendar: calculationCalendar,
+            locale: locale
+        )
+        let now = Date()
+
+        return records.reduce(into: [RecordSection]()) { sections, record in
+            let title = sectionTitle(
+                for: record.date,
+                relativeTo: now,
+                calendar: calculationCalendar,
+                relativeFormatter: relativeFormatter,
+                locale: locale
+            )
+
+            if let lastIndex = sections.indices.last, sections[lastIndex].title == title {
+                sections[lastIndex].records.append(record)
+            } else {
+                sections.append(RecordSection(title: title, records: [record]))
+            }
+        }
+    }
+
+    private func sectionHeader(title: String) -> some View {
+        Text(title)
+            .font(.footnote)
+            .fontWeight(.semibold)
+            .foregroundColor(Color(NSColor.secondaryLabelColor))
+            .textCase(nil)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+    }
+
+    private func sectionTitle(
+        for date: Date,
+        relativeTo now: Date,
+        calendar: Calendar,
+        relativeFormatter: RelativeDateTimeFormatter,
+        locale: Locale
+    ) -> String {
+        if calendar.isDateInToday(date) {
+            return Self.styleRelativeTitle(
+                relativeFormatter.localizedString(for: date, relativeTo: now),
+                locale: locale
+            )
+        }
+
+        if calendar.isDateInYesterday(date) {
+            return Self.styleRelativeTitle(
+                relativeFormatter.localizedString(for: date, relativeTo: now),
+                locale: locale
+            )
+        }
+
+        if let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start,
+           let recordWeekStart = calendar.dateInterval(of: .weekOfYear, for: date)?.start {
+            let weekDifference = calendar
+                .dateComponents([.weekOfYear], from: currentWeekStart, to: recordWeekStart)
+                .weekOfYear ?? 0
+
+            if weekDifference == 0 {
+                return NSLocalizedString("This Week", comment: "Section title for records created this week")
+            }
+
+            if weekDifference == -1 {
+                return NSLocalizedString("Last Week", comment: "Section title for records created in the previous week")
+            }
+        }
+
+        if let currentMonthStart = calendar.dateInterval(of: .month, for: now)?.start,
+           let recordMonthStart = calendar.dateInterval(of: .month, for: date)?.start {
+            let monthDifference = calendar
+                .dateComponents([.month], from: currentMonthStart, to: recordMonthStart)
+                .month ?? 0
+
+            if monthDifference == 0 {
+                return Self.styleRelativeTitle(
+                    relativeFormatter.localizedString(from: DateComponents(month: 0)),
+                    locale: locale
+                )
+            }
+
+            if monthDifference == -1 {
+                return Self.styleRelativeTitle(
+                    relativeFormatter.localizedString(from: DateComponents(month: -1)),
+                    locale: locale
+                )
+            }
+        }
+
+        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            let monthName = Self.monthString(from: date, locale: locale)
+            let format = NSLocalizedString(
+                "In %@",
+                comment: "Section title for records created earlier this year"
+            )
+            return String(
+                format: format,
+                locale: locale,
+                monthName
+            )
+        }
+
+        let monthAndYear = Self.monthYearString(from: date, locale: locale)
+        let format = NSLocalizedString(
+            "In %@",
+            comment: "Section title for records created in previous years"
+        )
+        return String(
+            format: format,
+            locale: locale,
+            monthAndYear
+        )
+    }
+
+    private static func makeRelativeFormatter(calendar: Calendar, locale: Locale) -> RelativeDateTimeFormatter {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.calendar = calendar
+        formatter.locale = locale
+        formatter.dateTimeStyle = .named
+        formatter.unitsStyle = .full
+        return formatter
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("MMMM")
+        return formatter
+    }()
+
+    private static let monthYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("MMMM y")
+        return formatter
+    }()
+
+    private static func monthString(from date: Date, locale: Locale) -> String {
+        monthFormatter.locale = locale
+        return monthFormatter.string(from: date)
+    }
+
+    private static func monthYearString(from date: Date, locale: Locale) -> String {
+        monthYearFormatter.locale = locale
+        return monthYearFormatter.string(from: date)
+    }
+
+    private static func styleRelativeTitle(_ string: String, locale: Locale) -> String {
+        if let code = locale.languageCode, code.lowercased().hasPrefix("en") {
+            return string.capitalized(with: locale)
+        }
+        return string
+    }
+}
+
+private struct RecordSection: Identifiable {
+    let title: String
+    var records: [Record]
+
+    var id: String { title }
 }
 
 private struct SidebarHeader: View {
