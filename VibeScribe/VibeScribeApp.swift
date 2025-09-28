@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import AppKit
 import AVFoundation
+import ScreenCaptureKit
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -104,9 +105,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func requestPermissions(completion: @escaping (Bool) -> Void) {
         // Request Microphone access
         AVCaptureDevice.requestAccess(for: .audio) { micGranted in
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                await self.requestSystemAudioPermissionIfNeeded()
                 completion(micGranted)
             }
+        }
+    }
+
+    @MainActor
+    private func requestSystemAudioPermissionIfNeeded() async {
+        do {
+            _ = try await SCShareableContent.current
+            Logger.info("System audio permission available", category: .audio)
+        } catch {
+            Logger.warning("System audio permission not available", category: .audio)
         }
     }
     
