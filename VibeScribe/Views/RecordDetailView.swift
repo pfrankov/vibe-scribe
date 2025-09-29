@@ -166,27 +166,48 @@ struct RecordDetailView: View {
                             .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.plain)
-                    .disabled(playerManager.player == nil)
+                    .disabled(!playerManager.isReady)
                     .frame(width: 48, height: 48)
                     .contentShape(Rectangle())
                     .help(playerManager.isPlaying ? "Pause" : "Play")
                     
                     // Time and Slider Column
                     VStack(spacing: 8) {
-                        // Progress Slider
-                        Slider(
-                            value: $playerManager.currentTime,
-                            in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
-                            onEditingChanged: { editing in
-                                isEditingSlider = editing
-                                if editing {
-                                    playerManager.scrubbingStarted()
-                                } else {
-                                    playerManager.seek(to: playerManager.currentTime)
+                        // Progress Slider + Playback Speed
+                        HStack(spacing: 12) {
+                            Slider(
+                                value: $playerManager.currentTime,
+                                in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
+                                onEditingChanged: { editing in
+                                    isEditingSlider = editing
+                                    if editing {
+                                        playerManager.scrubbingStarted()
+                                    } else {
+                                        playerManager.seek(to: playerManager.currentTime)
+                                    }
                                 }
+                            )
+                            .frame(maxWidth: .infinity)
+                            .controlSize(.regular)
+                            .disabled(!playerManager.isReady)
+
+                            Button {
+                                playerManager.cyclePlaybackSpeed()
+                            } label: {
+                                Text("\(playerManager.playbackSpeed, format: .number.precision(.fractionLength(0...2)))×")
+                                    .font(.callout.weight(.semibold))
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 10)
+                                    .background(.thinMaterial, in: Capsule())
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
+                                    )
                             }
-                        )
-                        .controlSize(.regular)
+                            .buttonStyle(.plain)
+                            .disabled(!playerManager.isReady)
+                            .help("Playback Speed")
+                        }
                         
                         // Time Label with equal space on both sides for better alignment
                         HStack {
@@ -210,7 +231,7 @@ struct RecordDetailView: View {
             .background(Color(NSColor.controlBackgroundColor).opacity(0.9))
             .cornerRadius(10)
             .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-            .disabled(playerManager.player == nil)
+            .disabled(!playerManager.isReady)
             .padding(.vertical, 8)
             
             Divider()
