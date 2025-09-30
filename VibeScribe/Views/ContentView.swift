@@ -26,8 +26,9 @@ struct ContentView: View {
                     records: records,
                     selectedRecord: $selectedRecord,
                     shouldScrollToSelectedRecord: $shouldScrollToSelectedRecord,
-                    onCreateRecording: presentRecordingOverlay
+                    onCreateRecording: presentRecordingOverlay,
                 )
+                .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 700)
             } detail: {
                 recordDetail
             }
