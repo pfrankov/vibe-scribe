@@ -468,7 +468,7 @@ private struct RecordsSidebarView: View {
     }
 
     private static func styleRelativeTitle(_ string: String, locale: Locale) -> String {
-        if let code = locale.languageCode, code.lowercased().hasPrefix("en") {
+        if let code = locale.language.languageCode?.identifier, code.lowercased().hasPrefix("en") {
             return string.capitalized(with: locale)
         }
         return string

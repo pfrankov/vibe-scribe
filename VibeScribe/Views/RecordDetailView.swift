@@ -621,27 +621,11 @@ struct RecordDetailView: View {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("m4a")
 
-        exportSession.outputURL = tempURL
-        exportSession.outputFileType = .m4a
         exportSession.audioTimePitchAlgorithm = .timeDomain
         exportSession.shouldOptimizeForNetworkUse = false
 
-        return try await withCheckedThrowingContinuation { continuation in
-            exportSession.exportAsynchronously {
-                switch exportSession.status {
-                case .completed:
-                    continuation.resume(returning: tempURL)
-                case .failed:
-                    let exportError = exportSession.error ?? AudioUtilsError.exportFailed("Unknown export error")
-                    continuation.resume(throwing: exportError)
-                case .cancelled:
-                    continuation.resume(throwing: AudioUtilsError.exportCancelled)
-                default:
-                    let exportError = exportSession.error ?? AudioUtilsError.exportFailed("Export did not complete")
-                    continuation.resume(throwing: exportError)
-                }
-            }
-        }
+        try await exportSession.export(to: tempURL, as: .m4a)
+        return tempURL
     }
 
     @MainActor
