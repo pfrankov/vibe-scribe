@@ -15,18 +15,19 @@ struct ContentView: View {
     @State private var shouldScrollToSelectedRecord = false
     @StateObject private var importManager = AudioFileImportManager()
     @State private var isDragOver = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
     @Query(sort: \Record.date, order: .reverse) private var records: [Record]
 
     var body: some View {
         VStack(spacing: 0) {
             // Main content
-            NavigationSplitView {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
                 RecordsSidebarView(
                     records: records,
                     selectedRecord: $selectedRecord,
                     shouldScrollToSelectedRecord: $shouldScrollToSelectedRecord,
-                    onCreateRecording: presentRecordingOverlay,
+                    onCreateRecording: presentRecordingOverlay
                 )
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 700)
             } detail: {
@@ -103,9 +104,13 @@ struct ContentView: View {
     @ViewBuilder
     private var recordDetail: some View {
         if let selectedRecord = selectedRecord {
-            RecordDetailView(record: selectedRecord) { _ in
-                self.selectedRecord = nil
-            }
+            RecordDetailView(
+                record: selectedRecord,
+                isSidebarCollapsed: columnVisibility == .detailOnly,
+                onRecordDeleted: { _ in
+                    self.selectedRecord = nil
+                }
+            )
             .id(selectedRecord.id)
         } else {
             VStack {

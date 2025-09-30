@@ -14,9 +14,17 @@ import UniformTypeIdentifiers
 
 // Detail view for a single record
 struct RecordDetailView: View {
+    
+    init(record: Record, isSidebarCollapsed: Bool = false, onRecordDeleted: ((UUID) -> Void)? = nil) {
+        self.record = record
+        self.isSidebarCollapsed = isSidebarCollapsed
+        self.onRecordDeleted = onRecordDeleted
+    }
+
     // Use @Bindable for direct modification of @Model properties
     @Bindable var record: Record
     var onRecordDeleted: ((UUID) -> Void)? = nil
+    var isSidebarCollapsed: Bool = false
     @Environment(\.modelContext) private var modelContext
     @Query private var appSettings: [AppSettings]
     
@@ -406,7 +414,9 @@ struct RecordDetailView: View {
                                 Spacer() // Add Spacer to push content to top
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Fix alignment to top
-        .padding(16) // More compact general padding
+        .padding(.horizontal, 16) // Keep sides consistent
+        .padding(.top, isSidebarCollapsed ? 16 : 0) // Dynamic top padding: 0 when sidebar is visible, original when collapsed
+        .animation(.easeInOut(duration: 0.25), value: isSidebarCollapsed)
         .animation(.easeInOut(duration: 0.4), value: shouldShowContent)
         .onAppear {
             // Initialize processing state based on current record state
