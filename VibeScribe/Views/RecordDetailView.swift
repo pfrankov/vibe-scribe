@@ -54,7 +54,11 @@ struct RecordDetailView: View {
     // Action menu state
     @State private var isShowingDeleteConfirmation = false
     @State private var isDownloading = false
-    
+    // Layout constants for the audio controls
+    private let speedControlColumnWidth: CGFloat = 68
+    private let speedControlColumnSpacing: CGFloat = 12
+    private let controlRowHeight: CGFloat = 28
+
     // Enum for tabs
     enum Tab {
         case transcription
@@ -79,7 +83,7 @@ struct RecordDetailView: View {
     private var settings: AppSettings {
         appSettings.first ?? AppSettings()
     }
-    
+
     // Check if we should show content or the processing view
     private var shouldShowContent: Bool {
         switch processingState {
@@ -182,7 +186,8 @@ struct RecordDetailView: View {
                     // Time and Slider Column
                     VStack(spacing: 8) {
                         // Progress Slider + Playback Speed
-                        HStack(spacing: 12) {
+                        // Reserve fixed-width column so the slider aligns with the duration label
+                        HStack(spacing: speedControlColumnSpacing) {
                             Slider(
                                 value: $playerManager.currentTime,
                                 in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
@@ -199,22 +204,9 @@ struct RecordDetailView: View {
                             .controlSize(.regular)
                             .disabled(!playerManager.isReady)
 
-                            Button {
-                                playerManager.cyclePlaybackSpeed()
-                            } label: {
-                                Text("\(playerManager.playbackSpeed, format: .number.precision(.fractionLength(0...2)))×")
-                                    .font(.callout.weight(.semibold))
-                                    .padding(.vertical, 4)
-                                    .padding(.horizontal, 10)
-                                    .background(.thinMaterial, in: Capsule())
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!playerManager.isReady)
-                            .help("Playback Speed")
+                            // Invisible reserved column for the speed control (constrained height)
+                            Color.clear
+                                .frame(width: speedControlColumnWidth, height: controlRowHeight)
                         }
                         
                         // Time Label with equal space on both sides for better alignment
@@ -231,6 +223,20 @@ struct RecordDetailView: View {
                                 .foregroundStyle(Color(NSColor.secondaryLabelColor))
                                 .monospacedDigit()
                         }
+                        .padding(.trailing, speedControlColumnWidth + speedControlColumnSpacing)
+                    }
+                    // Center the speed control vertically relative to the whole column
+                    .overlay(alignment: .trailing) {
+                        Button {
+                            playerManager.cyclePlaybackSpeed()
+                        } label: {
+                            Text("\(playerManager.playbackSpeed, format: .number.precision(.fractionLength(0...2)))×")
+                                .font(.title3.weight(.semibold))
+                                .frame(width: speedControlColumnWidth, height: controlRowHeight, alignment: .center)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!playerManager.isReady)
+                        .help("Playback Speed")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -424,22 +430,22 @@ struct RecordDetailView: View {
             
             // --- Refined File Loading Logic ---
             guard let fileURL = record.fileURL else {
-                print("Error: Record '\(record.name)' has no associated fileURL.")
+                Logger.error("Record '\(record.name)' has no associated fileURL.", category: .ui)
                 return // Exit early
             }
 
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                print("Error: Audio file for record '\(record.name)' not found at path: \(fileURL.path)")
+                Logger.error("Audio file for record '\(record.name)' not found at path: \(fileURL.path)", category: .audio)
                 return // Exit early
             }
 
-            print("Loading audio from: \(fileURL.path)")
+            Logger.debug("Loading audio from: \(fileURL.path)", category: .audio)
             playerManager.setupPlayer(url: fileURL)
             
             // Check if this is a new record that should auto-process
             // A record is considered "new" if it has no transcription yet
             if !record.hasTranscription && record.transcriptionText == nil {
-                print("Detected new record, starting automatic pipeline for: \(record.name)")
+                Logger.debug("Detected new record, starting automatic pipeline for: \(record.name)", category: .ui)
                 isAutomaticMode = true
                 startAutomaticPipeline()
             }
@@ -448,7 +454,7 @@ struct RecordDetailView: View {
             // If this view is showing the newly created record, start automatic processing
             if let recordId = notification.userInfo?["recordId"] as? UUID,
                recordId == record.id {
-                print("Received notification for new record creation: \(record.name)")
+                Logger.debug("Received notification for new record creation: \(record.name)", category: .ui)
                 isAutomaticMode = true
                 startAutomaticPipeline()
             }
@@ -498,12 +504,12 @@ struct RecordDetailView: View {
     
     // Update processing state based on current conditions
     private func updateProcessingState() {
-        print("🔄 updateProcessingState called")
-        print("🔍 isTranscribing: \(isTranscribing), isSSEStreaming: \(isSSEStreaming), chunks: \(sseStreamingChunks.count)")
+        Logger.debug("updateProcessingState called", category: .ui)
+        Logger.debug("isTranscribing: \(isTranscribing), isSSEStreaming: \(isSSEStreaming), chunks: \(sseStreamingChunks.count)", category: .ui)
         
         if let error = transcriptionError ?? summaryError {
             processingState = .error(error)
-            print("🚨 Set state to error: \(error)")
+            Logger.debug("Set state to error: \(error)", category: .ui)
             
             // Switch to appropriate tab based on error type
             if transcriptionError != nil {
@@ -515,24 +521,24 @@ struct RecordDetailView: View {
             // Use streaming state if SSE is active and we have chunks
             if isSSEStreaming && !sseStreamingChunks.isEmpty {
                 processingState = .streamingTranscription(sseStreamingChunks)
-                print("🌊 Set state to streamingTranscription with \(sseStreamingChunks.count) chunks")
+                Logger.debug("Set state to streamingTranscription with \(sseStreamingChunks.count) chunks", category: .transcription)
             } else {
                 processingState = .transcribing
-                print("📝 Set state to transcribing (no SSE or no chunks)")
+                Logger.debug("Set state to transcribing (no SSE or no chunks)", category: .transcription)
             }
         } else if isSummarizing {
             processingState = .summarizing
-            print("📋 Set state to summarizing")
+            Logger.debug("Set state to summarizing", category: .ui)
         } else if isAutomaticMode && record.hasTranscription && record.summaryText == nil {
             // In automatic mode, show summarizing between transcription and summarization
             processingState = .summarizing
-            print("🤖 Set state to summarizing (automatic mode)")
+            Logger.debug("Set state to summarizing (automatic mode)", category: .ui)
         } else if record.hasTranscription && record.summaryText != nil {
             processingState = .completed
-            print("✅ Set state to completed")
+            Logger.debug("Set state to completed", category: .ui)
         } else {
             processingState = .idle
-            print("💤 Set state to idle")
+            Logger.debug("Set state to idle", category: .ui)
         }
     }
 
@@ -541,22 +547,22 @@ struct RecordDetailView: View {
         isEditingTitle = true
         // Focus immediately - SwiftUI will handle timing properly
         isTitleFieldFocused = true
-        print("Started editing title for record: \(record.name)")
+        Logger.debug("Started editing title for record: \(record.name)", category: .ui)
     }
 
     private func saveTitle() {
         if !editingTitle.isEmpty && editingTitle != record.name {
-            print("Saving new title: \(editingTitle) for record ID: \(record.id)")
+            Logger.debug("Saving new title: \(editingTitle) for record ID: \(record.id)", category: .ui)
             record.name = editingTitle
         } else {
-            print("Title unchanged or empty, reverting.")
+            Logger.debug("Title unchanged or empty, reverting.", category: .ui)
         }
         isEditingTitle = false
         isTitleFieldFocused = false
     }
 
     private func cancelEditingTitle() {
-        print("Cancelled editing title for record: \(record.name)")
+        Logger.debug("Cancelled editing title for record: \(record.name)", category: .ui)
         isEditingTitle = false
         isTitleFieldFocused = false
     }
@@ -566,7 +572,7 @@ struct RecordDetailView: View {
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
-            print("Transcription copied to clipboard.")
+            Logger.info("Transcription copied to clipboard.", category: .ui)
         }
     }
 
@@ -575,7 +581,7 @@ struct RecordDetailView: View {
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
-            print("Summary copied to clipboard.")
+            Logger.info("Summary copied to clipboard.", category: .ui)
         }
     }
 
