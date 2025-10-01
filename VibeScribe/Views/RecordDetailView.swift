@@ -218,7 +218,10 @@ struct RecordDetailView: View {
                         .frame(width: 12)
                     
                     // Time and Slider Column
-                    VStack(spacing: 8) {
+                    VStack(spacing: 2) {
+                        // Add 5 pixel top indentation
+                        Color.clear
+                            .frame(height: 12)
                         // Progress Slider + Playback Speed
                         // Reserve fixed-width column so the slider aligns with the duration label
                         HStack(spacing: speedControlColumnSpacing) {
