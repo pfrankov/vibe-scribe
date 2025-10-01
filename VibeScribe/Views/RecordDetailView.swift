@@ -165,23 +165,57 @@ struct RecordDetailView: View {
             }
             .padding(.bottom, 4)
             
-            // --- Audio Player UI --- 
-            VStack(spacing: 0) {
-                HStack(spacing: 16) {
+           // --- Audio Player UI ---
+           VStack(spacing: 0) {
+               HStack(spacing: 0) {
+                    // Rewind Button (10 seconds back)
+                    Button {
+                        playerManager.skipBackward(10)
+                    } label: {
+                        Image(systemName: "gobackward.10")
+                            .font(.system(size: 24))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!playerManager.isPlaying)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .help("Skip back 10 seconds")
+                    
                     // Play/Pause Button
                     Button {
                         playerManager.togglePlayPause()
                     } label: {
                         Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 32))
+                            .font(.system(size: 44))
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.plain)
                     .disabled(!playerManager.isReady)
-                    .frame(width: 48, height: 48)
+                    .frame(width: 56, height: 56)
                     .contentShape(Rectangle())
                     .help(playerManager.isPlaying ? "Pause" : "Play")
+                    
+                    // Forward Button (10 seconds forward)
+                    Button {
+                        playerManager.skipForward(10)
+                    } label: {
+                        Image(systemName: "goforward.10")
+                            .font(.system(size: 24))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!playerManager.isPlaying)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .help("Skip forward 10 seconds")
+                    
+                    // Spacing between controls and time/slider
+                    Spacer()
+                        .frame(width: 12)
                     
                     // Time and Slider Column
                     VStack(spacing: 8) {
@@ -239,14 +273,14 @@ struct RecordDetailView: View {
                         .help("Playback Speed")
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
             .background(Color(NSColor.controlBackgroundColor).opacity(0.9))
             .cornerRadius(10)
             .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
             .disabled(!playerManager.isReady)
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
             
             Divider()
             

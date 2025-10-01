@@ -116,6 +116,20 @@ final class AudioPlayerManager: NSObject, ObservableObject {
         pausePlayback()
     }
 
+    func skipForward(_ seconds: TimeInterval = 10) {
+        guard isReady else { return }
+        let newTime = min(currentTime + seconds, duration)
+        seek(to: newTime)
+        Logger.debug("Skipped forward \(seconds) seconds to \(newTime)", category: .audio)
+    }
+    
+    func skipBackward(_ seconds: TimeInterval = 10) {
+        guard isReady else { return }
+        let newTime = max(currentTime - seconds, 0)
+        seek(to: newTime)
+        Logger.debug("Skipped backward \(seconds) seconds to \(newTime)", category: .audio)
+    }
+
     func stopAndCleanup() {
         pausePlayback(clearResumeFlag: true)
         playerNode.stop()
