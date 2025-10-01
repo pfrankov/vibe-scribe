@@ -29,7 +29,6 @@ struct RecordDetailView: View {
     @Query private var appSettings: [AppSettings]
     
     @StateObject private var playerManager = AudioPlayerManager()
-    @State private var isEditingSlider = false // Track if user is scrubbing
     @State private var isTranscribing = false
     @State private var transcriptionError: String? = nil
     @State private var cancellables = Set<AnyCancellable>()
@@ -58,6 +57,121 @@ struct RecordDetailView: View {
     private let speedControlColumnWidth: CGFloat = 68
     private let speedControlColumnSpacing: CGFloat = 12
     private let controlRowHeight: CGFloat = 28
+
+    // Removed tuning controls (auto-optimized waveform)
+
+    // tuning panel removed
+
+    // Extract heavy player UI into a computed property to help type-checker
+    private var playerControls: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                // Rewind Button (10 seconds back)
+                Button {
+                    playerManager.skipBackward(10)
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 24))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!playerManager.isPlaying)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .help("Skip back 10 seconds")
+
+                // Play/Pause Button
+                Button {
+                    playerManager.togglePlayPause()
+                } label: {
+                    Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 44))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .disabled(!playerManager.isReady)
+                .frame(width: 56, height: 56)
+                .contentShape(Rectangle())
+                .help(playerManager.isPlaying ? "Pause" : "Play")
+
+                // Forward Button (10 seconds forward)
+                Button {
+                    playerManager.skipForward(10)
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 24))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!playerManager.isPlaying)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .help("Skip forward 10 seconds")
+
+                // Spacing between controls and time/slider
+                Spacer().frame(width: 12)
+
+                // Time and Slider Column
+                VStack(spacing: 2) {
+                    Color.clear.frame(height: 12)
+
+                    HStack(spacing: speedControlColumnSpacing) {
+                        WaveformScrubberView(
+                            progress: Binding(
+                                get: { playerManager.playbackProgress },
+                                set: { playerManager.previewScrubProgress($0) }
+                            ),
+                            samples: playerManager.waveformSamples,
+                            duration: playerManager.duration,
+                            isEnabled: playerManager.isReady && playerManager.duration > 0,
+                            onScrubStart: { if playerManager.isReady { playerManager.scrubbingStarted() } },
+                            onScrubEnd: { ratio in
+                                if playerManager.isReady { playerManager.seek(toProgress: ratio) }
+                            }
+                        )
+                        .frame(maxWidth: .infinity)
+
+                        Color.clear.frame(width: speedControlColumnWidth, height: controlRowHeight)
+                    }
+
+                    HStack {
+                        Text(playerManager.currentTime.clockString)
+                            .font(.caption)
+                            .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                            .monospacedDigit()
+                        Spacer()
+                        Text(playerManager.duration.clockString)
+                            .font(.caption)
+                            .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                            .monospacedDigit()
+                    }
+                    .padding(.trailing, speedControlColumnWidth + speedControlColumnSpacing)
+                }
+                .overlay(alignment: .trailing) {
+                    Button { playerManager.cyclePlaybackSpeed() } label: {
+                        Text("\(playerManager.playbackSpeed, format: .number.precision(.fractionLength(0...2)))×")
+                            .font(.title3.weight(.semibold))
+                            .frame(width: speedControlColumnWidth, height: controlRowHeight, alignment: .center)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!playerManager.isReady)
+                    .help("Playback Speed")
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            // tuning panel removed
+        }
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.9))
+        .cornerRadius(10)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .disabled(!playerManager.isReady)
+        .padding(.vertical, 4)
+    }
 
     // Enum for tabs
     enum Tab {
@@ -166,125 +280,8 @@ struct RecordDetailView: View {
             .padding(.bottom, 4)
             
            // --- Audio Player UI ---
-           VStack(spacing: 0) {
-               HStack(spacing: 0) {
-                    // Rewind Button (10 seconds back)
-                    Button {
-                        playerManager.skipBackward(10)
-                    } label: {
-                        Image(systemName: "gobackward.10")
-                            .font(.system(size: 24))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!playerManager.isPlaying)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-                    .help("Skip back 10 seconds")
-                    
-                    // Play/Pause Button
-                    Button {
-                        playerManager.togglePlayPause()
-                    } label: {
-                        Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 44))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!playerManager.isReady)
-                    .frame(width: 56, height: 56)
-                    .contentShape(Rectangle())
-                    .help(playerManager.isPlaying ? "Pause" : "Play")
-                    
-                    // Forward Button (10 seconds forward)
-                    Button {
-                        playerManager.skipForward(10)
-                    } label: {
-                        Image(systemName: "goforward.10")
-                            .font(.system(size: 24))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!playerManager.isPlaying)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-                    .help("Skip forward 10 seconds")
-                    
-                    // Spacing between controls and time/slider
-                    Spacer()
-                        .frame(width: 12)
-                    
-                    // Time and Slider Column
-                    VStack(spacing: 2) {
-                        // Add 5 pixel top indentation
-                        Color.clear
-                            .frame(height: 12)
-                        // Progress Slider + Playback Speed
-                        // Reserve fixed-width column so the slider aligns with the duration label
-                        HStack(spacing: speedControlColumnSpacing) {
-                            Slider(
-                                value: $playerManager.currentTime,
-                                in: 0...(playerManager.duration > 0 ? playerManager.duration : 1.0),
-                                onEditingChanged: { editing in
-                                    isEditingSlider = editing
-                                    if editing {
-                                        playerManager.scrubbingStarted()
-                                    } else {
-                                        playerManager.seek(to: playerManager.currentTime)
-                                    }
-                                }
-                            )
-                            .frame(maxWidth: .infinity)
-                            .controlSize(.regular)
-                            .disabled(!playerManager.isReady)
+           playerControls
 
-                            // Invisible reserved column for the speed control (constrained height)
-                            Color.clear
-                                .frame(width: speedControlColumnWidth, height: controlRowHeight)
-                        }
-                        
-                        // Time Label with equal space on both sides for better alignment
-                        HStack {
-                            Text(playerManager.currentTime.clockString)
-                                .font(.caption)
-                                .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                                .monospacedDigit()
-                            
-                            Spacer()
-                            
-                            Text(playerManager.duration.clockString)
-                                .font(.caption)
-                                .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                                .monospacedDigit()
-                        }
-                        .padding(.trailing, speedControlColumnWidth + speedControlColumnSpacing)
-                    }
-                    // Center the speed control vertically relative to the whole column
-                    .overlay(alignment: .trailing) {
-                        Button {
-                            playerManager.cyclePlaybackSpeed()
-                        } label: {
-                            Text("\(playerManager.playbackSpeed, format: .number.precision(.fractionLength(0...2)))×")
-                                .font(.title3.weight(.semibold))
-                                .frame(width: speedControlColumnWidth, height: controlRowHeight, alignment: .center)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!playerManager.isReady)
-                        .help("Playback Speed")
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-            .background(Color(NSColor.controlBackgroundColor).opacity(0.9))
-            .cornerRadius(10)
-            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-            .disabled(!playerManager.isReady)
-            .padding(.vertical, 4)
-            
             Divider()
             
             // Processing loader - always shows when processing, positioned below player
