@@ -125,15 +125,31 @@ struct ContentView: View {
 
     // MARK: - Helper Methods
     
-    private func assignMainWindow() {
-        if let window = NSApplication.shared.windows.first(where: { $0.isMainWindow }) {
-            (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = window
+    @MainActor
+    private func assignMainWindow(retryCount: Int = 0) {
+        guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
+
+        if let primaryWindow = NSApplication.shared.mainWindow
+            ?? NSApplication.shared.keyWindow
+            ?? NSApplication.shared.windows.first(where: { $0.isVisible }) {
+            guard appDelegate.mainWindow !== primaryWindow else { return }
+            appDelegate.mainWindow = primaryWindow
             Logger.info("Assigned main window to AppDelegate", category: .ui)
-        } else if let anyWindow = NSApplication.shared.windows.first {
-            (NSApplication.shared.delegate as? AppDelegate)?.mainWindow = anyWindow
-            Logger.warning("Assigned fallback window to AppDelegate", category: .ui)
-        } else {
-            Logger.error("No window found to assign to AppDelegate", category: .ui)
+            return
+        }
+
+        guard retryCount < 3 else {
+            if let fallbackWindow = NSApplication.shared.windows.first {
+                appDelegate.mainWindow = fallbackWindow
+                Logger.info("Assigned fallback window to AppDelegate after retries", category: .ui)
+            } else {
+                Logger.error("No window found to assign to AppDelegate", category: .ui)
+            }
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            self.assignMainWindow(retryCount: retryCount + 1)
         }
     }
     

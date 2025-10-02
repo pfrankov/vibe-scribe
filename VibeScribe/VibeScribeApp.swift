@@ -118,7 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             _ = try await SCShareableContent.current
             Logger.info("System audio permission available", category: .audio)
         } catch {
-            Logger.warning("System audio permission not available", category: .audio)
+            Logger.info("System audio permission not yet available; will request when needed", category: .audio)
         }
     }
     

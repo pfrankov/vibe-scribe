@@ -1,7 +1,7 @@
 import SwiftUI
 
 // Processing states for the audio pipeline
-enum ProcessingState {
+enum ProcessingState: Equatable {
     case idle
     case transcribing
     case summarizing

@@ -602,11 +602,12 @@ struct RecordDetailView: View {
     private func updateProcessingState() {
         Logger.debug("updateProcessingState called", category: .ui)
         Logger.debug("isTranscribing: \(isTranscribing), isSSEStreaming: \(isSSEStreaming), chunks: \(sseStreamingChunks.count)", category: .ui)
-        
+
+        let nextState: ProcessingState
+
         if let error = transcriptionError ?? summaryError {
-            processingState = .error(error)
-            Logger.debug("Set state to error: \(error)", category: .ui)
-            
+            nextState = .error(error)
+
             // Switch to appropriate tab based on error type
             if transcriptionError != nil {
                 selectedTab = .transcription
@@ -616,26 +617,25 @@ struct RecordDetailView: View {
         } else if isTranscribing {
             // Use streaming state if SSE is active and we have chunks
             if isSSEStreaming && !sseStreamingChunks.isEmpty {
-                processingState = .streamingTranscription(sseStreamingChunks)
-                Logger.debug("Set state to streamingTranscription with \(sseStreamingChunks.count) chunks", category: .transcription)
+                nextState = .streamingTranscription(sseStreamingChunks)
             } else {
-                processingState = .transcribing
-                Logger.debug("Set state to transcribing (no SSE or no chunks)", category: .transcription)
+                nextState = .transcribing
             }
         } else if isSummarizing {
-            processingState = .summarizing
-            Logger.debug("Set state to summarizing", category: .ui)
+            nextState = .summarizing
         } else if isAutomaticMode && record.hasTranscription && record.summaryText == nil {
             // In automatic mode, show summarizing between transcription and summarization
-            processingState = .summarizing
-            Logger.debug("Set state to summarizing (automatic mode)", category: .ui)
+            nextState = .summarizing
         } else if record.hasTranscription && record.summaryText != nil {
-            processingState = .completed
-            Logger.debug("Set state to completed", category: .ui)
+            nextState = .completed
         } else {
-            processingState = .idle
-            Logger.debug("Set state to idle", category: .ui)
+            nextState = .idle
         }
+
+        guard nextState != processingState else { return }
+
+        processingState = nextState
+        Logger.debug("Processing state changed to \(nextState.logDescription)", category: .ui)
     }
 
     private func startEditingTitle() {
@@ -1400,4 +1400,23 @@ struct RecordDetailView: View {
         // Start transcription first
         startTranscription()
     }
-} 
+}
+
+private extension ProcessingState {
+    var logDescription: String {
+        switch self {
+        case .idle:
+            return "idle"
+        case .transcribing:
+            return "transcribing"
+        case .summarizing:
+            return "summarizing"
+        case .completed:
+            return "completed"
+        case .error(let message):
+            return "error(\(message))"
+        case .streamingTranscription(let chunks):
+            return "streamingTranscription(\(chunks.count) chunks)"
+        }
+    }
+}
