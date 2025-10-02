@@ -378,17 +378,40 @@ extension AudioPlayerManager {
         let dynamicTarget = min(16_000, max(targetWaveformSampleCount, Int(durationSeconds * 14)))
         let bucketCount = min(dynamicTarget, max(1, totalFrames))
 
-        let workItem = DispatchWorkItem { [weak self] in
+        let asset = AVURLAsset(url: url)
+
+        Task(priority: .userInitiated) { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .audio)
+                guard let track = tracks.first else {
+                    Logger.warning("No audio track for waveform generation", category: .audio)
+                    return
+                }
+
+                self.processWaveform(asset: asset,
+                                     track: track,
+                                     bucketCount: bucketCount,
+                                     durationSeconds: durationSeconds,
+                                     generationID: generationID)
+            } catch {
+                Logger.error("Failed to load audio tracks for waveform generation", error: error, category: .audio)
+            }
+        }
+    }
+
+    private func processWaveform(asset: AVURLAsset,
+                                 track: AVAssetTrack,
+                                 bucketCount: Int,
+                                 durationSeconds: Double,
+                                 generationID: UUID) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
 
             // Fast path: downsample decode using AVAssetReader to ~4 kHz mono
             // AVAssetReader requires sample rate between 8 kHz and 192 kHz
             let targetSampleRate: Double = 8_000
-            let asset = AVURLAsset(url: url)
-            guard let track = asset.tracks(withMediaType: .audio).first else {
-                Logger.warning("No audio track for waveform generation", category: .audio)
-                return
-            }
 
             let outputSettings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatLinearPCM,
@@ -400,8 +423,6 @@ extension AudioPlayerManager {
             ]
 
             var composite: [Float] = Array(repeating: 0, count: bucketCount)
-            var bucketSumSquares: [Double] = Array(repeating: 0, count: bucketCount)
-            var bucketCounts: [Int] = Array(repeating: 0, count: bucketCount)
 
             do {
                 let reader = try AVAssetReader(asset: asset)
@@ -421,31 +442,33 @@ extension AudioPlayerManager {
                     var lengthAtOffset = 0
                     var totalLength = 0
                     var dataPointer: UnsafeMutablePointer<Int8>?
-                    let status = CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: &lengthAtOffset, totalLengthOut: &totalLength, dataPointerOut: &dataPointer)
+                    let status = CMBlockBufferGetDataPointer(
+                        block,
+                        atOffset: 0,
+                        lengthAtOffsetOut: &lengthAtOffset,
+                        totalLengthOut: &totalLength,
+                        dataPointerOut: &dataPointer
+                    )
                     if status != kCMBlockBufferNoErr || dataPointer == nil || totalLength <= 0 {
                         continue
                     }
                     let count = totalLength / MemoryLayout<Float>.size
                     let floatPtr = dataPointer!.withMemoryRebound(to: Float.self, capacity: count) { $0 }
 
-                    var i = 0
-                    while i < count {
+                    var index = 0
+                    while index < count {
                         let framesIntoBucket = processedFrames % framesPerBucketDS
                         let framesRemainingInBucket = framesPerBucketDS - framesIntoBucket
-                        let chunkLen = min(framesRemainingInBucket, count - i)
+                        let chunkLength = min(framesRemainingInBucket, count - index)
 
-                        var maxVal: Float = 0
-                        var sumSq: Float = 0
-                        vDSP_maxv(floatPtr.advanced(by: i), 1, &maxVal, vDSP_Length(chunkLen))
-                        vDSP_svesq(floatPtr.advanced(by: i), 1, &sumSq, vDSP_Length(chunkLen))
+                        var maxValue: Float = 0
+                        vDSP_maxv(floatPtr.advanced(by: index), 1, &maxValue, vDSP_Length(chunkLength))
 
-                        let bIdx = min(bucketCount - 1, processedFrames / framesPerBucketDS)
-                        if maxVal > composite[bIdx] { composite[bIdx] = maxVal }
-                        bucketSumSquares[bIdx] += Double(sumSq)
-                        bucketCounts[bIdx] += chunkLen
+                        let bucketIndex = min(bucketCount - 1, processedFrames / framesPerBucketDS)
+                        if maxValue > composite[bucketIndex] { composite[bucketIndex] = maxValue }
 
-                        processedFrames += chunkLen
-                        i += chunkLen
+                        processedFrames += chunkLength
+                        index += chunkLength
                     }
                     CMSampleBufferInvalidate(sampleBuffer)
                 }
@@ -462,54 +485,50 @@ extension AudioPlayerManager {
                     return
                 }
 
-                // Map to dB to preserve contrast across long ranges
-                @inline(__always) func ampToDb(_ v: Float) -> Float {
-                    return 20 * log10(max(v, 1e-6))
+                @inline(__always) func amplitudeToDecibels(_ value: Float) -> Float {
+                    20 * log10(max(value, 1e-6))
                 }
-                var dbValues = composite.map { ampToDb($0) }
+                let dbValues = composite.map { amplitudeToDecibels($0) }
 
-                // Robust normalization on dB values
-                func percentileDb(_ data: [Float], _ p: Double) -> Float {
-                    let n = data.count
-                    if n == 0 { return -60 }
+                func percentileDb(_ data: [Float], _ percentile: Double) -> Float {
+                    let count = data.count
+                    if count == 0 { return -60 }
                     let sorted = data.sorted()
-                    let pos = min(max(p, 0), 1) * Double(n - 1)
-                    let lower = Int(floor(pos))
-                    let upper = Int(ceil(pos))
+                    let position = min(max(percentile, 0), 1) * Double(count - 1)
+                    let lower = Int(floor(position))
+                    let upper = Int(ceil(position))
                     if lower == upper { return sorted[lower] }
-                    let t = Float(pos - Double(lower))
+                    let t = Float(position - Double(lower))
                     return sorted[lower] * (1 - t) + sorted[upper] * t
                 }
 
-                let hi = percentileDb(dbValues, 0.999)
-                let loCandidate = percentileDb(dbValues, 0.10)
-                let dynamicRange: Float = 48 // dB
-                let lo = max(hi - dynamicRange, loCandidate)
-                let span = max(6, hi - lo) // min range
+                let highPercentile = percentileDb(dbValues, 0.999)
+                let lowCandidate = percentileDb(dbValues, 0.10)
+                let dynamicRange: Float = 48
+                let low = max(highPercentile - dynamicRange, lowCandidate)
+                let span = max(6, highPercentile - low)
 
-                var normalized = dbValues.map { v -> Float in
-                    let x = (v - lo) / span
-                    return max(0, min(1, x))
+                var normalized = dbValues.map { value -> Float in
+                    let scaled = (value - low) / span
+                    return max(0, min(1, scaled))
                 }
 
-                // Subtle neighbor smoothing
                 if normalized.count > 2 {
-                    var out = normalized
-                    for i in 0..<normalized.count {
-                        let l = i > 0 ? normalized[i - 1] : normalized[i]
-                        let c = normalized[i]
-                        let r = i + 1 < normalized.count ? normalized[i + 1] : normalized[i]
-                        out[i] = c * 0.7 + (l + r) * 0.15
+                    var smoothed = normalized
+                    for index in 0..<normalized.count {
+                        let left = index > 0 ? normalized[index - 1] : normalized[index]
+                        let center = normalized[index]
+                        let right = index + 1 < normalized.count ? normalized[index + 1] : normalized[index]
+                        smoothed[index] = center * 0.7 + (left + right) * 0.15
                     }
-                    normalized = out
+                    normalized = smoothed
                 }
 
-                // Gentle gamma to lift quieter parts slightly (editor-like look)
-                let bucketDurationSeconds = durationSeconds / Double(bucketCount)
-                let clampedDuration = min(max(bucketDurationSeconds, 0), 0.4)
+                let bucketDuration = durationSeconds / Double(bucketCount)
+                let clampedDuration = min(max(bucketDuration, 0), 0.4)
                 let t = max(0.0, min(1.0, clampedDuration / 0.4))
-                let gamma = Float(0.9 + 0.15 * t) // 0.9…1.05
-                var shaped = normalized.map { pow($0, gamma) }
+                let gamma = Float(0.9 + 0.15 * t)
+                let shaped = normalized.map { pow($0, gamma) }
 
                 let floorValue = max(0.0015, 0.006 - Float(t) * 0.003)
                 let finalWave = shaped.map { max(floorValue, min(1.0, $0)) }
@@ -522,7 +541,5 @@ extension AudioPlayerManager {
                 Logger.error("Waveform generation failed", error: error, category: .audio)
             }
         }
-
-        DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
     }
 }

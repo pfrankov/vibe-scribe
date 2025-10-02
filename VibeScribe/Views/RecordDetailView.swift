@@ -57,6 +57,7 @@ struct RecordDetailView: View {
     private let speedControlColumnWidth: CGFloat = 68
     private let speedControlColumnSpacing: CGFloat = 12
     private let controlRowHeight: CGFloat = 28
+    @State private var spaceKeyMonitor: Any?
 
     // Removed tuning controls (auto-optimized waveform)
 
@@ -475,7 +476,8 @@ struct RecordDetailView: View {
 
             Logger.debug("Loading audio from: \(fileURL.path)", category: .audio)
             playerManager.setupPlayer(url: fileURL)
-            
+            registerSpacebarShortcut()
+
             // Check if this is a new record that should auto-process
             // A record is considered "new" if it has no transcription yet
             if !record.hasTranscription && record.transcriptionText == nil {
@@ -494,6 +496,7 @@ struct RecordDetailView: View {
             }
         }
         .onDisappear {
+            unregisterSpacebarShortcut()
             playerManager.stopAndCleanup()
             // Cancel all subscriptions when closing window
             cancellables.forEach { $0.cancel() }
@@ -534,7 +537,66 @@ struct RecordDetailView: View {
         }
     }
 
-    // --- Helper Functions --- 
+    // MARK: - Keyboard Handling
+
+    private func registerSpacebarShortcut() {
+        guard spaceKeyMonitor == nil else { return }
+
+        spaceKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            guard shouldHandleSpacebar(event: event) else { return event }
+
+            playerManager.togglePlayPause()
+            return nil
+        }
+    }
+
+    private func unregisterSpacebarShortcut() {
+        if let monitor = spaceKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            spaceKeyMonitor = nil
+        }
+    }
+
+    private func shouldHandleSpacebar(event: NSEvent) -> Bool {
+        guard event.keyCode == 49 else { return false }
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty else { return false }
+
+        guard let window = event.window ?? NSApp.keyWindow, window.isKeyWindow else { return false }
+        if window.isSheet { return false }
+        if let mainWindow = (NSApplication.shared.delegate as? AppDelegate)?.mainWindow,
+           window != mainWindow {
+            return false
+        }
+
+        guard playerManager.isReady else { return false }
+        guard !isEditingTitle else { return false }
+        guard !isTextInputActive(in: window) else { return false }
+        return true
+    }
+
+    private func isTextInputActive(in window: NSWindow) -> Bool {
+        guard let responder = window.firstResponder else { return false }
+
+        if let textView = responder as? NSTextView {
+            if textView.isEditable || textView.isFieldEditor { return true }
+        }
+
+        if responder is NSTextField { return true }
+
+        if let view = responder as? NSView,
+           let fieldEditor = window.fieldEditor(false, for: nil),
+           fieldEditor === view {
+            return true
+        }
+
+        if responder.conforms(to: NSTextInputClient.self) {
+            return true
+        }
+
+        return false
+    }
+
+    // --- Helper Functions ---
     
     // Update processing state based on current conditions
     private func updateProcessingState() {
