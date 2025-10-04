@@ -45,13 +45,22 @@ struct RecordRow: View {
             }
 
             HStack(alignment: .center, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(formattedDateTime(record.date))
-                        .foregroundStyle(.secondary) // Use system token instead of manual color
-                    Text(record.duration.clockString)
-                        .foregroundStyle(.secondary) // Use system token
+                HStack(spacing: 10) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar")
+                            .imageScale(.small)
+                        Text(formattedDateTime(record.date))
+                    }
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .imageScale(.small)
+                        Text(record.duration.clockString)
+                            .monospacedDigit()
+                    }
                 }
                 .font(.caption)
+                .foregroundStyle(.secondary)
 
                 Spacer(minLength: 0)
 
