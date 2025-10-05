@@ -29,6 +29,7 @@ struct RecordDetailView: View {
     @Query private var appSettings: [AppSettings]
     
     @StateObject private var playerManager = AudioPlayerManager()
+    @ObservedObject private var modelService = ModelService.shared
     @State private var isTranscribing = false
     @State private var transcriptionError: String? = nil
     @State private var cancellables = Set<AnyCancellable>()
@@ -36,6 +37,9 @@ struct RecordDetailView: View {
     @State private var isSummarizing = false // Track summarization status
     @State private var summaryError: String? = nil
     @State private var isAutomaticMode = false // Track if this is a new record that should auto-process
+
+    @State private var selectedWhisperModel: String = ""
+    @State private var selectedSummaryModel: String = ""
 
     // Processing state for the beautiful loader
     @State private var processingState: ProcessingState = .idle
@@ -196,7 +200,51 @@ struct RecordDetailView: View {
     
     // Get current settings
     private var settings: AppSettings {
-        appSettings.first ?? AppSettings()
+        if let existingSettings = appSettings.first {
+            return existingSettings
+        } else {
+            let newSettings = AppSettings()
+            modelContext.insert(newSettings)
+            return newSettings
+        }
+    }
+
+    private var whisperModelOptions: [String] {
+        if modelService.whisperModels.isEmpty,
+           !settings.whisperModel.isEmpty,
+           !modelService.whisperModels.contains(settings.whisperModel) {
+            return [settings.whisperModel]
+        }
+        return modelService.whisperModels
+    }
+
+    private var summaryModelOptions: [String] {
+        if modelService.openAIModels.isEmpty,
+           !settings.openAIModel.isEmpty,
+           !modelService.openAIModels.contains(settings.openAIModel) {
+            return [settings.openAIModel]
+        }
+        return modelService.openAIModels
+    }
+
+    private func updateSettings(
+        _ keyPath: ReferenceWritableKeyPath<AppSettings, String>,
+        with newValue: String,
+        settingName: String
+    ) {
+        let normalizedValue = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentSettings = settings
+
+        guard currentSettings[keyPath: keyPath] != normalizedValue else { return }
+
+        currentSettings[keyPath: keyPath] = normalizedValue
+
+        do {
+            try modelContext.save()
+            Logger.debug("Updated \(settingName) to: \(normalizedValue)", category: .ui)
+        } catch {
+            Logger.error("Failed to save updated setting: \(error.localizedDescription)", category: .ui)
+        }
     }
 
     // Check if we should show content or the processing view
@@ -354,24 +402,34 @@ struct RecordDetailView: View {
                         }
                         .frame(maxHeight: .infinity)
                         
-                        // Transcribe Button 
-                        Button {
-                            startTranscription()
-                        } label: {
-                            HStack {
-                                if isTranscribing {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "waveform")
+                        // Transcribe Controls
+                        HStack(spacing: 12) {
+                            ComboBoxView(
+                                placeholder: whisperModelOptions.isEmpty ? "Select transcription model" : "Choose model",
+                                options: whisperModelOptions,
+                                selectedOption: $selectedWhisperModel
+                            )
+                            .frame(width: 220, height: 32)
+
+                            Button {
+                                startTranscription()
+                            } label: {
+                                HStack {
+                                    if isTranscribing {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "waveform")
+                                    }
+                                    Text("Transcribe")
                                 }
-                                Text("Transcribe")
+                                .frame(minWidth: 130)
                             }
-                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(isTranscribing || record.fileURL == nil)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(isTranscribing || record.fileURL == nil)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                         .padding(.top, 4)
                     }
                 } else {
@@ -429,24 +487,34 @@ struct RecordDetailView: View {
                         }
                         .frame(maxHeight: .infinity)
                         
-                        // Summarize Button 
-                        Button {
-                            startSummarization()
-                        } label: {
-                            HStack {
-                                if isSummarizing {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "doc.text.magnifyingglass")
+                        // Summarize Controls
+                        HStack(spacing: 12) {
+                            ComboBoxView(
+                                placeholder: summaryModelOptions.isEmpty ? "Select summary model" : "Choose model",
+                                options: summaryModelOptions,
+                                selectedOption: $selectedSummaryModel
+                            )
+                            .frame(width: 220, height: 32)
+
+                            Button {
+                                startSummarization()
+                            } label: {
+                                HStack {
+                                    if isSummarizing {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "doc.text.magnifyingglass")
+                                    }
+                                    Text("Summarize")
                                 }
-                                Text("Summarize")
+                                .frame(minWidth: 130)
                             }
-                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(isSummarizing || record.transcriptionText == nil || !record.hasTranscription)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(isSummarizing || record.transcriptionText == nil || !record.hasTranscription)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                         .padding(.top, 4)
                     }
                 }
@@ -460,6 +528,9 @@ struct RecordDetailView: View {
         .animation(.easeInOut(duration: 0.25), value: isSidebarCollapsed)
         .animation(.easeInOut(duration: 0.4), value: shouldShowContent)
         .onAppear {
+            selectedWhisperModel = settings.whisperModel
+            selectedSummaryModel = settings.openAIModel
+
             // Initialize processing state based on current record state
             updateProcessingState()
             
@@ -506,6 +577,22 @@ struct RecordDetailView: View {
         .onChange(of: isTitleFieldFocused) { oldValue, newValue in
             if !newValue && isEditingTitle { // If focus is lost AND we were editing
                 cancelEditingTitle()
+            }
+        }
+        .onChange(of: selectedWhisperModel) { _, newValue in
+            updateSettings(\.whisperModel, with: newValue, settingName: "Whisper model")
+        }
+        .onChange(of: selectedSummaryModel) { _, newValue in
+            updateSettings(\.openAIModel, with: newValue, settingName: "Summary model")
+        }
+        .onChange(of: appSettings.first?.whisperModel ?? "") { _, newValue in
+            if newValue != selectedWhisperModel {
+                selectedWhisperModel = newValue
+            }
+        }
+        .onChange(of: appSettings.first?.openAIModel ?? "") { _, newValue in
+            if newValue != selectedSummaryModel {
+                selectedSummaryModel = newValue
             }
         }
         // Update processing state when transcription/summarization states change
