@@ -295,10 +295,14 @@ private struct RecordsSidebarView: View {
     let onCreateRecording: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            SidebarHeader(onCreateRecording: onCreateRecording)
-            Divider()
-            content
+        ZStack {
+            VisualEffectBlurView(material: .sidebar, blendingMode: .behindWindow)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                SidebarHeader(onCreateRecording: onCreateRecording)
+                content
+            }
         }
     }
 
@@ -316,11 +320,16 @@ private struct RecordsSidebarView: View {
                                     .tag(record)
                                     .id(record.id)
                                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                    .listRowBackground(Color.clear)
                             }
                         }
                     }
                 }
-                .listStyle(.plain)
+                .listStyle(.sidebar)
+                .listRowSeparator(.hidden)
+                .listSectionSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
                 .scrollDismissesKeyboard(.immediately)
                 .onChange(of: selectedRecord) { _, newValue in
                     guard shouldScrollToSelectedRecord, let recordToScroll = newValue else { return }
@@ -369,9 +378,14 @@ private struct RecordsSidebarView: View {
             .fontWeight(.semibold)
             .foregroundColor(Color(NSColor.secondaryLabelColor))
             .textCase(nil)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 4)
+            .background(
+                VisualEffectBlurView(material: .sidebar, blendingMode: .behindWindow)
+                    .overlay(Color.clear)
+            )
     }
 
     private func sectionTitle(
