@@ -374,9 +374,7 @@ struct RecordDetailView: View {
                         
                         // Show error if exists
                         if let error = transcriptionError {
-                            Text(error)
-                                .foregroundStyle(.red)
-                                .font(.callout)
+                            InlineMessageView(error)
                                 .padding(.bottom, 4)
                         }
                         
@@ -451,9 +449,7 @@ struct RecordDetailView: View {
                         
                         // Show error if exists
                         if let error = summaryError {
-                            Text(error)
-                                .foregroundStyle(.red)
-                                .font(.callout)
+                            InlineMessageView(error)
                                 .padding(.bottom, 4)
                         }
                         

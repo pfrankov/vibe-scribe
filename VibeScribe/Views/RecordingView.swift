@@ -99,13 +99,9 @@ struct RecordingView: View {
 
             // Display error message if any
             if let error = displayError {
-                Text(error.localizedDescription)
-                    .foregroundColor(Color(NSColor.systemRed))
-                    .font(.caption)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
+                InlineMessageView(error: error)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(.horizontal, 24)
             }
 
             HStack(spacing: 20) {

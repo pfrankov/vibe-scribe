@@ -281,9 +281,7 @@ struct SettingsView: View {
             }
             
             if let error = modelService.whisperModelsError {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.caption)
+                InlineMessageView(error)
             }
             
             captionText("Specify the Whisper model to use for transcription. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
@@ -359,9 +357,7 @@ struct SettingsView: View {
             }
             
             if let error = modelService.openAIModelsError {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.caption)
+                InlineMessageView(error)
             }
             
             captionText("Specify the model to use for summarization. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
