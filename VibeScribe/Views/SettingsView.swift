@@ -137,6 +137,7 @@ struct OptimizedTextEditor: NSViewRepresentable {
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Query(filter: #Predicate<AppSettings> { $0.id == "app_settings" })
     private var appSettings: [AppSettings]
     
@@ -158,6 +159,8 @@ struct SettingsView: View {
     
     var body: some View {
         VStack(spacing: 0) {
+            header
+
             // Tab selector
             Picker("Settings", selection: $selectedTab) {
                 ForEach(SettingsTab.allCases) { tab in
@@ -167,7 +170,7 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(.horizontal, 20)
-            .padding(.top, UIConstants.spacing)
+            .padding(.top, UIConstants.smallSpacing)
             .padding(.bottom, UIConstants.spacing)
             .frame(maxWidth: UIConstants.tabPickerMaxWidth)
             
@@ -214,8 +217,28 @@ struct SettingsView: View {
             loadOpenAIModelsIfURLValid()
         }
     }
-    
+
     // MARK: - Content Sections
+
+    private var header: some View {
+        HStack(spacing: UIConstants.smallSpacing) {
+            Text("Settings")
+                .font(.system(size: UIConstants.fontSize, weight: .semibold))
+
+            Spacer()
+
+            Button(action: closeSettings) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color(NSColor.secondaryLabelColor))
+            .help("Close settings")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, UIConstants.spacing)
+        .padding(.bottom, UIConstants.smallSpacing)
+    }
     
     @ViewBuilder
     private var speechToTextContent: some View {
@@ -559,10 +582,14 @@ struct SettingsView: View {
         do {
             try modelContext.save()
         } catch {
-                            Logger.error("Error saving settings", error: error, category: .data)
+            Logger.error("Error saving settings", error: error, category: .data)
         }
     }
-    
+
+    private func closeSettings() {
+        dismiss()
+    }
+
     private func saveChunkSize() {
         // Convert text to Int, allow any number (including 0 or negative)
         if let chunkSize = Int(chunkSizeText) {
