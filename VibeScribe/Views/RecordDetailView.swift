@@ -1266,8 +1266,7 @@ struct RecordDetailView: View {
             
             // If there's only one chunk, use it as the final summary
             if chunkSummaries.count == 1 {
-                self.record.summaryText = chunkSummaries[0]
-                try? self.modelContext.save()
+                self.persistSummaryAndHandleTitle(chunkSummaries[0])
                 self.isSummarizing = false
                 
                 // In automatic mode, switch to summary tab after completion
@@ -1292,8 +1291,7 @@ struct RecordDetailView: View {
                     }
                 },
                 receiveValue: { finalSummary in
-                    self.record.summaryText = finalSummary
-                    try? self.modelContext.save()
+                    self.persistSummaryAndHandleTitle(finalSummary)
                     
                     // In automatic mode, switch to summary tab after completion
                     if self.isAutomaticMode {
@@ -1327,15 +1325,7 @@ struct RecordDetailView: View {
                 }
             },
             receiveValue: { summary in
-                record.summaryText = summary
-                // Note: hasSummary is automatically set when summaryText is assigned
-                do {
-                    try modelContext.save()
-                    print("Single text summary saved successfully")
-                } catch {
-                    summaryError = "Error saving summary: \(error.localizedDescription)"
-                    print("Error saving single text summary: \(error.localizedDescription)")
-                }
+                self.persistSummaryAndHandleTitle(summary)
             }
         ).store(in: &cancellables)
     }
@@ -1359,6 +1349,95 @@ struct RecordDetailView: View {
             prompt: prompt,
             url: settings.openAIBaseURL
         )
+    }
+    
+    private func persistSummaryAndHandleTitle(_ rawSummary: String) {
+        let cleanedSummary = rawSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.summaryText = cleanedSummary
+        
+        do {
+            try modelContext.save()
+            print("Summary saved successfully")
+        } catch {
+            summaryError = "Error saving summary: \(error.localizedDescription)"
+            print("Error saving summary: \(error.localizedDescription)")
+            return
+        }
+        
+        guard !cleanedSummary.isEmpty else {
+            Logger.debug("Summary is empty after trimming; skipping title generation.", category: .llm)
+            return
+        }
+        
+        maybeGenerateTitle(from: cleanedSummary)
+    }
+    
+    private func maybeGenerateTitle(from summary: String) {
+        guard settings.autoGenerateTitleFromSummary else {
+            Logger.debug("Auto title generation disabled; skipping LLM request.", category: .llm)
+            return
+        }
+        
+        let prompt = settings.summaryTitlePrompt.replacingOccurrences(of: "{summary}", with: summary)
+        
+        callOpenAIAPI(prompt: prompt, url: settings.openAIBaseURL)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        Logger.error("Failed to generate title from summary: \(error.localizedDescription)", category: .llm)
+                    }
+                },
+                receiveValue: { generatedTitle in
+                    let sanitizedTitle = self.sanitizeGeneratedTitle(generatedTitle)
+                    guard !sanitizedTitle.isEmpty else {
+                        Logger.error("Generated title is empty after sanitization; keeping existing name.", category: .llm)
+                        return
+                    }
+                    
+                    if self.record.name == sanitizedTitle {
+                        Logger.info("Generated title matches existing name '\(sanitizedTitle)'; no update needed.", category: .llm)
+                        return
+                    }
+                    
+                    self.record.name = sanitizedTitle
+                    do {
+                        try self.modelContext.save()
+                        Logger.info("Auto-generated title saved: \(sanitizedTitle)", category: .data)
+                    } catch {
+                        Logger.error("Failed to save auto-generated title: \(error.localizedDescription)", category: .data)
+                    }
+                }
+            )
+            .store(in: &cancellables)
+    }
+    
+    private func sanitizeGeneratedTitle(_ rawTitle: String) -> String {
+        let quotesCharacterSet = CharacterSet(charactersIn: "\"'“”‘’`")
+        let punctuationAndWhitespace = CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines)
+        
+        var cleaned = rawTitle
+            .components(separatedBy: quotesCharacterSet)
+            .joined()
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        
+        cleaned = cleaned.trimmingCharacters(in: punctuationAndWhitespace)
+        
+        if cleaned.lowercased().hasPrefix("title:") {
+            let index = cleaned.index(cleaned.startIndex, offsetBy: 6)
+            cleaned = String(cleaned[index...]).trimmingCharacters(in: punctuationAndWhitespace)
+        } else if cleaned.lowercased().hasPrefix("heading:") {
+            let index = cleaned.index(cleaned.startIndex, offsetBy: 8)
+            cleaned = String(cleaned[index...]).trimmingCharacters(in: punctuationAndWhitespace)
+        }
+        
+        let words = cleaned
+            .split(whereSeparator: { $0.isWhitespace })
+            .prefix(5)
+        
+        let result = words.joined(separator: " ").trimmingCharacters(in: punctuationAndWhitespace)
+        return result
     }
     
     // Call OpenAI-compatible API

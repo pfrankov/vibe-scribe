@@ -30,19 +30,54 @@ final class AppSettings {
     
     // Prompts
     var chunkPrompt: String = """
-Summarize this part of transcription concisely while keeping the main ideas, insights, and important details:
-
-{transcription}
-
-Give me only the summary, don't include any introductory phrases.
+<task>
+  <instructions>
+    Analyze the text in the `<source>` tag.
+    Create a concise summary in the SAME language as the original text.
+    The summary must be a bulleted list. Each point must start with '- '.
+    IMPORTANT: You must output ONLY the bulleted list. Do not add any introductory text, titles, or comments. Your response must begin directly with the first bullet point.
+  </instructions>
+  <source>
+    {transcription}
+  </source>
+</task>
 """
     
     var summaryPrompt: String = """
-Combine these summaries into one cohesive document that flows naturally:
+<task>
+  <instructions>
+    Synthesize the fragmented summaries from `<source_summaries>` into a single, de-duplicated list.
 
-{transcription}
+    RULES:
+    - Merge related points. Remove all repetition.
+    - Use the SAME language as the source.
+    - Output ONLY a bulleted list ('- '). NO intro, NO titles, NO comments.
+  </instructions>
 
-The combined text should be well-structured and feel like a single document rather than disconnected parts.
+  <source_summaries>
+    {transcription}
+  </source_summaries>
+</task>
+"""
+    
+    var autoGenerateTitleFromSummary: Bool = true
+    
+    var summaryTitlePrompt: String = """
+<task>
+  <instructions>
+    Analyze the summary in the `<source_summary>` tag.
+    Create a short, descriptive title that captures its main topic.
+    
+    RULES:
+    - The title must be in the SAME language as the summary.
+    - MAXIMUM 5 words.
+    - Output ONLY the title. NO quotes, NO extra punctuation, NO introductory text.
+  </instructions>
+
+  <source_summary>
+    {summary}
+  </source_summary>
+</task>
 """
     
     init() {
@@ -59,7 +94,13 @@ The combined text should be well-structured and feel like a single document rath
          openAIAPIKey: String = "",
          openAIModel: String = "",
          chunkPrompt: String,
-         summaryPrompt: String) {
+         summaryPrompt: String,
+         autoGenerateTitleFromSummary: Bool = true,
+         summaryTitlePrompt: String = """
+Create a concise title of at most five words that captures the essence of this summary. Respond with the title only, without quotes or enclosing punctuation.
+
+{summary}
+""") {
         self.id = id
         self.whisperBaseURL = whisperBaseURL
         self.whisperAPIKey = whisperAPIKey
@@ -71,6 +112,8 @@ The combined text should be well-structured and feel like a single document rath
         self.openAIModel = openAIModel
         self.chunkPrompt = chunkPrompt
         self.summaryPrompt = summaryPrompt
+        self.autoGenerateTitleFromSummary = autoGenerateTitleFromSummary
+        self.summaryTitlePrompt = summaryTitlePrompt
     }
 }
 

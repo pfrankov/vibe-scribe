@@ -39,6 +39,7 @@ enum FocusedField {
     case chunkPromptEditor
     case summaryPromptEditor
     case chunkSizeField
+    case summaryTitlePromptEditor
 }
 
 // MARK: - Custom TextEditor with controlled scrolling
@@ -189,7 +190,11 @@ struct SettingsView: View {
                     focusedField = nil
                 }
             }
-            .scrollDisabled(focusedField == .chunkPromptEditor || focusedField == .summaryPromptEditor)
+            .scrollDisabled(
+                focusedField == .chunkPromptEditor ||
+                focusedField == .summaryPromptEditor ||
+                focusedField == .summaryTitlePromptEditor
+            )
         }
         .onAppear {
             _ = settings
@@ -382,6 +387,38 @@ struct SettingsView: View {
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+            Toggle("Generate short title after summarization", isOn: Binding(
+                get: { settings.autoGenerateTitleFromSummary },
+                set: { newValue in
+                    settings.autoGenerateTitleFromSummary = newValue
+                    trySave()
+                }
+            ))
+            .toggleStyle(.checkbox)
+            
+            captionText("When enabled, the app asks the language model for a concise title based on the final summary.")
+        }
+        
+        VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+            Text("Title generation prompt")
+                .font(.system(size: UIConstants.fontSize))
+            
+            styledTextEditor(
+                text: Binding(
+                    get: { settings.summaryTitlePrompt },
+                    set: { newValue in
+                        settings.summaryTitlePrompt = newValue
+                        trySave()
+                    }
+                ),
+                focusField: .summaryTitlePromptEditor
+            )
+            .disabled(!settings.autoGenerateTitleFromSummary)
+            
+            captionText("Use {summary} as a placeholder for the completed summary text. The model should answer with a title only.")
+        }
+        
+        VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
             HStack {
                 Toggle("Split long texts into chunks", isOn: Binding(
                     get: { settings.useChunking },
@@ -568,4 +605,4 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .modelContainer(for: AppSettings.self, inMemory: true)
-} 
+}
