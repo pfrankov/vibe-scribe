@@ -23,6 +23,7 @@ final class AudioPlayerManager: NSObject, ObservableObject {
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let timePitch = AVAudioUnitTimePitch()
+    private let waveformCache = WaveformCache.shared
 
     private var audioFile: AVAudioFile?
     private var audioLengthSamples: AVAudioFramePosition = 0
@@ -42,6 +43,7 @@ final class AudioPlayerManager: NSObject, ObservableObject {
     private let targetWaveformSampleCount = 1200
 
     private var waveformGenerationID = UUID()
+    private var waveformTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -72,11 +74,18 @@ final class AudioPlayerManager: NSObject, ObservableObject {
             playbackProgress = 0
 
             waveformSamples = []
-            let generationID = UUID()
-            waveformGenerationID = generationID
-            generateWaveformSamples(for: url,
-                                    frameCount: audioLengthSamples,
-                                    generationID: generationID)
+
+            if let cachedSamples = waveformCache.cachedWaveform(for: url) {
+                waveformGenerationID = UUID()
+                waveformSamples = cachedSamples
+                Logger.debug("Loaded cached waveform with \(cachedSamples.count) samples", category: .audio)
+            } else {
+                let generationID = UUID()
+                waveformGenerationID = generationID
+                generateWaveformSamples(for: url,
+                                        frameCount: audioLengthSamples,
+                                        generationID: generationID)
+            }
 
             Logger.info("Audio player setup. Duration: \(duration)", category: .audio)
         } catch {
@@ -342,7 +351,13 @@ final class AudioPlayerManager: NSObject, ObservableObject {
 
     // MARK: - Helpers
 
+    private func cancelWaveformGeneration() {
+        waveformTask?.cancel()
+        waveformTask = nil
+    }
+
     private func resetState() {
+        cancelWaveformGeneration()
         audioFile = nil
         audioLengthSamples = 0
         sampleRate = 44_100
@@ -363,6 +378,8 @@ extension AudioPlayerManager {
     private func generateWaveformSamples(for url: URL,
                                          frameCount: AVAudioFramePosition,
                                          generationID: UUID) {
+        cancelWaveformGeneration()
+
         guard frameCount > 0 else {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.waveformGenerationID == generationID else { return }
@@ -372,173 +389,229 @@ extension AudioPlayerManager {
         }
 
         let totalFrames = Int(frameCount)
-
         let sourceSampleRate = sampleRate
         let durationSeconds = sourceSampleRate > 0 ? Double(totalFrames) / sourceSampleRate : 0
         let dynamicTarget = min(16_000, max(targetWaveformSampleCount, Int(durationSeconds * 14)))
         let bucketCount = min(dynamicTarget, max(1, totalFrames))
-
         let asset = AVURLAsset(url: url)
 
-        Task(priority: .userInitiated) { @MainActor [weak self] in
+        let task = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
             do {
+                try Task.checkCancellation()
+
                 let tracks = try await asset.loadTracks(withMediaType: .audio)
                 guard let track = tracks.first else {
                     Logger.warning("No audio track for waveform generation", category: .audio)
+                    await self.clearWaveformIfMatches(generationID)
                     return
                 }
 
-                self.processWaveform(asset: asset,
-                                     track: track,
-                                     bucketCount: bucketCount,
-                                     durationSeconds: durationSeconds,
-                                     generationID: generationID)
-            } catch {
-                Logger.error("Failed to load audio tracks for waveform generation", error: error, category: .audio)
-            }
-        }
-    }
+                try Task.checkCancellation()
 
-    private func processWaveform(asset: AVURLAsset,
-                                 track: AVAssetTrack,
-                                 bucketCount: Int,
-                                 durationSeconds: Double,
-                                 generationID: UUID) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
+                let buckets = try self.makeWaveformBuckets(asset: asset,
+                                                           track: track,
+                                                           bucketCount: bucketCount,
+                                                           durationSeconds: durationSeconds)
 
-            // Fast path: downsample decode using AVAssetReader to ~4 kHz mono
-            // AVAssetReader requires sample rate between 8 kHz and 192 kHz
-            let targetSampleRate: Double = 8_000
+                try Task.checkCancellation()
 
-            let outputSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVLinearPCMIsFloatKey: true,
-                AVLinearPCMBitDepthKey: 32,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMIsNonInterleaved: false,
-                AVSampleRateKey: targetSampleRate
-            ]
-
-            var composite: [Float] = Array(repeating: 0, count: bucketCount)
-
-            do {
-                let reader = try AVAssetReader(asset: asset)
-                let output = AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings)
-                output.alwaysCopiesSampleData = false
-                if reader.canAdd(output) { reader.add(output) }
-                if !reader.startReading() {
-                    Logger.error("AVAssetReader failed to start", category: .audio)
+                guard !buckets.isEmpty else {
+                    await self.clearWaveformIfMatches(generationID)
                     return
                 }
 
-                let framesPerBucketDS = max(1, Int(ceil(targetSampleRate * durationSeconds / Double(bucketCount))))
-                var processedFrames: Int = 0
+                let normalized = self.normalizeWaveform(buckets,
+                                                        durationSeconds: durationSeconds,
+                                                        bucketCount: bucketCount)
 
-                while reader.status == .reading, let sampleBuffer = output.copyNextSampleBuffer() {
-                    guard let block = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
-                    var lengthAtOffset = 0
-                    var totalLength = 0
-                    var dataPointer: UnsafeMutablePointer<Int8>?
-                    let status = CMBlockBufferGetDataPointer(
-                        block,
-                        atOffset: 0,
-                        lengthAtOffsetOut: &lengthAtOffset,
-                        totalLengthOut: &totalLength,
-                        dataPointerOut: &dataPointer
-                    )
-                    if status != kCMBlockBufferNoErr || dataPointer == nil || totalLength <= 0 {
-                        continue
-                    }
-                    let count = totalLength / MemoryLayout<Float>.size
-                    let floatPtr = dataPointer!.withMemoryRebound(to: Float.self, capacity: count) { $0 }
+                try Task.checkCancellation()
 
-                    var index = 0
-                    while index < count {
-                        let framesIntoBucket = processedFrames % framesPerBucketDS
-                        let framesRemainingInBucket = framesPerBucketDS - framesIntoBucket
-                        let chunkLength = min(framesRemainingInBucket, count - index)
-
-                        var maxValue: Float = 0
-                        vDSP_maxv(floatPtr.advanced(by: index), 1, &maxValue, vDSP_Length(chunkLength))
-
-                        let bucketIndex = min(bucketCount - 1, processedFrames / framesPerBucketDS)
-                        if maxValue > composite[bucketIndex] { composite[bucketIndex] = maxValue }
-
-                        processedFrames += chunkLength
-                        index += chunkLength
-                    }
-                    CMSampleBufferInvalidate(sampleBuffer)
+                let applied = await self.applyWaveformIfCurrent(normalized, generationID: generationID)
+                if applied {
+                    self.waveformCache.storeWaveform(normalized, for: url, duration: durationSeconds)
+                    Logger.debug("Stored waveform cache with \(normalized.count) samples", category: .audio)
                 }
-
-                if reader.status == .failed {
-                    Logger.error("AVAssetReader failed during reading: \(reader.error?.localizedDescription ?? "unknown")", category: .audio)
-                }
-
-                if composite.isEmpty {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, self.waveformGenerationID == generationID else { return }
-                        self.waveformSamples = []
-                    }
-                    return
-                }
-
-                @inline(__always) func amplitudeToDecibels(_ value: Float) -> Float {
-                    20 * log10(max(value, 1e-6))
-                }
-                let dbValues = composite.map { amplitudeToDecibels($0) }
-
-                func percentileDb(_ data: [Float], _ percentile: Double) -> Float {
-                    let count = data.count
-                    if count == 0 { return -60 }
-                    let sorted = data.sorted()
-                    let position = min(max(percentile, 0), 1) * Double(count - 1)
-                    let lower = Int(floor(position))
-                    let upper = Int(ceil(position))
-                    if lower == upper { return sorted[lower] }
-                    let t = Float(position - Double(lower))
-                    return sorted[lower] * (1 - t) + sorted[upper] * t
-                }
-
-                let highPercentile = percentileDb(dbValues, 0.999)
-                let lowCandidate = percentileDb(dbValues, 0.10)
-                let dynamicRange: Float = 48
-                let low = max(highPercentile - dynamicRange, lowCandidate)
-                let span = max(6, highPercentile - low)
-
-                var normalized = dbValues.map { value -> Float in
-                    let scaled = (value - low) / span
-                    return max(0, min(1, scaled))
-                }
-
-                if normalized.count > 2 {
-                    var smoothed = normalized
-                    for index in 0..<normalized.count {
-                        let left = index > 0 ? normalized[index - 1] : normalized[index]
-                        let center = normalized[index]
-                        let right = index + 1 < normalized.count ? normalized[index + 1] : normalized[index]
-                        smoothed[index] = center * 0.7 + (left + right) * 0.15
-                    }
-                    normalized = smoothed
-                }
-
-                let bucketDuration = durationSeconds / Double(bucketCount)
-                let clampedDuration = min(max(bucketDuration, 0), 0.4)
-                let t = max(0.0, min(1.0, clampedDuration / 0.4))
-                let gamma = Float(0.9 + 0.15 * t)
-                let shaped = normalized.map { pow($0, gamma) }
-
-                let floorValue = max(0.0015, 0.006 - Float(t) * 0.003)
-                let finalWave = shaped.map { max(floorValue, min(1.0, $0)) }
-
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.waveformGenerationID == generationID else { return }
-                    self.waveformSamples = finalWave
-                }
+            } catch is CancellationError {
+                Logger.debug("Waveform generation cancelled", category: .audio)
             } catch {
                 Logger.error("Waveform generation failed", error: error, category: .audio)
+                await self.clearWaveformIfMatches(generationID)
+            }
+        }
+
+        waveformTask = task
+    }
+
+    private func makeWaveformBuckets(asset: AVURLAsset,
+                                     track: AVAssetTrack,
+                                     bucketCount: Int,
+                                     durationSeconds: Double) throws -> [Float] {
+        let targetSampleRate: Double = 8_000
+        let outputSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMBitDepthKey: 32,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMIsNonInterleaved: false,
+            AVSampleRateKey: targetSampleRate
+        ]
+
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings)
+        output.alwaysCopiesSampleData = false
+
+        guard reader.canAdd(output) else {
+            throw WaveformGenerationError.readerStartFailure(underlying: nil)
+        }
+        reader.add(output)
+
+        guard reader.startReading() else {
+            throw WaveformGenerationError.readerStartFailure(underlying: reader.error)
+        }
+
+        let framesPerBucket = max(1, Int(ceil(targetSampleRate * durationSeconds / Double(bucketCount))))
+        var buckets = [Float](repeating: 0, count: bucketCount)
+        var processedFrames = 0
+
+        while reader.status == .reading {
+            try Task.checkCancellation()
+            guard let sampleBuffer = output.copyNextSampleBuffer() else { break }
+            defer { CMSampleBufferInvalidate(sampleBuffer) }
+
+            guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+                continue
+            }
+
+            var totalLength = 0
+            var dataPointer: UnsafeMutablePointer<Int8>?
+            var lengthAtOffset = 0
+            let status = CMBlockBufferGetDataPointer(
+                blockBuffer,
+                atOffset: 0,
+                lengthAtOffsetOut: &lengthAtOffset,
+                totalLengthOut: &totalLength,
+                dataPointerOut: &dataPointer
+            )
+
+            guard status == kCMBlockBufferNoErr,
+                  let pointer = dataPointer,
+                  totalLength > 0 else {
+                continue
+            }
+
+            let frameCount = totalLength / MemoryLayout<Float>.size
+            pointer.withMemoryRebound(to: Float.self, capacity: frameCount) { basePointer in
+                var index = 0
+                while index < frameCount {
+                    let framesIntoBucket = processedFrames % framesPerBucket
+                    let framesRemainingInBucket = framesPerBucket - framesIntoBucket
+                    let chunkLength = min(framesRemainingInBucket, frameCount - index)
+
+                    var maxValue: Float = 0
+                    vDSP_maxv(basePointer.advanced(by: index), 1, &maxValue, vDSP_Length(chunkLength))
+
+                    let bucketIndex = min(bucketCount - 1, processedFrames / framesPerBucket)
+                    if maxValue > buckets[bucketIndex] {
+                        buckets[bucketIndex] = maxValue
+                    }
+
+                    processedFrames += chunkLength
+                    index += chunkLength
+                }
+            }
+        }
+
+        if reader.status == .failed {
+            throw WaveformGenerationError.readerFailure(underlying: reader.error)
+        }
+
+        return buckets
+    }
+
+    private func normalizeWaveform(_ buckets: [Float],
+                                   durationSeconds: Double,
+                                   bucketCount: Int) -> [Float] {
+        guard !buckets.isEmpty else { return [] }
+
+        let dbValues = buckets.map(Self.amplitudeToDecibels)
+        let sorted = dbValues.sorted()
+
+        let highPercentile = Self.percentile(in: sorted, percentile: 0.999)
+        let lowCandidate = Self.percentile(in: sorted, percentile: 0.10)
+        let dynamicRange: Float = 48
+        let low = max(highPercentile - dynamicRange, lowCandidate)
+        let span = max(6, highPercentile - low)
+
+        var normalized = dbValues.map { value -> Float in
+            let scaled = (value - low) / span
+            return max(0, min(1, scaled))
+        }
+
+        if normalized.count > 2 {
+            var smoothed = normalized
+            for index in normalized.indices {
+                let left = index > normalized.startIndex ? normalized[index - 1] : normalized[index]
+                let center = normalized[index]
+                let right = index + 1 < normalized.endIndex ? normalized[index + 1] : normalized[index]
+                smoothed[index] = center * 0.7 + (left + right) * 0.15
+            }
+            normalized = smoothed
+        }
+
+        let bucketDuration = durationSeconds / Double(max(bucketCount, 1))
+        let clampedDuration = min(max(bucketDuration, 0), 0.4)
+        let t = max(0.0, min(1.0, clampedDuration / 0.4))
+        let gamma = Float(0.9 + 0.15 * t)
+        let floorValue = max(0.0015, 0.006 - Float(t) * 0.003)
+
+        for index in normalized.indices {
+            let shaped = pow(normalized[index], gamma)
+            normalized[index] = max(floorValue, min(1.0, shaped))
+        }
+
+        return normalized
+    }
+
+    @MainActor
+    private func applyWaveformIfCurrent(_ samples: [Float], generationID: UUID) -> Bool {
+        guard waveformGenerationID == generationID else { return false }
+        waveformSamples = samples
+        return true
+    }
+
+    @MainActor
+    private func clearWaveformIfMatches(_ generationID: UUID) {
+        guard waveformGenerationID == generationID else { return }
+        waveformSamples = []
+    }
+
+    private static func amplitudeToDecibels(_ value: Float) -> Float {
+        20 * log10(max(value, 1e-6))
+    }
+
+    private static func percentile(in sortedData: [Float], percentile: Double) -> Float {
+        guard !sortedData.isEmpty else { return -60 }
+        let clamped = min(max(percentile, 0), 1)
+        let position = clamped * Double(sortedData.count - 1)
+        let lower = Int(floor(position))
+        let upper = Int(ceil(position))
+        if lower == upper { return sortedData[lower] }
+        let t = Float(position - Double(lower))
+        return sortedData[lower] * (1 - t) + sortedData[upper] * t
+    }
+
+    private enum WaveformGenerationError: LocalizedError {
+        case readerStartFailure(underlying: Error?)
+        case readerFailure(underlying: Error?)
+
+        var errorDescription: String? {
+            switch self {
+            case let .readerStartFailure(underlying):
+                return "AVAssetReader failed to start: \(underlying?.localizedDescription ?? "unknown error")"
+            case let .readerFailure(underlying):
+                return "AVAssetReader failed during reading: \(underlying?.localizedDescription ?? "unknown error")"
             }
         }
     }
