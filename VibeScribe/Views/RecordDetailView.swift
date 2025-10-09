@@ -8,7 +8,6 @@
 import SwiftUI
 import SwiftData
 import AVFoundation
-import Combine
 import AppKit
 import UniformTypeIdentifiers
 
@@ -30,24 +29,12 @@ struct RecordDetailView: View {
     
     @StateObject private var playerManager = AudioPlayerManager()
     @ObservedObject private var modelService = ModelService.shared
-    @State private var isTranscribing = false
-    @State private var transcriptionError: String? = nil
-    @State private var cancellables = Set<AnyCancellable>()
+    @ObservedObject private var processingManager = RecordProcessingManager.shared
     @State private var selectedTab: Tab = .summary // Default to summary tab
-    @State private var isSummarizing = false // Track summarization status
-    @State private var summaryError: String? = nil
     @State private var isAutomaticMode = false // Track if this is a new record that should auto-process
 
     @State private var selectedWhisperModel: String = ""
     @State private var selectedSummaryModel: String = ""
-
-    // Processing state for the beautiful loader
-    @State private var processingState: ProcessingState = .idle
-
-    // SSE streaming chunks for real-time preview  
-    @State private var sseStreamingChunks: [String] = [] // For UI preview (last few lines)
-    @State private var sseFullText: String = "" // For accumulating full transcription text
-    @State private var isSSEStreaming = false // Track if currently using SSE streaming
 
     // State for inline title editing - Renamed for clarity
     @State private var isEditingTitle: Bool = false
@@ -182,6 +169,15 @@ struct RecordDetailView: View {
     enum Tab {
         case transcription
         case summary
+        
+        var logName: String {
+            switch self {
+            case .transcription:
+                return "Transcription"
+            case .summary:
+                return "Summary"
+            }
+        }
     }
     
     // Computed property for transcription text for easier access
@@ -218,6 +214,73 @@ struct RecordDetailView: View {
         return modelService.whisperModels
     }
 
+    private var processingStatus: RecordProcessingManager.RecordProcessingState {
+        processingManager.state(for: record.id)
+    }
+
+    private var transcriptionError: String? {
+        processingStatus.transcriptionError
+    }
+
+    private var summaryError: String? {
+        processingStatus.summaryError
+    }
+
+    private var isTranscribing: Bool {
+        processingStatus.isTranscribing || processingStatus.pendingTranscriptionCount > 0
+    }
+
+    private var isSummarizing: Bool {
+        processingStatus.isSummarizing || processingStatus.pendingSummarizationCount > 0
+    }
+
+    private var isStreaming: Bool {
+        processingStatus.isStreaming
+    }
+
+    private var streamingChunks: [String] {
+        processingStatus.streamingChunks
+    }
+
+    private var currentProcessingState: ProcessingState {
+        if let error = transcriptionError ?? summaryError {
+            return .error(error)
+        } else if isStreaming {
+            return .streamingTranscription(streamingChunks)
+        } else if processingStatus.isTranscribing || processingStatus.pendingTranscriptionCount > 0 {
+            return .transcribing
+        } else if processingStatus.isSummarizing || processingStatus.pendingSummarizationCount > 0 {
+            return .summarizing
+        } else if record.summaryText != nil || (record.transcriptionText != nil && record.hasTranscription) {
+            return .completed
+        } else {
+            return .idle
+        }
+    }
+
+    private func requestTranscription(from origin: Tab) {
+        Logger.debug("User requested transcription from \(origin.logName) tab for record \(record.name)", category: .ui)
+        isAutomaticMode = false
+        processingManager.enqueueTranscription(
+            for: record,
+            in: modelContext,
+            settings: settings,
+            automatic: false,
+            preferStreaming: true
+        )
+    }
+    
+    private func requestSummarization(from origin: Tab) {
+        Logger.debug("User requested summarization from \(origin.logName) tab for record \(record.name)", category: .ui)
+        isAutomaticMode = false
+        processingManager.enqueueSummarization(
+            for: record,
+            in: modelContext,
+            settings: settings,
+            automatic: false
+        )
+    }
+    
     private var summaryModelOptions: [String] {
         if modelService.openAIModels.isEmpty,
            !settings.openAIModel.isEmpty,
@@ -249,7 +312,7 @@ struct RecordDetailView: View {
 
     // Check if we should show content or the processing view
     private var shouldShowContent: Bool {
-        switch processingState {
+        switch currentProcessingState {
         case .completed:
             return true
         case .error:
@@ -334,9 +397,9 @@ struct RecordDetailView: View {
             Divider()
             
             // Processing loader - always shows when processing, positioned below player
-            switch processingState {
+            switch currentProcessingState {
             case .transcribing, .summarizing, .streamingTranscription:
-                ProcessingProgressView(state: processingState)
+                ProcessingProgressView(state: currentProcessingState)
                     .padding(.top, 8)
             default:
                 EmptyView()
@@ -410,7 +473,7 @@ struct RecordDetailView: View {
                             .frame(width: 220, height: 32)
 
                             Button {
-                                startTranscription()
+                                requestTranscription(from: .transcription)
                             } label: {
                                 HStack {
                                     if isTranscribing {
@@ -493,7 +556,7 @@ struct RecordDetailView: View {
                             .frame(width: 220, height: 32)
 
                             Button {
-                                startSummarization()
+                                requestSummarization(from: .summary)
                             } label: {
                                 HStack {
                                     if isSummarizing {
@@ -528,8 +591,6 @@ struct RecordDetailView: View {
             selectedSummaryModel = settings.openAIModel
 
             // Initialize processing state based on current record state
-            updateProcessingState()
-            
             // --- Refined File Loading Logic ---
             guard let fileURL = record.fileURL else {
                 Logger.error("Record '\(record.name)' has no associated fileURL.", category: .ui)
@@ -565,9 +626,6 @@ struct RecordDetailView: View {
         .onDisappear {
             unregisterSpacebarShortcut()
             playerManager.stopAndCleanup()
-            // Cancel all subscriptions when closing window
-            cancellables.forEach { $0.cancel() }
-            cancellables.removeAll()
         }
         // Detect focus changes for the title TextField
         .onChange(of: isTitleFieldFocused) { oldValue, newValue in
@@ -591,24 +649,14 @@ struct RecordDetailView: View {
                 selectedSummaryModel = newValue
             }
         }
-        // Update processing state when transcription/summarization states change
-        .onChange(of: isTranscribing) { oldValue, newValue in
-            updateProcessingState()
+        .onReceive(processingManager.$recordStates) { _ in
+            handleProcessingStateChange()
         }
-        .onChange(of: isSummarizing) { oldValue, newValue in
-            updateProcessingState()
-        }
-        .onChange(of: transcriptionError) { oldValue, newValue in
-            updateProcessingState()
-        }
-        .onChange(of: summaryError) { oldValue, newValue in
-            updateProcessingState()
-        }
-        .onChange(of: sseStreamingChunks) { oldValue, newValue in
-            updateProcessingState()
-        }
-        .onChange(of: isSSEStreaming) { oldValue, newValue in
-            updateProcessingState()
+        .onChange(of: record.summaryText ?? "") { _, newValue in
+            if isAutomaticMode && !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                selectedTab = .summary
+                isAutomaticMode = false
+            }
         }
         .alert("Delete Recording?", isPresented: $isShowingDeleteConfirmation) {
             Button("Delete", role: .destructive) {
@@ -681,46 +729,6 @@ struct RecordDetailView: View {
 
     // --- Helper Functions ---
     
-    // Update processing state based on current conditions
-    private func updateProcessingState() {
-        Logger.debug("updateProcessingState called", category: .ui)
-        Logger.debug("isTranscribing: \(isTranscribing), isSSEStreaming: \(isSSEStreaming), chunks: \(sseStreamingChunks.count)", category: .ui)
-
-        let nextState: ProcessingState
-
-        if let error = transcriptionError ?? summaryError {
-            nextState = .error(error)
-
-            // Switch to appropriate tab based on error type
-            if transcriptionError != nil {
-                selectedTab = .transcription
-            } else if summaryError != nil {
-                selectedTab = .summary
-            }
-        } else if isTranscribing {
-            // Use streaming state if SSE is active and we have chunks
-            if isSSEStreaming && !sseStreamingChunks.isEmpty {
-                nextState = .streamingTranscription(sseStreamingChunks)
-            } else {
-                nextState = .transcribing
-            }
-        } else if isSummarizing {
-            nextState = .summarizing
-        } else if isAutomaticMode && record.hasTranscription && record.summaryText == nil {
-            // In automatic mode, show summarizing between transcription and summarization
-            nextState = .summarizing
-        } else if record.hasTranscription && record.summaryText != nil {
-            nextState = .completed
-        } else {
-            nextState = .idle
-        }
-
-        guard nextState != processingState else { return }
-
-        processingState = nextState
-        Logger.debug("Processing state changed to \(nextState.logDescription)", category: .ui)
-    }
-
     private func startEditingTitle() {
         editingTitle = record.name
         isEditingTitle = true
@@ -922,663 +930,30 @@ struct RecordDetailView: View {
         }
     }
     
-    // Function to start transcription
-    private func startTranscription() {
-        guard let fileURL = record.fileURL, !isTranscribing else { return }
-        
-        isTranscribing = true
-        transcriptionError = nil
-        isSSEStreaming = false
-        sseStreamingChunks.removeAll()
-        sseFullText = ""
-        
-        Logger.info("Starting transcription for: \(record.name)", category: .transcription)
-        Logger.debug("Using Whisper API at URL: \(settings.whisperBaseURL) with model: \(settings.whisperModel)", category: .transcription)
-        
-        let whisperManager = WhisperTranscriptionManager.shared
-        
-        // Try real-time streaming first for better UX
-        whisperManager.transcribeAudioRealTime(audioURL: fileURL, settings: settings)
-        .receive(on: DispatchQueue.main)
-        .sink(
-            receiveCompletion: { completion in
-                switch completion {
-                case .finished:
-                    print("✅ SSE Transcription completed successfully")
-                    
-                    // Save the final accumulated text from SSE full text BEFORE clearing
-                    if !self.sseFullText.isEmpty {
-                        print("💾 Saving final SSE transcription result: \(self.sseFullText.count) characters")
-                        print("📝 Final text preview: \(self.sseFullText.prefix(100))...")
-                        
-                        self.record.transcriptionText = self.sseFullText
-                        self.record.hasTranscription = true
-                        
-                        print("🔍 BEFORE SAVE - record.transcriptionText: '\(self.record.transcriptionText?.prefix(100) ?? "nil")'")
-                        print("🔍 BEFORE SAVE - record.transcriptionText FULL LENGTH: \(self.record.transcriptionText?.count ?? 0)")
-                        print("🔍 BEFORE SAVE - record.hasTranscription: \(self.record.hasTranscription)")
-                        
-                        do {
-                            try self.modelContext.save()
-                            print("✅ Final SSE transcription saved successfully")
-                            
-                            // Verify what was actually saved
-                            print("🔍 AFTER SAVE - record.transcriptionText: '\(self.record.transcriptionText?.prefix(100) ?? "nil")'")
-                            print("🔍 AFTER SAVE - record.transcriptionText FULL LENGTH: \(self.record.transcriptionText?.count ?? 0)")
-                            print("🔍 AFTER SAVE - record.hasTranscription: \(self.record.hasTranscription)")
-                        #if DEBUG
-                        Logger.debug("After save: preview of transcriptionText computed property", category: .transcription)
-                        #endif
-                        } catch {
-                            print("❌ Error saving final SSE transcription: \(error.localizedDescription)")
-                            self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
-                        }
-                    } else {
-                        print("⚠️ SSE transcription resulted in empty text")
-                        self.transcriptionError = "Error: Empty transcription received from SSE. Please try again with different model or check your audio quality."
-                        
-                        // Still mark as having transcription attempt so UI shows properly
-                        self.record.hasTranscription = true
-                        self.record.transcriptionText = "" // Store empty string
-                        
-                        do {
-                            try self.modelContext.save()
-                            print("💾 Saved empty SSE transcription result with error state")
-                        } catch {
-                            print("❌ Error saving empty SSE transcription state: \(error.localizedDescription)")
-                        }
-                    }
-                    
-                    // Clear state AFTER saving
-                    self.isTranscribing = false
-                    self.isSSEStreaming = false
-                    self.sseStreamingChunks.removeAll()
-                    self.sseFullText = ""
-                    
-                    // In automatic mode, start summarization after transcription completes
-                    if self.isAutomaticMode {
-                        print("🔄 Automatic mode: Starting summarization after transcription completion")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.startSummarization()
-                        }
-                    }
-                case .failure(let error):
-                    // Clear state on error too
-                    self.isTranscribing = false
-                    self.isSSEStreaming = false
-                    self.sseStreamingChunks.removeAll()
-                    self.sseFullText = ""
-                    
-                    if case .streamingNotSupported = error {
-                        print("⚠️ SSE not supported, falling back to regular transcription")
-                        // Fallback to regular transcription
-                        self.startRegularTranscription()
-                    } else {
-                        self.transcriptionError = "Error: \(error.description)"
-                        print("❌ SSE Transcription error: \(error.description)")
-                        self.isAutomaticMode = false // Stop automatic mode on error
-                    }
-                }
-            },
-            receiveValue: { update in
-                if update.isPartial {
-                    print("🔄 Partial SSE update: \(update.text.prefix(50))...")
-                    
-                    // Mark as SSE streaming
-                    self.isSSEStreaming = true
-                    
-                    // Clean the text
-                    let cleanText = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    print("🧹 Cleaned text length: \(cleanText.count), content: '\(cleanText.prefix(100))'")
-                    
-                    if !cleanText.isEmpty && cleanText.count > 5 {
-                        // 1. Accumulate full text (this is what we'll save)
-                        self.sseFullText += cleanText
-                        print("💾 Accumulated full text: \(self.sseFullText.count) characters")
-                        
-                        // 2. For UI preview, extract last few words as a chunk
-                        let words = cleanText.split(separator: " ")
-                        let recentWords = Array(words.suffix(12)) // Last 12 words for preview
-                        let chunkText = recentWords.joined(separator: " ")
-                        
-                        print("📝 Preview chunk text: '\(chunkText)'")
-                        print("🔍 Current preview chunks count: \(self.sseStreamingChunks.count)")
-                        print("🔍 Last preview chunk: '\(self.sseStreamingChunks.last ?? "none")'")
-                        
-                        // Add preview chunk if it's different from the last one
-                        if self.sseStreamingChunks.last != chunkText {
-                            self.sseStreamingChunks.append(chunkText)
-                            print("✅ Added preview chunk! Total preview chunks: \(self.sseStreamingChunks.count)")
-                            print("📋 All preview chunks so far: \(self.sseStreamingChunks)")
-                            
-                            // Limit preview chunks to prevent memory issues (keep last 10 for UI)
-                            if self.sseStreamingChunks.count > 10 {
-                                self.sseStreamingChunks.removeFirst()
-                                print("🗑️ Removed oldest preview chunk, now have: \(self.sseStreamingChunks.count)")
-                            }
-                        } else {
-                            print("⚠️ Preview chunk skipped - same as last one")
-                        }
-                    } else {
-                        print("⚠️ Chunk skipped - too short or empty")
-                    }
-                    
-                    print("🎯 isSSEStreaming: \(self.isSSEStreaming), preview chunks: \(self.sseStreamingChunks.count), full text: \(self.sseFullText.count) chars")
-                } else {
-                    print("✅ Final SSE transcription chunk received: \(update.text.count) characters")
-                    print("📝 Final chunk preview: \(update.text.prefix(100))...")
-                    
-                    // This is the final chunk - it contains complete transcription
-                    let cleanText = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleanText.isEmpty {
-                        // Final chunk contains complete transcription, so replace
-                        self.sseFullText = cleanText
-                        print("💾 Set complete transcription from final chunk: \(self.sseFullText.count) characters")
-                        
-                        // Also add final preview chunk for UI
-                        if cleanText.count > 5 {
-                            let words = cleanText.split(separator: " ")
-                            let recentWords = Array(words.suffix(12))
-                            let chunkText = recentWords.joined(separator: " ")
-                            
-                            if self.sseStreamingChunks.last != chunkText {
-                                self.sseStreamingChunks.append(chunkText)
-                                print("✅ Added final preview chunk! Total preview chunks: \(self.sseStreamingChunks.count)")
-                                print("📋 All preview chunks including final: \(self.sseStreamingChunks)")
-                            }
-                        }
-                    }
-                    
-                    // Don't save here - let receiveCompletion handle the final save from full text
-                    print("🔄 Final chunk processed, waiting for completion to save full text")
-                }
-            }
-        )
-        .store(in: &cancellables)
-    }
-    
-    // Fallback method for regular transcription when SSE is not supported
-    private func startRegularTranscription() {
-        guard let fileURL = record.fileURL, !isTranscribing else { return }
-        
-        isTranscribing = true
-        transcriptionError = nil
-        
-        print("🔄 Starting regular (non-streaming) transcription")
-        
-        let whisperManager = WhisperTranscriptionManager.shared
-        
-        // Use regular transcription API with settings parameter  
-        whisperManager.transcribeAudio(audioURL: fileURL, settings: settings)
-        .receive(on: DispatchQueue.main)
-        .sink(
-            receiveCompletion: { completion in
-                self.isTranscribing = false
-                
-                switch completion {
-                case .finished:
-                    print("✅ Regular transcription completed successfully")
-                    
-                    // In automatic mode, start summarization after transcription completes
-                    if self.isAutomaticMode {
-                        print("🔄 Automatic mode: Starting summarization after transcription completion")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.startSummarization()
-                        }
-                    }
-                case .failure(let error):
-                    self.transcriptionError = "Error: \(error.description)"
-                    print("❌ Regular transcription error: \(error.description)")
-                    self.isAutomaticMode = false // Stop automatic mode on error
-                }
-            },
-            receiveValue: { transcription in
-                print("📝 Received regular transcription of length: \(transcription.count) characters")
-                
-                // Check that transcription is not empty
-                if transcription.isEmpty {
-                    self.transcriptionError = "Error: Empty transcription received. Please try again with different model or check your audio quality."
-                    print("❌ Error: Empty transcription received")
-                    
-                    // Still mark as having transcription attempt so UI shows properly
-                    self.record.hasTranscription = true
-                    self.record.transcriptionText = "" // Store empty string
-                    
-                    do {
-                        try self.modelContext.save()
-                        print("💾 Saved empty transcription result with error state")
-                    } catch {
-                        print("❌ Error saving empty transcription state: \(error.localizedDescription)")
-                    }
-                    return
-                }
-                
-                // Always save original result
-                print("💾 Saving regular transcription result")
-                
-                // Save only if text is not empty
-                self.record.transcriptionText = transcription
-                self.record.hasTranscription = true
-                do {
-                    try self.modelContext.save()
-                    print("✅ Regular transcription saved successfully")
-                } catch {
-                    print("❌ Error saving regular transcription: \(error.localizedDescription)")
-                    self.transcriptionError = "Error saving transcription: \(error.localizedDescription)"
-                }
-            }
-        )
-        .store(in: &cancellables)
-    }
-    
-    // Function to start summarization
-    private func startSummarization() {
-        guard let transcriptionText = record.transcriptionText, // Can be either SRT or plain text
-              !transcriptionText.isEmpty,
-              !isSummarizing else { return }
-
-        print("🔍 startSummarization - raw transcriptionText length: \(transcriptionText.count)")
-        print("🔍 startSummarization - raw transcriptionText preview: '\(transcriptionText.prefix(200))...'")
-        print("🔍 startSummarization - raw transcriptionText suffix: '...\(transcriptionText.suffix(100))'")
-
-        // Determine if this is SRT format or plain text and extract accordingly
-        let cleanText: String
-        if transcriptionText.contains("-->") && transcriptionText.contains("\n\n") {
-            // This looks like SRT format - extract text from it
-            print("📋 Detected SRT format, extracting clean text...")
-            cleanText = WhisperTranscriptionManager.shared.extractTextFromSRT(transcriptionText)
-        } else {
-            // This is already plain text (from SSE streaming)
-            print("📝 Detected plain text format, using as-is...")
-            cleanText = transcriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        print("🔍 startSummarization - cleanText length: \(cleanText.count)")
-        print("🔍 startSummarization - cleanText preview: '\(cleanText.prefix(200))...'")
-        print("🔍 startSummarization - cleanText suffix: '...\(cleanText.suffix(100))'")
-
-        guard !cleanText.isEmpty else {
-            print("Error: Clean text is empty for record: \(record.name)")
-            summaryError = "Error: Transcription text is empty after processing."
-            isSummarizing = false
-            isAutomaticMode = false // Stop automatic mode
-            return
-        }
-        
-        print("📊 Starting summarization with \(cleanText.count) characters of clean text")
-        
-        isSummarizing = true
-        summaryError = nil
-        
-        print("Starting summarization for: \(record.name), using OpenAI compatible API at URL: \(settings.openAIBaseURL)")
-        
-        // Check if we should chunk the text based on settings
-        if settings.useChunking {
-            print("📊 Chunking enabled - splitting text (\(cleanText.count) characters) into chunks")
-            let chunks = TextChunker.chunkText(cleanText, maxChunkSize: settings.chunkSize, forceChunking: false)
-            print("Split text into \(chunks.count) chunks using intelligent boundaries")
-            processSummaryWithChunks(chunks)
-        } else {
-            print("📊 Chunking disabled - processing text (\(cleanText.count) characters) as single text")
-            processSummaryAsSingleText(cleanText)
-            return
-        }
-    }
-    
-    // Process summary with chunking
-    private func processSummaryWithChunks(_ chunks: [String]) {
-        // Create array to store chunk summaries
-        var chunkSummaries = [String]()
-        let group = DispatchGroup()
-        
-        // Summarize each chunk
-        for (index, chunk) in chunks.enumerated() {
-            group.enter()
-            
-            summarizeChunk(chunk, index: index).sink(
-                receiveCompletion: { completion in
-                    switch completion {
-                    case .finished:
-                        print("Chunk \(index) summarization completed")
-                    case .failure(let error):
-                        print("Chunk \(index) summarization error: \(error.localizedDescription)")
-                        self.summaryError = "Error summarizing chunk \(index): \(error.localizedDescription)"
-                        self.isAutomaticMode = false // Stop automatic mode on error
-                    }
-                    group.leave()
-                },
-                receiveValue: { summary in
-                    chunkSummaries.append(summary)
-                }
-            ).store(in: &cancellables)
-        }
-        
-        // When all chunks are summarized, combine them
-        group.notify(queue: .main) {
-            if chunkSummaries.isEmpty {
-                self.isSummarizing = false
-                if self.summaryError == nil {
-                    self.summaryError = "Failed to generate chunk summaries"
-                }
-                self.isAutomaticMode = false // Stop automatic mode on error
-                return
-            }
-            
-            // If there's only one chunk, use it as the final summary
-            if chunkSummaries.count == 1 {
-                self.persistSummaryAndHandleTitle(chunkSummaries[0])
-                self.isSummarizing = false
-                
-                // In automatic mode, switch to summary tab after completion
-                if self.isAutomaticMode {
-                    print("Automatic mode: Switching to summary tab after completion")
-                    self.isAutomaticMode = false // Reset automatic mode
-                }
-                return
-            }
-            
-            // If there are multiple chunks, combine them
-            self.combineSummaries(chunkSummaries).sink(
-                receiveCompletion: { completion in
-                    self.isSummarizing = false
-                    switch completion {
-                    case .finished:
-                        print("Combined summary completed")
-                    case .failure(let error):
-                        print("Combined summary error: \(error.localizedDescription)")
-                        self.summaryError = "Error combining summaries: \(error.localizedDescription)"
-                        self.isAutomaticMode = false // Stop automatic mode on error
-                    }
-                },
-                receiveValue: { finalSummary in
-                    self.persistSummaryAndHandleTitle(finalSummary)
-                    
-                    // In automatic mode, switch to summary tab after completion
-                    if self.isAutomaticMode {
-                        print("Automatic mode: Switching to summary tab after combined summary completion")
-                        self.isAutomaticMode = false // Reset automatic mode
-                    }
-                }
-            ).store(in: &self.cancellables)
-        }
-    }
-    
-    // Process summary as single text (no chunking)
-    private func processSummaryAsSingleText(_ text: String) {
-        // Use the summary prompt directly for single text
-        let prompt = settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: text)
-        
-        callOpenAIAPI(prompt: prompt, url: settings.openAIBaseURL).sink(
-            receiveCompletion: { completion in
-                isSummarizing = false
-                switch completion {
-                case .finished:
-                    print("Single text summarization completed successfully")
-                    if isAutomaticMode {
-                        print("Automatic mode: Switching to summary tab after single text completion")
-                        isAutomaticMode = false
-                    }
-                case .failure(let error):
-                    summaryError = "Error: \(error.localizedDescription)"
-                    print("Single text summarization failed: \(error.localizedDescription)")
-                    isAutomaticMode = false
-                }
-            },
-            receiveValue: { summary in
-                self.persistSummaryAndHandleTitle(summary)
-            }
-        ).store(in: &cancellables)
-    }
-    
-    // Summarize one chunk
-    private func summarizeChunk(_ chunk: String, index: Int) -> AnyPublisher<String, Error> {
-        let prompt = settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: chunk)
-        
-        return callOpenAIAPI(
-            prompt: prompt,
-            url: settings.openAIBaseURL
-        )
-    }
-    
-    // Combine chunk summaries
-    private func combineSummaries(_ summaries: [String]) -> AnyPublisher<String, Error> {
-        let combinedSummaries = summaries.joined(separator: "\n\n")
-        let prompt = settings.summaryPrompt.replacingOccurrences(of: "{transcription}", with: combinedSummaries)
-        
-        return callOpenAIAPI(
-            prompt: prompt,
-            url: settings.openAIBaseURL
-        )
-    }
-    
-    private func persistSummaryAndHandleTitle(_ rawSummary: String) {
-        let cleanedSummary = rawSummary.trimmingCharacters(in: .whitespacesAndNewlines)
-        record.summaryText = cleanedSummary
-        
-        do {
-            try modelContext.save()
-            print("Summary saved successfully")
-        } catch {
-            summaryError = "Error saving summary: \(error.localizedDescription)"
-            print("Error saving summary: \(error.localizedDescription)")
-            return
-        }
-        
-        guard !cleanedSummary.isEmpty else {
-            Logger.debug("Summary is empty after trimming; skipping title generation.", category: .llm)
-            return
-        }
-        
-        maybeGenerateTitle(from: cleanedSummary)
-    }
-    
-    private func maybeGenerateTitle(from summary: String) {
-        guard settings.autoGenerateTitleFromSummary else {
-            Logger.debug("Auto title generation disabled; skipping LLM request.", category: .llm)
-            return
-        }
-        
-        let prompt = settings.summaryTitlePrompt.replacingOccurrences(of: "{summary}", with: summary)
-        
-        callOpenAIAPI(prompt: prompt, url: settings.openAIBaseURL)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { completion in
-                    if case .failure(let error) = completion {
-                        Logger.error("Failed to generate title from summary: \(error.localizedDescription)", category: .llm)
-                    }
-                },
-                receiveValue: { generatedTitle in
-                    let sanitizedTitle = self.sanitizeGeneratedTitle(generatedTitle)
-                    guard !sanitizedTitle.isEmpty else {
-                        Logger.error("Generated title is empty after sanitization; keeping existing name.", category: .llm)
-                        return
-                    }
-                    
-                    if self.record.name == sanitizedTitle {
-                        Logger.info("Generated title matches existing name '\(sanitizedTitle)'; no update needed.", category: .llm)
-                        return
-                    }
-                    
-                    self.record.name = sanitizedTitle
-                    do {
-                        try self.modelContext.save()
-                        Logger.info("Auto-generated title saved: \(sanitizedTitle)", category: .data)
-                    } catch {
-                        Logger.error("Failed to save auto-generated title: \(error.localizedDescription)", category: .data)
-                    }
-                }
-            )
-            .store(in: &cancellables)
-    }
-    
-    private func sanitizeGeneratedTitle(_ rawTitle: String) -> String {
-        let quotesCharacterSet = CharacterSet(charactersIn: "\"'“”‘’`")
-        let punctuationAndWhitespace = CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines)
-        
-        var cleaned = rawTitle
-            .components(separatedBy: quotesCharacterSet)
-            .joined()
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-        
-        cleaned = cleaned.trimmingCharacters(in: punctuationAndWhitespace)
-        
-        if cleaned.lowercased().hasPrefix("title:") {
-            let index = cleaned.index(cleaned.startIndex, offsetBy: 6)
-            cleaned = String(cleaned[index...]).trimmingCharacters(in: punctuationAndWhitespace)
-        } else if cleaned.lowercased().hasPrefix("heading:") {
-            let index = cleaned.index(cleaned.startIndex, offsetBy: 8)
-            cleaned = String(cleaned[index...]).trimmingCharacters(in: punctuationAndWhitespace)
-        }
-        
-        let words = cleaned
-            .split(whereSeparator: { $0.isWhitespace })
-            .prefix(5)
-        
-        let result = words.joined(separator: " ").trimmingCharacters(in: punctuationAndWhitespace)
-        return result
-    }
-    
-    // Call OpenAI-compatible API
-    private func callOpenAIAPI(prompt: String, url: String) -> AnyPublisher<String, Error> {
-        return Future<String, Error> { promise in
-            // Form complete URL
-            guard let url = APIURLBuilder.buildURL(baseURL: url, endpoint: "chat/completions") else {
-                promise(.failure(NSError(domain: "Invalid URL", code: -1)))
-                return
-            }
-            
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 0  // No timeout for LLM requests
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            
-            // Add API Key if provided
-            let maskedAPIKey = settings.openAIAPIKey.isEmpty ? "None" : SecurityUtils.maskAPIKey(settings.openAIAPIKey)
-            if !settings.openAIAPIKey.isEmpty {
-                request.setValue("Bearer \(settings.openAIAPIKey)", forHTTPHeaderField: "Authorization")
-            }
-            
-            // Form request body
-            let requestBody: [String: Any] = [
-                "model": settings.openAIModel,
-                "messages": [
-                    ["role": "user", "content": prompt]
-                ]
-            ]
-            
-            // 🚀 LOG FULL REQUEST DETAILS
-            Logger.info("🤖 LLM API Request Details:", category: .llm)
-            Logger.info("📍 Endpoint: \(url.absoluteString)", category: .llm)
-            Logger.info("🔑 API Key: \(maskedAPIKey)", category: .llm) 
-            Logger.info("🧠 Model: \(settings.openAIModel)", category: .llm)
-            Logger.info("📜 User Prompt (Length: \(prompt.count) chars):", category: .llm)
-            Logger.info("═══════════════════════════════════════", category: .llm)
-            Logger.info(prompt, category: .llm)
-            Logger.info("═══════════════════════════════════════", category: .llm)
-            
-            do {
-                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-            } catch {
-                promise(.failure(error))
-                return
-            }
-            
-            // Send request with custom session that has no timeout
-            let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 0
-            config.timeoutIntervalForResource = 0
-            let session = URLSession(configuration: config)
-            
-            session.dataTask(with: request) { data, response, error in
-                if let error = error {
-                    Logger.error("❌ LLM API Network Error: \(error.localizedDescription)", category: .llm)
-                    promise(.failure(error))
-                    return
-                }
-                
-                // Log HTTP response details
-                if let httpResponse = response as? HTTPURLResponse {
-                    Logger.info("📡 LLM API HTTP Response Status: \(httpResponse.statusCode)", category: .llm)
-                    if httpResponse.statusCode >= 400 {
-                        Logger.error("❌ LLM API HTTP Error: \(httpResponse.statusCode)", category: .llm)
-                    }
-                }
-                
-                guard let data = data else {
-                    Logger.error("❌ No data received from LLM API", category: .llm)
-                    promise(.failure(NSError(domain: "No data received", code: -1)))
-                    return
-                }
-                
-                do {
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let choices = json["choices"] as? [[String: Any]],
-                       let firstChoice = choices.first,
-                       let message = firstChoice["message"] as? [String: Any],
-                       let content = message["content"] as? String {
-                        
-                        // 🚀 LOG RESPONSE DETAILS
-                        Logger.info("✅ LLM API Response received:", category: .llm)
-                        Logger.info("📊 Response Length: \(content.count) chars", category: .llm)
-                        Logger.info("📝 Response Content:", category: .llm)
-                        Logger.info("═══════════════════════════════════════", category: .llm)
-                        Logger.info(content, category: .llm)
-                        Logger.info("═══════════════════════════════════════", category: .llm)
-                        
-                        // Log usage info if available
-                        if let usage = json["usage"] as? [String: Any] {
-                            let promptTokens = usage["prompt_tokens"] as? Int ?? 0
-                            let completionTokens = usage["completion_tokens"] as? Int ?? 0
-                            let totalTokens = usage["total_tokens"] as? Int ?? 0
-                            Logger.info("📈 Token Usage - Prompt: \(promptTokens), Completion: \(completionTokens), Total: \(totalTokens)", category: .llm)
-                        }
-                        
-                        promise(.success(content))
-                    } else {
-                        let jsonStr = String(data: data, encoding: .utf8) ?? "Invalid UTF-8 data"
-                        Logger.error("❌ LLM API unexpected response format:", category: .llm)
-                        Logger.error("Raw response: \(jsonStr)", category: .llm)
-                        promise(.failure(NSError(domain: "Invalid response format", code: -1)))
-                    }
-                } catch {
-                    Logger.error("❌ LLM API JSON parsing error: \(error.localizedDescription)", category: .llm)
-                    if let jsonStr = String(data: data, encoding: .utf8) {
-                        Logger.error("Raw response: \(jsonStr)", category: .llm)
-                    }
-                    promise(.failure(error))
-                }
-            }.resume()
-        }.eraseToAnyPublisher()
-    }
-    
     // Function to start automatic pipeline
     private func startAutomaticPipeline() {
         guard isAutomaticMode else { return }
         
-        print("Starting automatic pipeline for record: \(record.name)")
-        
-        // Start transcription first
-        startTranscription()
+        Logger.debug("Starting automatic pipeline for record: \(record.name)", category: .transcription)
+        processingManager.enqueueTranscription(
+            for: record,
+            in: modelContext,
+            settings: settings,
+            automatic: true,
+            preferStreaming: true
+        )
     }
-}
-
-private extension ProcessingState {
-    var logDescription: String {
-        switch self {
-        case .idle:
-            return "idle"
-        case .transcribing:
-            return "transcribing"
-        case .summarizing:
-            return "summarizing"
-        case .completed:
-            return "completed"
-        case .error(let message):
-            return "error(\(message))"
-        case .streamingTranscription(let chunks):
-            return "streamingTranscription(\(chunks.count) chunks)"
+    
+    private func handleProcessingStateChange() {
+        let state = processingStatus
+        
+        if let error = state.transcriptionError, !error.isEmpty {
+            selectedTab = .transcription
+            isAutomaticMode = false
+        } else if let error = state.summaryError, !error.isEmpty {
+            selectedTab = .summary
+            isAutomaticMode = false
         }
     }
 }
+
