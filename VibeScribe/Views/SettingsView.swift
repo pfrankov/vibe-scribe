@@ -140,6 +140,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(filter: #Predicate<AppSettings> { $0.id == "app_settings" })
     private var appSettings: [AppSettings]
+#if DEBUG
+    @AppStorage("debug.simulateEmptyRecordings") private var simulateEmptyRecordings = false
+#endif
     
     @FocusState private var focusedField: FocusedField?
     @State private var selectedTab: SettingsTab = .speechToText
@@ -182,6 +185,10 @@ struct SettingsView: View {
                     } else {
                         summaryContent
                     }
+                    
+#if DEBUG
+                    adminSettingsSection
+#endif
                     
                     Spacer(minLength: UIConstants.spacing)
                 }
@@ -502,6 +509,28 @@ struct SettingsView: View {
             }
         }
     }
+    
+#if DEBUG
+    @ViewBuilder
+    private var adminSettingsSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: UIConstants.smallSpacing) {
+                Toggle("Simulate empty recordings list", isOn: Binding(
+                    get: { simulateEmptyRecordings },
+                    set: { newValue in
+                        simulateEmptyRecordings = newValue
+                    }
+                ))
+                
+                captionText("Hides all recordings so you can preview the empty state. Available in Debug builds only.")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Admin Tools", systemImage: "wrench.and.screwdriver")
+                .font(.system(size: UIConstants.fontSize, weight: .semibold))
+        }
+    }
+#endif
     
     // MARK: - Helper Components
     

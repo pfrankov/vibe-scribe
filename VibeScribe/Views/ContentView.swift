@@ -18,13 +18,16 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
     @Query(sort: \Record.date, order: .reverse) private var records: [Record]
+#if DEBUG
+    @AppStorage("debug.simulateEmptyRecordings") private var simulateEmptyRecordings = false
+#endif
 
     var body: some View {
         VStack(spacing: 0) {
             // Main content
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 RecordsSidebarView(
-                    records: records,
+                    records: effectiveRecords,
                     selectedRecord: $selectedRecord,
                     shouldScrollToSelectedRecord: $shouldScrollToSelectedRecord,
                     onCreateRecording: presentRecordingOverlay
@@ -76,10 +79,22 @@ struct ContentView: View {
             Logger.info("Auto-selected newly created record: \(newRecord.name)", category: .ui)
         }
         .onChange(of: records) { _, newRecords in
+#if DEBUG
+            guard !simulateEmptyRecordings else { return }
+#endif
             guard selectedRecord == nil, let first = newRecords.first else { return }
             selectRecord(first, shouldScroll: false)
             Logger.debug("Auto-selected first record without scrolling", category: .ui)
         }
+#if DEBUG
+        .onChange(of: simulateEmptyRecordings) { _, isSimulating in
+            if isSimulating {
+                selectedRecord = nil
+            } else {
+                selectFirstRecordIfNeeded()
+            }
+        }
+#endif
         // Legacy sheet flow kept disabled; overlay replaces it
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -99,6 +114,14 @@ struct ContentView: View {
         )
     }
     
+    private var effectiveRecords: [Record] {
+#if DEBUG
+        return simulateEmptyRecordings ? [] : records
+#else
+        return records
+#endif
+    }
+
     // MARK: - Subviews
     
     @ViewBuilder
@@ -154,6 +177,9 @@ struct ContentView: View {
     }
     
     private func selectFirstRecordIfNeeded() {
+#if DEBUG
+        guard !simulateEmptyRecordings else { return }
+#endif
         guard selectedRecord == nil, let first = records.first else { return }
         selectRecord(first, shouldScroll: false)
         Logger.debug("Auto-selected first record on appear", category: .ui)
