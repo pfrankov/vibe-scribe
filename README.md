@@ -1,6 +1,12 @@
 # VibeScribe
 
-<img width="700" alt="screenshot" src="https://github.com/user-attachments/assets/53b42ce6-f0d6-405e-b5a1-b3b19fc56c90" />
+<table>
+  <tr>
+    <td><img width="700" alt="VibeScribe" src="https://github.com/user-attachments/assets/6ee7410c-40fb-42e0-9b4b-ae3d12443c0b" /></td>
+    <td align="center" valign="top"><img width="300" alt="Recording overlay" src="https://github.com/user-attachments/assets/6e0be794-e3fd-42c3-9918-afdf257e20e6" /><br/><i>Recording always-on-top overlay</i></td>
+  </tr>
+</table>
+
 
 VibeScribe turns meetings, interviews, and brainstorming sessions into structured notes. Record microphone and optional system audio, watch the transcript stream in, and let AI craft shareable summaries—without leaving the macOS menu bar.
 
