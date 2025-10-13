@@ -8,6 +8,7 @@
 import Foundation
 import SwiftData
 import AVFoundation
+import UniformTypeIdentifiers
 
 // MARK: - Import Errors
 
@@ -62,6 +63,19 @@ class AudioFileImportManager: ObservableObject {
     /// Supported UTI types for audio files
     static var supportedUTTypes: [String] {
         Array(audioUTTypes).sorted()
+    }
+    
+    /// Supported Uniform Type Identifiers for file import panels
+    static var supportedContentTypes: [UTType] {
+        var types: Set<UTType> = [.audio]
+        
+        for ext in audioFileExtensions {
+            if let type = UTType(filenameExtension: ext) {
+                types.insert(type)
+            }
+        }
+        
+        return Array(types)
     }
     
     deinit {

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import AppKit
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -126,7 +127,13 @@ struct ContentView: View {
     
     @ViewBuilder
     private var recordDetail: some View {
-        if let selectedRecord = selectedRecord {
+        if effectiveRecords.isEmpty {
+            WelcomeEmptyDetailView(
+                onCreateRecording: presentRecordingOverlay,
+                onImportAudio: presentImportPanel,
+                onOpenSettings: { isShowingSettings = true }
+            )
+        } else if let selectedRecord = selectedRecord {
             RecordDetailView(
                 record: selectedRecord,
                 isSidebarCollapsed: columnVisibility == .detailOnly,
@@ -295,6 +302,33 @@ struct ContentView: View {
             AnyView(RecordingOverlayView().environment(\.modelContext, modelContext))
         })
     }
+    
+    private func presentImportPanel() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = AudioFileImportManager.supportedContentTypes
+        panel.prompt = "Import"
+        panel.message = "Select audio you'd like VibeScribe to transcribe and summarize."
+        
+        panel.begin { response in
+            guard response == .OK else { return }
+            
+            let urls = panel.urls
+            guard !urls.isEmpty else { return }
+            
+            let supportedAudioFiles = AudioFileImportManager.filterSupportedAudioFiles(urls: urls)
+            
+            if supportedAudioFiles.isEmpty {
+                showUnsupportedFilesAlert(totalCount: urls.count)
+                return
+            }
+            
+            Logger.info("Importing \(supportedAudioFiles.count) audio files from picker", category: .audio)
+            importManager.importAudioFiles(urls: supportedAudioFiles, modelContext: modelContext)
+        }
+    }
 
     @ViewBuilder
     private var dragOverlay: some View {
@@ -326,7 +360,10 @@ private struct RecordsSidebarView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                SidebarHeader(onCreateRecording: onCreateRecording)
+                SidebarHeader(
+                    showQuickAction: !records.isEmpty,
+                    onCreateRecording: onCreateRecording
+                )
                 content
             }
         }
@@ -545,6 +582,7 @@ private struct RecordSection: Identifiable {
 }
 
 private struct SidebarHeader: View {
+    let showQuickAction: Bool
     let onCreateRecording: () -> Void
 
     var body: some View {
@@ -555,12 +593,14 @@ private struct SidebarHeader: View {
                 .foregroundColor(.primary)
             Spacer()
 
-            Button(action: onCreateRecording) {
-                Label("New Recording", systemImage: "plus.circle.fill")
-                    .font(.body)
+            if showQuickAction {
+                 Button(action: onCreateRecording) {
+                    Label("New Recording", systemImage: "plus.circle.fill")
+                        .font(.body)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.regular)
             }
-            .buttonStyle(.borderless)
-            .controlSize(.regular)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -570,19 +610,26 @@ private struct SidebarHeader: View {
 private struct RecordingsEmptyState: View {
     var body: some View {
         VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "waveform.slash")
-                .font(.system(size: 40))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                .padding(.bottom, 4)
+            Spacer(minLength: 0)
+
+            Image(systemName: "waveform.circle")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundColor(.accentColor)
+                .symbolRenderingMode(.hierarchical)
+            
             Text("No recordings yet")
                 .font(.headline)
-                .foregroundColor(Color(NSColor.labelColor))
-            Text("Click + to create your first recording")
+                .multilineTextAlignment(.center)
+            
+            Text("Start a capture or import a file from the panel on the right.")
                 .font(.subheadline)
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+            
             Spacer()
         }
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -663,6 +710,151 @@ struct DragOverlayContent: View {
         } else {
             return .accentColor
         }
+    }
+}
+
+private struct WelcomeEmptyDetailView: View {
+    let onCreateRecording: () -> Void
+    let onImportAudio: () -> Void
+    let onOpenSettings: () -> Void
+    
+    private let whisperServerURL = URL(string: "https://github.com/pfrankov/whisper-server/releases")!
+    
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 24) {
+                heroSection
+                quickStartCard
+                essentialsNote
+            }
+            .frame(maxWidth: 560)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 28)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var heroSection: some View {
+        VStack(spacing: 10) {
+            if let appIconImage {
+                Image(nsImage: appIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 6)
+            } else {
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 54, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.accentColor, Color.accentColor.opacity(0.22))
+            }
+
+            Text("Welcome to VibeScribe")
+                .font(.system(size: 26, weight: .bold))
+                .multilineTextAlignment(.center)
+
+            Text("Record or import conversations, keep processing on your own Whisper-compatible server, and read the AI summary right away.")
+                .font(.title3.weight(.regular))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    private var appIconImage: NSImage? {
+        if let assetIcon = NSImage(named: "AppIcon") {
+            return assetIcon
+        }
+        if let bundleIcon = NSImage(named: NSImage.applicationIconName) {
+            return bundleIcon
+        }
+        return NSApp?.applicationIconImage
+    }
+
+    @ViewBuilder
+    private var quickStartCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pick your first step")
+                    .font(.headline)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    primaryRecordingButton
+                    importButton
+                }
+                VStack(spacing: 12) {
+                    primaryRecordingButton
+                    importButton
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Link("Install WhisperServer", destination: whisperServerURL)
+                Text("Run WhisperServer locally or on your own host to keep conversations private.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: onOpenSettings) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gearshape")
+                            .foregroundColor(.accentColor)
+                        Text("Connect your transcription and summary services")
+                    }
+                }
+                .buttonStyle(.link)
+
+                Text("Add your Whisper-compatible audio endpoint and chat model so VibeScribe can process automatically.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+    }
+
+    @ViewBuilder
+    private var essentialsNote: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "shield.lefthalf.filled")
+                    .foregroundColor(.accentColor)
+                Text("The recordings, transcriptions, and sammaries stay on your Mac and only you determine what to do with them.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var primaryRecordingButton: some View {
+        Button(action: onCreateRecording) {
+            Label("Start recording", systemImage: "mic.circle.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .accessibilityHint("Opens the floating overlay to capture mic and system audio.")
+    }
+
+    private var importButton: some View {
+        Button(action: onImportAudio) {
+            Label("Import audio file", systemImage: "tray.and.arrow.down.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
     }
 }
 
