@@ -7,10 +7,10 @@
   </tr>
 </table>
 
-VibeScribe is a macOS app that records your meetings from any app and turns them into smart summaries using AI.
-_🔒 Privacy first—everything can be done using only local AI models._
+VibeScribe is a macOS app that records your meetings from any app and turns them into smart summaries using AI.  
+🔒 Privacy first—everything can be done using only local AI models.
 
-**Key Features**
+## Key Features
 - Record a meeting from any app (Zoom, Meet, Teams, Discord, Slack, or others) and get a summary in the same language as the conversation.
 - Import, transcribe, and summarize existing audio or video files via drag and drop.
 - Automatically title your notes from the summary.
