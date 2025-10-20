@@ -25,6 +25,7 @@ final class RecordProcessingManager: ObservableObject {
     }
     
     struct SettingsSnapshot: Equatable {
+        let whisperProviderRawValue: String
         let whisperBaseURL: String
         let whisperAPIKey: String
         let whisperModel: String
@@ -39,6 +40,7 @@ final class RecordProcessingManager: ObservableObject {
         let summaryTitlePrompt: String
         
         init(settings: AppSettings) {
+            self.whisperProviderRawValue = settings.whisperProviderRawValue
             self.whisperBaseURL = settings.whisperBaseURL
             self.whisperAPIKey = settings.whisperAPIKey
             self.whisperModel = settings.whisperModel
@@ -57,10 +59,33 @@ final class RecordProcessingManager: ObservableObject {
             whisperModel.isEmpty ? "whisper-1" : whisperModel
         }
         
+        var whisperProvider: WhisperProvider {
+            WhisperProvider(rawValue: whisperProviderRawValue) ?? .compatibleAPI
+        }
+        
+        var resolvedWhisperBaseURL: String {
+            switch whisperProvider {
+            case .whisperServer:
+                return WhisperProvider.whisperServer.defaultBaseURL
+            case .compatibleAPI:
+                return whisperBaseURL
+            }
+        }
+        
+        var resolvedWhisperAPIKey: String {
+            switch whisperProvider {
+            case .whisperServer:
+                return WhisperProvider.whisperServer.defaultAPIKey
+            case .compatibleAPI:
+                return whisperAPIKey
+            }
+        }
+        
         func asTransientSettingsModel() -> AppSettings {
             AppSettings(
-                whisperBaseURL: whisperBaseURL,
-                whisperAPIKey: whisperAPIKey,
+                whisperProvider: whisperProvider,
+                whisperBaseURL: resolvedWhisperBaseURL,
+                whisperAPIKey: resolvedWhisperAPIKey,
                 whisperModel: whisperModel,
                 useChunking: useChunking,
                 chunkSize: chunkSize,

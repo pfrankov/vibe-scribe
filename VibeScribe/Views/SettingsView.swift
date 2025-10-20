@@ -217,6 +217,9 @@ struct SettingsView: View {
         .onChange(of: settings.whisperAPIKey) { _, _ in
             loadWhisperModelsIfURLValid()
         }
+        .onChange(of: settings.whisperProviderRawValue) { _, _ in
+            loadWhisperModelsIfURLValid()
+        }
         .onChange(of: settings.openAIBaseURL) { _, _ in
             loadOpenAIModelsIfURLValid()
         }
@@ -249,77 +252,155 @@ struct SettingsView: View {
     
     @ViewBuilder
     private var speechToTextContent: some View {
-        settingsField(
-            title: "Whisper compatible API base URL",
-            placeholder: "https://api.example.com/v1/",
-            value: Binding(
-                get: { settings.whisperBaseURL },
-                set: { newValue in
-                    settings.whisperBaseURL = newValue
-                    trySave()
-                }
-            ),
-            caption: "e.g., https://api.openai.com/v1/ or your local Whisper instance base URL. Endpoint will be appended automatically."
-        )
-        
-        settingsField(
-            title: "Whisper API Key",
-            placeholder: "sk-...",
-            value: Binding(
-                get: { settings.whisperAPIKey },
-                set: { newValue in
-                    settings.whisperAPIKey = newValue
-                    trySave()
-                }
-            ),
-            caption: "Your Whisper API key. Leave empty for local servers that don't require authentication."
-        )
-        
+        // Provider selector
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            HStack {
-                Text("Whisper Model")
-                    .font(.system(size: UIConstants.fontSize))
-                
-                Spacer()
-                
-                Button(action: { modelService.loadWhisperModels(baseURL: settings.whisperBaseURL, apiKey: settings.whisperAPIKey) }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption)
+            Picker("", selection: Binding(
+                get: { settings.whisperProvider },
+                set: { newValue in
+                    settings.whisperProvider = newValue
+                    trySave()
                 }
-                .buttonStyle(.borderless)
-                .disabled(modelService.isLoadingWhisperModels || settings.whisperBaseURL.isEmpty)
-                .help("Refresh models list")
+            )) {
+                ForEach(WhisperProvider.allCases, id: \.self) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
             }
-            
-            if modelService.isLoadingWhisperModels {
+            .pickerStyle(.menu)
+            .labelsHidden()
+        }
+
+        // Group: WhisperServer
+        if settings.whisperProvider == .whisperServer {
+            VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
                 HStack {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading models...")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text("Model")
+                        .font(.system(size: UIConstants.fontSize))
+
+                    Spacer()
+
+                    Button(action: {
+                        modelService.loadWhisperModels(
+                            baseURL: settings.resolvedWhisperBaseURL,
+                            apiKey: settings.resolvedWhisperAPIKey
+                        )
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(modelService.isLoadingWhisperModels)
+                    .help("Refresh models list")
                 }
-                .frame(height: 22)
-            } else {
-                ComboBoxView(
-                    placeholder: modelService.whisperModels.isEmpty ? "Enter model name or refresh list" : "Select Whisper model",
-                    options: modelService.whisperModels,
-                    selectedOption: Binding(
-                        get: { settings.whisperModel },
-                        set: { newValue in
-                            settings.whisperModel = newValue
-                            trySave()
-                        }
+
+                if modelService.isLoadingWhisperModels {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Loading models...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(height: 22)
+                } else {
+                    ComboBoxView(
+                        placeholder: modelService.whisperModels.isEmpty ? "Enter model name or refresh list" : "Select model",
+                        options: modelService.whisperModels,
+                        selectedOption: Binding(
+                            get: { settings.whisperModel },
+                            set: { newValue in
+                                settings.whisperModel = newValue
+                                trySave()
+                            }
+                        )
                     )
-                )
-                .frame(height: 22)
+                    .frame(height: 22)
+                }
+
+                if let error = modelService.whisperModelsError {
+                    InlineMessageView(error)
+                }
             }
-            
-            if let error = modelService.whisperModelsError {
-                InlineMessageView(error)
+        }
+
+        // Group: Whisper compatible API
+        if settings.whisperProvider == .compatibleAPI {
+            settingsField(
+                title: "Whisper compatible API base URL",
+                placeholder: "https://api.example.com/v1/",
+                value: Binding(
+                    get: { settings.whisperBaseURL },
+                    set: { newValue in
+                        settings.whisperBaseURL = newValue
+                        trySave()
+                    }
+                ),
+                caption: "e.g., https://api.openai.com/v1/ or your local Whisper instance base URL. Endpoint will be appended automatically."
+            )
+
+            settingsField(
+                title: "Whisper API Key",
+                placeholder: "sk-...",
+                value: Binding(
+                    get: { settings.whisperAPIKey },
+                    set: { newValue in
+                        settings.whisperAPIKey = newValue
+                        trySave()
+                    }
+                ),
+                caption: "Your Whisper API key. Leave empty for local servers that don't require authentication."
+            )
+
+            VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+                HStack {
+                    Text("Whisper Model")
+                        .font(.system(size: UIConstants.fontSize))
+
+                    Spacer()
+
+                    Button(action: {
+                        modelService.loadWhisperModels(
+                            baseURL: settings.whisperBaseURL,
+                            apiKey: settings.whisperAPIKey
+                        )
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(modelService.isLoadingWhisperModels || settings.whisperBaseURL.isEmpty)
+                    .help("Refresh models list")
+                }
+
+                if modelService.isLoadingWhisperModels {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Loading models...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(height: 22)
+                } else {
+                    ComboBoxView(
+                        placeholder: modelService.whisperModels.isEmpty ? "Enter model name or refresh list" : "Select Whisper model",
+                        options: modelService.whisperModels,
+                        selectedOption: Binding(
+                            get: { settings.whisperModel },
+                            set: { newValue in
+                                settings.whisperModel = newValue
+                                trySave()
+                            }
+                        )
+                    )
+                    .frame(height: 22)
+                }
+
+                if let error = modelService.whisperModelsError {
+                    InlineMessageView(error)
+                }
+
+                captionText("Specify the Whisper model to use for transcription. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
             }
-            
-            captionText("Specify the Whisper model to use for transcription. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
         }
     }
     
@@ -636,14 +717,21 @@ struct SettingsView: View {
     }
     
     private func loadWhisperModelsIfURLValid() {
-        guard !settings.whisperBaseURL.isEmpty else { return }
-        
-        guard APIURLBuilder.isValidBaseURL(settings.whisperBaseURL) else {
+        let provider = settings.whisperProvider
+        let baseURL = settings.resolvedWhisperBaseURL
+        let apiKey = settings.resolvedWhisperAPIKey
+
+        // For compatible API: don't trigger load if field is empty
+        if provider == .compatibleAPI && settings.whisperBaseURL.isEmpty {
+            return
+        }
+
+        guard APIURLBuilder.isValidBaseURL(baseURL) else {
             modelService.whisperModelsError = "Invalid URL format"
             return
         }
-        
-        modelService.loadWhisperModels(baseURL: settings.whisperBaseURL, apiKey: settings.whisperAPIKey)
+
+        modelService.loadWhisperModels(baseURL: baseURL, apiKey: apiKey)
     }
     
     private func loadOpenAIModelsIfURLValid() {

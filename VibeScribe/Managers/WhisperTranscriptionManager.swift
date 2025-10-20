@@ -103,13 +103,13 @@ class WhisperTranscriptionManager: NSObject {
         print("🎯 Starting transcription for: \(audioURL.lastPathComponent)")
         
         // Check if we already know this server doesn't support SSE
-        let serverKey = settings.whisperBaseURL
+        let serverKey = settings.resolvedWhisperBaseURL
         if let cachedResult = getCachedSSESupport(for: serverKey), !cachedResult {
             print("📋 Server \(serverKey) known to not support SSE, using regular mode")
             return transcribeAudioRegular(
                 audioURL: audioURL,
-                whisperBaseURL: settings.whisperBaseURL,
-                apiKey: settings.whisperAPIKey,
+                whisperBaseURL: settings.resolvedWhisperBaseURL,
+                apiKey: settings.resolvedWhisperAPIKey,
                 model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
             )
         }
@@ -118,8 +118,8 @@ class WhisperTranscriptionManager: NSObject {
         print("🚀 Attempting SSE streaming with stream=true parameter...")
         return transcribeAudioStreaming(
             audioURL: audioURL,
-            whisperBaseURL: settings.whisperBaseURL,
-            apiKey: settings.whisperAPIKey,
+            whisperBaseURL: settings.resolvedWhisperBaseURL,
+            apiKey: settings.resolvedWhisperAPIKey,
             model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
         )
         .catch { error -> AnyPublisher<String, TranscriptionError> in
@@ -129,8 +129,8 @@ class WhisperTranscriptionManager: NSObject {
                 
                 return self.transcribeAudioRegular(
                     audioURL: audioURL,
-                    whisperBaseURL: settings.whisperBaseURL,
-                    apiKey: settings.whisperAPIKey,
+                    whisperBaseURL: settings.resolvedWhisperBaseURL,
+                    apiKey: settings.resolvedWhisperAPIKey,
                     model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
                 )
             } else {
@@ -150,8 +150,8 @@ class WhisperTranscriptionManager: NSObject {
             return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
         }
         
-        guard let serverURL = APIURLBuilder.buildURL(baseURL: settings.whisperBaseURL, endpoint: "audio/transcriptions") else {
-            print("❌ Error: Invalid Whisper API base URL: \(settings.whisperBaseURL)")
+        guard let serverURL = APIURLBuilder.buildURL(baseURL: settings.resolvedWhisperBaseURL, endpoint: "audio/transcriptions") else {
+            print("❌ Error: Invalid Whisper API base URL: \(settings.resolvedWhisperBaseURL)")
             return Fail(error: TranscriptionError.networkError(NSError(domain: "InvalidURL", code: -1, userInfo: nil))).eraseToAnyPublisher()
         }
         
@@ -164,7 +164,7 @@ class WhisperTranscriptionManager: NSObject {
             await self.startStreamingWithRetry(
                 audioURL: audioURL,
                 serverURL: serverURL,
-                apiKey: settings.whisperAPIKey,
+                apiKey: settings.resolvedWhisperAPIKey,
                 model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel,
                 subject: subject,
                 maxRetries: 3

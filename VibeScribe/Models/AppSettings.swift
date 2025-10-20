@@ -8,6 +8,51 @@
 import Foundation
 import SwiftData
 
+// MARK: - Whisper Provider Configuration
+
+enum WhisperProvider: String, CaseIterable, Identifiable, Codable {
+    case whisperServer
+    case compatibleAPI
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .whisperServer:
+            return "WhisperServer"
+        case .compatibleAPI:
+            return "Whisper compatible API"
+        }
+    }
+    
+    var defaultBaseURL: String {
+        switch self {
+        case .whisperServer:
+            return "http://localhost:12017/v1/"
+        case .compatibleAPI:
+            return "https://api.openai.com/v1/"
+        }
+    }
+    
+    var defaultAPIKey: String {
+        switch self {
+        case .whisperServer:
+            return ""
+        case .compatibleAPI:
+            return ""
+        }
+    }
+    
+    var allowsCustomCredentials: Bool {
+        switch self {
+        case .whisperServer:
+            return false
+        case .compatibleAPI:
+            return true
+        }
+    }
+}
+
 // --- SwiftData Model for Application Settings ---
 @Model
 final class AppSettings {
@@ -18,6 +63,7 @@ final class AppSettings {
     var whisperBaseURL: String = "https://api.openai.com/v1/"
     var whisperAPIKey: String = ""
     var whisperModel: String = ""
+    var whisperProviderRawValue: String = WhisperProvider.compatibleAPI.rawValue
     
     // LLM Context settings
     var useChunking: Bool = true // Option to enable/disable chunking entirely
@@ -85,6 +131,7 @@ final class AppSettings {
     }
     
     init(id: String = "app_settings", 
+         whisperProvider: WhisperProvider = .compatibleAPI,
          whisperBaseURL: String, 
          whisperAPIKey: String = "",
          whisperModel: String = "",
@@ -102,6 +149,7 @@ Create a concise title of at most five words that captures the essence of this s
 {summary}
 """) {
         self.id = id
+        self.whisperProvider = whisperProvider
         self.whisperBaseURL = whisperBaseURL
         self.whisperAPIKey = whisperAPIKey
         self.whisperModel = whisperModel
@@ -122,7 +170,8 @@ Create a concise title of at most five words that captures the essence of this s
 extension AppSettings {
     /// Validate if Whisper settings are properly configured
     var isWhisperConfigured: Bool {
-        return !whisperBaseURL.isEmpty && APIURLBuilder.isValidBaseURL(whisperBaseURL)
+        let baseURL = resolvedWhisperBaseURL
+        return !baseURL.isEmpty && APIURLBuilder.isValidBaseURL(baseURL)
     }
     
     /// Validate if OpenAI settings are properly configured
@@ -130,4 +179,30 @@ extension AppSettings {
         return !openAIBaseURL.isEmpty && APIURLBuilder.isValidBaseURL(openAIBaseURL)
     }
     
-  }
+    var whisperProvider: WhisperProvider {
+        get { WhisperProvider(rawValue: whisperProviderRawValue) ?? .compatibleAPI }
+        set { whisperProviderRawValue = newValue.rawValue }
+    }
+    
+    var resolvedWhisperBaseURL: String {
+        switch whisperProvider {
+        case .whisperServer:
+            return WhisperProvider.whisperServer.defaultBaseURL
+        case .compatibleAPI:
+            return whisperBaseURL
+        }
+    }
+    
+    var resolvedWhisperAPIKey: String {
+        switch whisperProvider {
+        case .whisperServer:
+            return WhisperProvider.whisperServer.defaultAPIKey
+        case .compatibleAPI:
+            return whisperAPIKey
+        }
+    }
+    
+    var allowsCustomWhisperCredentials: Bool {
+        whisperProvider.allowsCustomCredentials
+    }
+}
