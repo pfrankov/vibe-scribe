@@ -18,6 +18,8 @@ struct RecordDetailView: View {
         self.record = record
         self.isSidebarCollapsed = isSidebarCollapsed
         self.onRecordDeleted = onRecordDeleted
+        _transcriptionDraft = State(initialValue: record.transcriptionText ?? "")
+        _summaryDraft = State(initialValue: record.summaryText ?? "")
     }
 
     // Use @Bindable for direct modification of @Model properties
@@ -36,10 +38,16 @@ struct RecordDetailView: View {
     @State private var selectedWhisperModel: String = ""
     @State private var selectedSummaryModel: String = ""
 
+    @State private var transcriptionDraft: String
+    @State private var summaryDraft: String
+    @State private var transcriptionSaveWorkItem: DispatchWorkItem?
+    @State private var summarySaveWorkItem: DispatchWorkItem?
+
     // State for inline title editing - Renamed for clarity
     @State private var isEditingTitle: Bool = false
     @State private var editingTitle: String = ""
     @FocusState private var isTitleFieldFocused: Bool
+    @FocusState private var focusedEditor: ActiveEditor?
 
     // Action menu state
     @State private var isShowingDeleteConfirmation = false
@@ -48,6 +56,7 @@ struct RecordDetailView: View {
     private let speedControlColumnWidth: CGFloat = 68
     private let speedControlColumnSpacing: CGFloat = 12
     private let controlRowHeight: CGFloat = 28
+    private let inlineSaveDebounceInterval: TimeInterval = 0.75
     @State private var spaceKeyMonitor: Any?
 
     // Removed tuning controls (auto-optimized waveform)
@@ -179,19 +188,308 @@ struct RecordDetailView: View {
             }
         }
     }
+
+    // Enum to keep track of focused text editor
+    private enum ActiveEditor: Hashable {
+        case transcription
+        case summary
+    }
+
+    // Reusable inline editor to keep body lightweight for type-checker
+    private struct InlineEditableTextArea: View {
+        @Binding var text: String
+        var placeholder: String
+        var statusMessage: String?
+        var focusBinding: FocusState<ActiveEditor?>.Binding
+        var editor: ActiveEditor
+
+        var body: some View {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(NSColor.textBackgroundColor))
+
+                TextEditor(text: $text)
+                    .font(.body)
+                    .focused(focusBinding, equals: editor)
+                    .disableAutocorrection(true)
+                    .background(Color.clear)
+                    .padding(8)
+
+                if text.isEmpty {
+                    Text(statusMessage ?? placeholder)
+                        .font(.body)
+                        .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 1)
+            )
+            .frame(maxHeight: .infinity)
+        }
+    }
+
+    private var headerSection: some View {
+        HStack {
+            ZStack(alignment: .leading) {
+                // --- TextField (Visible when editing title) ---
+                TextField("Name", text: $editingTitle)
+                    .textFieldStyle(.plain)
+                    .focused($isTitleFieldFocused)
+                    .onSubmit { saveTitle() }
+                    .font(.title2.bold())
+                    .opacity(isEditingTitle ? 1 : 0)
+                    .disabled(!isEditingTitle)
+                    .onTapGesture {}
+
+                // --- Text (Visible when not editing title) ---
+                Text(record.name)
+                    .font(.title2.bold())
+                    .opacity(isEditingTitle ? 0 : 1)
+                    .onTapGesture(count: 2) {
+                        startEditingTitle()
+                    }
+            }
+            Spacer()
+
+            Menu {
+                Button {
+                    triggerDownload()
+                } label: {
+                    Label("Download Audio", systemImage: "arrow.down.to.line")
+                }
+                .disabled(record.fileURL == nil || isDownloading)
+
+                Button {
+                    startEditingTitle()
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .disabled(isEditingTitle)
+
+                Divider()
+
+                Button(role: .destructive) {
+                    isShowingDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            } label: {
+                if isDownloading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.9)
+                        .frame(width: 24, height: 24)
+                } else {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .frame(width: 28, height: 28)
+        }
+        .padding(.bottom, 4)
+    }
+
+    private var tabsSection: some View {
+        guard shouldShowContent else {
+            return AnyView(EmptyView())
+        }
+
+        let picker = Picker("", selection: $selectedTab) {
+            Text("Transcription").tag(Tab.transcription)
+            Text("Summary").tag(Tab.summary)
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 300)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 8)
+
+        let content: AnyView = {
+            switch selectedTab {
+            case .transcription:
+                return AnyView(transcriptionTab)
+            case .summary:
+                return AnyView(summaryTab)
+            }
+        }()
+
+        return AnyView(
+            VStack(alignment: .leading, spacing: 10) {
+                picker
+                content
+            }
+        )
+    }
+
+    private var transcriptionTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Spacer()
+                Button {
+                    copyTranscription()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy Transcription")
+                .disabled(!hasTranscriptionContent)
+            }
+
+            if let error = transcriptionError {
+                InlineMessageView(error)
+                    .padding(.bottom, 4)
+            }
+
+            InlineEditableTextArea(
+                text: $transcriptionDraft,
+                placeholder: "Start typing transcription...",
+                statusMessage: transcriptionStatusMessage,
+                focusBinding: $focusedEditor,
+                editor: .transcription
+            )
+
+            HStack(spacing: 12) {
+                ComboBoxView(
+                    placeholder: whisperModelOptions.isEmpty ? "Select transcription model" : "Choose model",
+                    options: whisperModelOptions,
+                    selectedOption: $selectedWhisperModel
+                )
+                .frame(width: 220, height: 32)
+
+                Button {
+                    requestTranscription(from: .transcription)
+                } label: {
+                    HStack {
+                        if isTranscribing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "waveform")
+                        }
+                        Text("Transcribe")
+                    }
+                    .frame(minWidth: 130)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isTranscribing || record.fileURL == nil)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.top, 4)
+        }
+    }
+
+    private var summaryTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Spacer()
+                Button {
+                    copySummary()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy Summary")
+                .disabled(!hasSummaryContent)
+            }
+
+            if let error = summaryError {
+                InlineMessageView(error)
+                    .padding(.bottom, 4)
+            }
+
+            InlineEditableTextArea(
+                text: $summaryDraft,
+                placeholder: "No summary available yet.",
+                statusMessage: nil,
+                focusBinding: $focusedEditor,
+                editor: .summary
+            )
+
+            HStack(spacing: 12) {
+                ComboBoxView(
+                    placeholder: summaryModelOptions.isEmpty ? "Select summary model" : "Choose model",
+                    options: summaryModelOptions,
+                    selectedOption: $selectedSummaryModel
+                )
+                .frame(width: 220, height: 32)
+
+                Button {
+                    requestSummarization(from: .summary)
+                } label: {
+                    HStack {
+                        if isSummarizing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "doc.text.magnifyingglass")
+                        }
+                        Text("Summarize")
+                    }
+                    .frame(minWidth: 130)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isSummarizing || !hasTranscriptionContent)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.top, 4)
+        }
+    }
+
+    private var processingSection: some View {
+        Group {
+            switch currentProcessingState {
+            case .transcribing, .summarizing, .streamingTranscription:
+                ProcessingProgressView(state: currentProcessingState)
+                    .padding(.top, 8)
+            default:
+                EmptyView()
+            }
+        }
+    }
     
     // Computed property for transcription text for easier access
-    private var transcriptionText: String {
+    private var transcriptionStatusMessage: String? {
         if let text = record.transcriptionText, !text.isEmpty {
-            return text
-        } else if record.hasTranscription && record.transcriptionText != nil {
-            // Transcription attempt finished but text is empty
-            return "Transcription resulted in empty text. Try again with a different model or check audio quality."
-        } else if record.hasTranscription {
-            return "Transcription processing... Check back later."
-        } else {
-            return "Transcription not available yet."
+            return nil
         }
+
+        if record.hasTranscription && record.transcriptionText != nil {
+            return "Transcription resulted in empty text. Try again with a different model or check audio quality."
+        }
+
+        if record.hasTranscription {
+            return "Transcription processing... Check back later."
+        }
+
+        return "Transcription not available yet."
+    }
+
+    private var trimmedTranscriptionDraft: String {
+        transcriptionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedSummaryDraft: String {
+        summaryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasTranscriptionContent: Bool {
+        !trimmedTranscriptionDraft.isEmpty
+    }
+
+    private var hasSummaryContent: Bool {
+        !trimmedSummaryDraft.isEmpty
     }
     
     // Get current settings
@@ -271,6 +569,9 @@ struct RecordDetailView: View {
     }
     
     private func requestSummarization(from origin: Tab) {
+        commitPendingInlineEdits()
+        guard hasTranscriptionContent else { return }
+
         Logger.debug("User requested summarization from \(origin.logName) tab for record \(record.name)", category: .ui)
         isAutomaticMode = false
         processingManager.enqueueSummarization(
@@ -326,267 +627,28 @@ struct RecordDetailView: View {
         }
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) { // Reduce base spacing
-            // Header with Title (now editable) and Close button
-            HStack {
-                ZStack(alignment: .leading) {
-                    // --- TextField (Visible when editing title) ---
-                    TextField("Name", text: $editingTitle)
-                        .textFieldStyle(.plain)
-                        .focused($isTitleFieldFocused)
-                        .onSubmit { saveTitle() }
-                        .font(.title2.bold())
-                        .opacity(isEditingTitle ? 1 : 0)
-                        .disabled(!isEditingTitle)
-                        .onTapGesture {}
-
-                    // --- Text (Visible when not editing title) ---
-                    Text(record.name)
-                        .font(.title2.bold())
-                        .opacity(isEditingTitle ? 0 : 1)
-                        .onTapGesture(count: 2) {
-                            startEditingTitle()
-                        }
-                }
-                Spacer()
-
-                Menu {
-                    Button {
-                        triggerDownload()
-                    } label: {
-                        Label("Download Audio", systemImage: "arrow.down.to.line")
-                    }
-                    .disabled(record.fileURL == nil || isDownloading)
-
-                    Button {
-                        startEditingTitle()
-                    } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-                    .disabled(isEditingTitle)
-
-                    Divider()
-
-                    Button(role: .destructive) {
-                        isShowingDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                } label: {
-                    if isDownloading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(0.9)
-                            .frame(width: 24, height: 24)
-                    } else {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .frame(width: 28, height: 28)
-            }
-            .padding(.bottom, 4)
-            
-           // --- Audio Player UI ---
-           playerControls
-
+    private var mainStack: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            headerSection
+            playerControls
             Divider()
-            
-            // Processing loader - always shows when processing, positioned below player
-            switch currentProcessingState {
-            case .transcribing, .summarizing, .streamingTranscription:
-                ProcessingProgressView(state: currentProcessingState)
-                    .padding(.top, 8)
-            default:
-                EmptyView()
-            }
-            
-            // Show tabs only when everything is completed
-            if shouldShowContent {
-                // Tab picker - properly centered segmented control following macOS HIG
-                Picker("", selection: $selectedTab) {
-                    Text("Transcription").tag(Tab.transcription)
-                    Text("Summary").tag(Tab.summary)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 300) // Limit width for better appearance
-                .frame(maxWidth: .infinity, alignment: .center) // Center in the container
-                .padding(.vertical, 8)
-                
-                // Tab content
-                if selectedTab == .transcription {
-                    // Transcription Tab Content
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Spacer()
-                            Button {
-                                copyTranscription()
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .labelStyle(.iconOnly)
-                                    .symbolRenderingMode(.hierarchical)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Copy Transcription")
-                            .disabled(!record.hasTranscription || record.transcriptionText == nil)
-                        }
-                        
-                        // Show error if exists
-                        if let error = transcriptionError {
-                            InlineMessageView(error)
-                                .padding(.bottom, 4)
-                        }
-                        
-                        // ScrollView for transcription
-                        ScrollView {
-                            Text(transcriptionText)
-                                .font(.body)
-                                .foregroundStyle(record.hasTranscription && record.transcriptionText != nil ? 
-                                                Color(NSColor.labelColor) : 
-                                                Color(NSColor.secondaryLabelColor))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                                .onHover { hovering in
-                                    if hovering {
-                                        NSCursor.iBeam.push()
-                                    } else {
-                                        NSCursor.pop()
-                                    }
-                                }
-                                .padding(12)
-                                .background(Color(NSColor.textBackgroundColor))
-                                .cornerRadius(6)
-                        }
-                        .frame(maxHeight: .infinity)
-                        
-                        // Transcribe Controls
-                        HStack(spacing: 12) {
-                            ComboBoxView(
-                                placeholder: whisperModelOptions.isEmpty ? "Select transcription model" : "Choose model",
-                                options: whisperModelOptions,
-                                selectedOption: $selectedWhisperModel
-                            )
-                            .frame(width: 220, height: 32)
-
-                            Button {
-                                requestTranscription(from: .transcription)
-                            } label: {
-                                HStack {
-                                    if isTranscribing {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Image(systemName: "waveform")
-                                    }
-                                    Text("Transcribe")
-                                }
-                                .frame(minWidth: 130)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-                            .disabled(isTranscribing || record.fileURL == nil)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.top, 4)
-                    }
-                } else {
-                    // Summary Tab Content
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Spacer()
-                            Button {
-                                copySummary()
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .labelStyle(.iconOnly)
-                                    .symbolRenderingMode(.hierarchical)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Copy Summary")
-                            .disabled(record.summaryText == nil)
-                        }
-                        
-                        // Show error if exists
-                        if let error = summaryError {
-                            InlineMessageView(error)
-                                .padding(.bottom, 4)
-                        }
-                        
-                        // ScrollView for summary
-                        ScrollView {
-                            if let summaryText = record.summaryText, !summaryText.isEmpty {
-                                Text(summaryText)
-                                    .font(.body)
-                                    .foregroundStyle(Color(NSColor.labelColor))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .textSelection(.enabled)
-                                    .onHover { hovering in
-                                        if hovering {
-                                            NSCursor.iBeam.push()
-                                        } else {
-                                            NSCursor.pop()
-                                        }
-                                    }
-                                    .padding(12)
-                                    .background(Color(NSColor.textBackgroundColor))
-                                    .cornerRadius(6)
-                            } else {
-                                Text("No summary available yet.")
-                                    .font(.body)
-                                    .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(12)
-                                    .background(Color(NSColor.textBackgroundColor))
-                                    .cornerRadius(6)
-                            }
-                        }
-                        .frame(maxHeight: .infinity)
-                        
-                        // Summarize Controls
-                        HStack(spacing: 12) {
-                            ComboBoxView(
-                                placeholder: summaryModelOptions.isEmpty ? "Select summary model" : "Choose model",
-                                options: summaryModelOptions,
-                                selectedOption: $selectedSummaryModel
-                            )
-                            .frame(width: 220, height: 32)
-
-                            Button {
-                                requestSummarization(from: .summary)
-                            } label: {
-                                HStack {
-                                    if isSummarizing {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Image(systemName: "doc.text.magnifyingglass")
-                                    }
-                                    Text("Summarize")
-                                }
-                                .frame(minWidth: 130)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-                            .disabled(isSummarizing || record.transcriptionText == nil || !record.hasTranscription)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.top, 4)
-                    }
-                }
-            }
-            
-                                Spacer() // Add Spacer to push content to top
+            processingSection
+            tabsSection
+            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Fix alignment to top
-        .padding(.horizontal, 16) // Keep sides consistent
-        .padding(.top, isSidebarCollapsed ? 16 : 0) // Dynamic top padding: 0 when sidebar is visible, original when collapsed
-        .animation(.easeInOut(duration: 0.25), value: isSidebarCollapsed)
-        .animation(.easeInOut(duration: 0.4), value: shouldShowContent)
-        .onAppear {
+    }
+
+    var body: some View {
+        var view = AnyView(
+            mainStack
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, 16)
+                .padding(.top, isSidebarCollapsed ? 16 : 0)
+        )
+
+        view = AnyView(view.animation(.easeInOut(duration: 0.25), value: isSidebarCollapsed))
+        view = AnyView(view.animation(.easeInOut(duration: 0.4), value: shouldShowContent))
+        view = AnyView(view.onAppear {
             selectedWhisperModel = settings.whisperModel
             selectedSummaryModel = settings.openAIModel
 
@@ -613,8 +675,9 @@ struct RecordDetailView: View {
                 isAutomaticMode = true
                 startAutomaticPipeline()
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
+        })
+
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
             // If this view is showing the newly created record, start automatic processing
             if let recordId = notification.userInfo?["recordId"] as? UUID,
                recordId == record.id {
@@ -622,50 +685,100 @@ struct RecordDetailView: View {
                 isAutomaticMode = true
                 startAutomaticPipeline()
             }
-        }
-        .onDisappear {
+        })
+
+        view = AnyView(view.onDisappear {
+            commitPendingInlineEdits()
             unregisterSpacebarShortcut()
             playerManager.stopAndCleanup()
-        }
+        })
         // Detect focus changes for the title TextField
-        .onChange(of: isTitleFieldFocused) { oldValue, newValue in
+        view = AnyView(view.onChange(of: isTitleFieldFocused) { oldValue, newValue in
             if !newValue && isEditingTitle { // If focus is lost AND we were editing
                 cancelEditingTitle()
             }
-        }
-        .onChange(of: selectedWhisperModel) { _, newValue in
+        })
+
+        view = AnyView(view.onChange(of: selectedWhisperModel) { _, newValue in
             updateSettings(\.whisperModel, with: newValue, settingName: "Whisper model")
-        }
-        .onChange(of: selectedSummaryModel) { _, newValue in
+        })
+
+        view = AnyView(view.onChange(of: selectedSummaryModel) { _, newValue in
             updateSettings(\.openAIModel, with: newValue, settingName: "Summary model")
-        }
-        .onChange(of: appSettings.first?.whisperModel ?? "") { _, newValue in
+        })
+
+        view = AnyView(view.onChange(of: transcriptionDraft) { _, newValue in
+            let persistedValue = record.transcriptionText ?? ""
+            if persistedValue == newValue {
+                transcriptionSaveWorkItem?.cancel()
+                transcriptionSaveWorkItem = nil
+            } else {
+                scheduleTranscriptionSave()
+            }
+        })
+
+        view = AnyView(view.onChange(of: summaryDraft) { _, newValue in
+            let persistedValue = record.summaryText ?? ""
+            if persistedValue == newValue {
+                summarySaveWorkItem?.cancel()
+                summarySaveWorkItem = nil
+            } else {
+                scheduleSummarySave()
+            }
+        })
+
+        view = AnyView(view.onChange(of: appSettings.first?.whisperModel ?? "") { _, newValue in
             if newValue != selectedWhisperModel {
                 selectedWhisperModel = newValue
             }
-        }
-        .onChange(of: appSettings.first?.openAIModel ?? "") { _, newValue in
+        })
+
+        view = AnyView(view.onChange(of: appSettings.first?.openAIModel ?? "") { _, newValue in
             if newValue != selectedSummaryModel {
                 selectedSummaryModel = newValue
             }
-        }
-        .onReceive(processingManager.$recordStates) { _ in
+        })
+
+        view = AnyView(view.onReceive(processingManager.$recordStates) { _ in
             handleProcessingStateChange()
-        }
-        .onChange(of: record.summaryText ?? "") { _, newValue in
+        })
+
+        view = AnyView(view.onChange(of: record.transcriptionText ?? "") { _, newValue in
+            guard focusedEditor != .transcription else { return }
+            if newValue != transcriptionDraft {
+                transcriptionDraft = newValue
+            }
+        })
+
+        view = AnyView(view.onChange(of: record.summaryText ?? "") { _, newValue in
+            if focusedEditor != .summary, newValue != summaryDraft {
+                summaryDraft = newValue
+            }
             if isAutomaticMode && !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 selectedTab = .summary
                 isAutomaticMode = false
             }
-        }
-        .alert("Delete Recording?", isPresented: $isShowingDeleteConfirmation) {
+        })
+
+        view = AnyView(view.onChange(of: focusedEditor) { oldValue, newValue in
+            if oldValue == .transcription, newValue != .transcription {
+                saveTranscriptionIfNeeded()
+            }
+            if oldValue == .summary, newValue != .summary {
+                saveSummaryIfNeeded()
+            }
+        })
+
+        view = AnyView(view.alert("Delete Recording?", isPresented: $isShowingDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 deleteCurrentRecord()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This will permanently remove the recording, transcription, and summary. This action cannot be undone.")
-        }
+        })
+
+        return view
     }
 
     // MARK: - Keyboard Handling
@@ -755,21 +868,104 @@ struct RecordDetailView: View {
     }
 
     private func copyTranscription() {
-        if let text = record.transcriptionText {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
-            Logger.info("Transcription copied to clipboard.", category: .ui)
-        }
+        let text = trimmedTranscriptionDraft
+        guard !text.isEmpty else { return }
+
+        commitPendingInlineEdits()
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        Logger.info("Transcription copied to clipboard.", category: .ui)
     }
 
     private func copySummary() {
-        if let text = record.summaryText {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
-            Logger.info("Summary copied to clipboard.", category: .ui)
+        let text = trimmedSummaryDraft
+        guard !text.isEmpty else { return }
+
+        commitPendingInlineEdits()
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        Logger.info("Summary copied to clipboard.", category: .ui)
+    }
+
+    private func scheduleTranscriptionSave() {
+        transcriptionSaveWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem {
+            saveTranscriptionIfNeeded()
         }
+
+        transcriptionSaveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + inlineSaveDebounceInterval,
+            execute: workItem
+        )
+    }
+
+    private func saveTranscriptionIfNeeded() {
+        transcriptionSaveWorkItem?.cancel()
+        transcriptionSaveWorkItem = nil
+
+        let newStoredValue: String? = hasTranscriptionContent ? transcriptionDraft : nil
+
+        let shouldUpdateText = record.transcriptionText != newStoredValue
+        let shouldUpdateFlag = record.hasTranscription != hasTranscriptionContent
+
+        guard shouldUpdateText || shouldUpdateFlag else {
+            return
+        }
+
+        record.transcriptionText = newStoredValue
+        record.hasTranscription = hasTranscriptionContent
+
+        do {
+            try modelContext.save()
+            Logger.debug("Transcription updated inline for record \(record.id)", category: .ui)
+        } catch {
+            Logger.error("Failed to persist edited transcription", error: error, category: .ui)
+        }
+    }
+
+    private func scheduleSummarySave() {
+        summarySaveWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem {
+            saveSummaryIfNeeded()
+        }
+
+        summarySaveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + inlineSaveDebounceInterval,
+            execute: workItem
+        )
+    }
+
+    private func saveSummaryIfNeeded() {
+        summarySaveWorkItem?.cancel()
+        summarySaveWorkItem = nil
+
+        let newStoredValue: String? = hasSummaryContent ? summaryDraft : nil
+
+        guard record.summaryText != newStoredValue else {
+            return
+        }
+
+        record.summaryText = newStoredValue
+
+        do {
+            try modelContext.save()
+            Logger.debug("Summary updated inline for record \(record.id)", category: .ui)
+        } catch {
+            Logger.error("Failed to persist edited summary", error: error, category: .ui)
+        }
+    }
+
+    private func commitPendingInlineEdits() {
+        saveTranscriptionIfNeeded()
+        saveSummaryIfNeeded()
     }
 
     @MainActor
@@ -956,4 +1152,3 @@ struct RecordDetailView: View {
         }
     }
 }
-
