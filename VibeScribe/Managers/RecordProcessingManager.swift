@@ -406,7 +406,7 @@ final class RecordProcessingManager: ObservableObject {
     }
     
     private func performRegularTranscription(job: ProcessingJob, fileURL: URL) async throws -> String {
-        var settingsModel = job.settings.asTransientSettingsModel()
+    let settingsModel = job.settings.asTransientSettingsModel()
         settingsModel.whisperModel = job.settings.resolvedWhisperModel
         
         var didResume = false

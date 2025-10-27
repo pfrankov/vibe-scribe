@@ -57,8 +57,23 @@ final class AudioPlayerManager: NSObject, ObservableObject {
     func setupPlayer(url: URL) {
         stopAndCleanup()
 
+        // Verify file exists before attempting to load
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            Logger.error("Audio file does not exist at path: \(url.path)", category: .audio)
+            resetState()
+            return
+        }
+
         do {
             let file = try AVAudioFile(forReading: url)
+            
+            // Verify file has valid audio data
+            guard file.length > 0 else {
+                Logger.error("Audio file is empty or invalid: \(url.path)", category: .audio)
+                resetState()
+                return
+            }
+            
             audioFile = file
             audioLengthSamples = file.length
             sampleRate = file.processingFormat.sampleRate
@@ -88,8 +103,9 @@ final class AudioPlayerManager: NSObject, ObservableObject {
             }
 
             Logger.info("Audio player setup. Duration: \(duration)", category: .audio)
-        } catch {
-            Logger.error("Failed to setup audio engine player", error: error, category: .audio)
+        } catch let error as NSError {
+            // Provide more detailed error information
+            Logger.error("Failed to setup audio engine player for file: \(url.path). Error: \(error.localizedDescription) (domain: \(error.domain), code: \(error.code))", category: .audio)
             resetState()
         }
     }
