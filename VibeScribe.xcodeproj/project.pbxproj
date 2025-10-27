@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		7A8E8A6B2C88EC9F00DC14A4 /* (null) in Sources */ = {isa = PBXBuildFile; };
+		E6ADCD5E2DBF2F5A00E8B7C3 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E6ADCD5C2DBF2F5A00E8B7C3 /* MarkdownUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E6ADCD5E2DBF2F5A00E8B7C3 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -82,6 +84,7 @@
 			);
 			name = VibeScribe;
 			packageProductDependencies = (
+				E6ADCD5C2DBF2F5A00E8B7C3 /* MarkdownUI */,
 			);
 			productName = VibeScribe;
 			productReference = 8DC158442DAC281A00BECEAC /* VibeScribe.app */;
@@ -112,6 +115,7 @@
 			mainGroup = 8DC1583B2DAC281A00BECEAC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				E6ADCD5D2DBF2F5A00E8B7C3 /* swift-markdown-ui */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8DC158452DAC281A00BECEAC /* Products */;
@@ -143,6 +147,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E6ADCD5C2DBF2F5A00E8B7C3 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E6ADCD5D2DBF2F5A00E8B7C3 /* swift-markdown-ui */;
+			productName = MarkdownUI;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		E6ADCD5D2DBF2F5A00E8B7C3 /* swift-markdown-ui */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCBuildConfiguration section */
 		8DC158512DAC281C00BECEAC /* Debug */ = {

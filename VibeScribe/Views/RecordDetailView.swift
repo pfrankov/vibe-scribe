@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import MarkdownUI
 import SwiftData
 import AVFoundation
 import AppKit
@@ -40,6 +41,9 @@ struct RecordDetailView: View {
 
     @State private var transcriptionDraft: String
     @State private var summaryDraft: String
+    @State private var summaryMarkdownContent: MarkdownContent?
+    @State private var renderedSummarySnapshot: String = ""
+    @State private var isSummaryEditing: Bool = false
     @State private var transcriptionSaveWorkItem: DispatchWorkItem?
     @State private var summarySaveWorkItem: DispatchWorkItem?
 
@@ -202,6 +206,7 @@ struct RecordDetailView: View {
         var statusMessage: String?
         var focusBinding: FocusState<ActiveEditor?>.Binding
         var editor: ActiveEditor
+        var onExit: (() -> Void)? = nil
 
         var body: some View {
             ZStack(alignment: .topLeading) {
@@ -214,6 +219,11 @@ struct RecordDetailView: View {
                     .disableAutocorrection(true)
                     .background(Color.clear)
                     .padding(8)
+#if os(macOS)
+                    .onExitCommand {
+                        onExit?()
+                    }
+#endif
 
                 if text.isEmpty {
                     Text(statusMessage ?? placeholder)
@@ -229,6 +239,117 @@ struct RecordDetailView: View {
                     .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 1)
             )
             .frame(maxHeight: .infinity)
+        }
+    }
+
+    private struct MarkdownSummaryPreview: View {
+        var markdownContent: MarkdownContent?
+        var plainText: String
+        var placeholder: String
+        var onActivateEditing: () -> Void
+
+        private var trimmedText: String {
+            plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var body: some View {
+            let preview = ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(NSColor.textBackgroundColor))
+
+                ScrollView(.vertical) {
+                    Group {
+                        if let content = markdownContent {
+                            Markdown(content)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if !trimmedText.isEmpty {
+                            Markdown(plainText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Text(placeholder)
+                                .foregroundStyle(Color(NSColor.secondaryLabelColor))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(8)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 1)
+            )
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+
+            return preview.modifier(SummaryPreviewActivationModifier(onActivateEditing: onActivateEditing))
+        }
+    }
+
+#if os(macOS)
+    private struct DoubleClickCatchingView: NSViewRepresentable {
+        var onDoubleClick: () -> Void
+
+        final class Coordinator: NSObject, NSGestureRecognizerDelegate {
+            let onDoubleClick: () -> Void
+
+            init(onDoubleClick: @escaping () -> Void) {
+                self.onDoubleClick = onDoubleClick
+            }
+
+            @objc func handleDoubleClick(_ recognizer: NSClickGestureRecognizer) {
+                guard recognizer.state == .ended else { return }
+                onDoubleClick()
+            }
+
+            func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer) -> Bool {
+                true
+            }
+        }
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(onDoubleClick: onDoubleClick)
+        }
+
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            view.wantsLayer = false
+            let gesture = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleClick(_:)))
+            gesture.numberOfClicksRequired = 2
+            gesture.delaysPrimaryMouseButtonEvents = false
+            gesture.buttonMask = 0x1
+            gesture.delegate = context.coordinator
+            view.addGestureRecognizer(gesture)
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {
+            guard let gesture = nsView.gestureRecognizers.first(where: { $0 is NSClickGestureRecognizer }) as? NSClickGestureRecognizer else {
+                return
+            }
+            gesture.numberOfClicksRequired = 2
+            gesture.delaysPrimaryMouseButtonEvents = false
+            gesture.buttonMask = 0x1
+        }
+    }
+#endif
+
+    private struct SummaryPreviewActivationModifier: ViewModifier {
+        var onActivateEditing: () -> Void
+
+        func body(content: Content) -> some View {
+#if os(macOS)
+            content
+                .background(DoubleClickCatchingView(onDoubleClick: onActivateEditing))
+                .highPriorityGesture(
+                    TapGesture(count: 2).onEnded(onActivateEditing)
+                )
+#else
+            content
+                .highPriorityGesture(
+                    TapGesture(count: 2).onEnded(onActivateEditing)
+                )
+#endif
         }
     }
 
@@ -408,13 +529,23 @@ struct RecordDetailView: View {
                     .padding(.bottom, 4)
             }
 
-            InlineEditableTextArea(
-                text: $summaryDraft,
-                placeholder: "No summary available yet.",
-                statusMessage: nil,
-                focusBinding: $focusedEditor,
-                editor: .summary
-            )
+            if isSummaryEditing {
+                InlineEditableTextArea(
+                    text: $summaryDraft,
+                    placeholder: "No summary available yet.",
+                    statusMessage: nil,
+                    focusBinding: $focusedEditor,
+                    editor: .summary,
+                    onExit: { focusedEditor = nil }
+                )
+            } else {
+                MarkdownSummaryPreview(
+                    markdownContent: summaryMarkdownContent,
+                    plainText: summaryDraft,
+                    placeholder: "No summary available yet.",
+                    onActivateEditing: activateSummaryEditing
+                )
+            }
 
             HStack(spacing: 12) {
                 ComboBoxView(
@@ -444,6 +575,16 @@ struct RecordDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 4)
+        }
+        .onAppear { updateSummaryMarkdownContentIfNeeded(force: true) }
+        .onChange(of: summaryDraft) { _, _ in
+            guard !isSummaryEditing else { return }
+            updateSummaryMarkdownContentIfNeeded()
+        }
+        .onChange(of: focusedEditor) { _, newValue in
+            if newValue != .summary {
+                updateSummaryMarkdownContentIfNeeded()
+            }
         }
     }
 
@@ -675,6 +816,8 @@ struct RecordDetailView: View {
                 isAutomaticMode = true
                 startAutomaticPipeline()
             }
+
+            updateSummaryMarkdownContentIfNeeded(force: true)
         })
 
         view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
@@ -691,6 +834,8 @@ struct RecordDetailView: View {
             commitPendingInlineEdits()
             unregisterSpacebarShortcut()
             playerManager.stopAndCleanup()
+            isSummaryEditing = false
+            focusedEditor = nil
         })
         // Detect focus changes for the title TextField
         view = AnyView(view.onChange(of: isTitleFieldFocused) { oldValue, newValue in
@@ -705,6 +850,17 @@ struct RecordDetailView: View {
 
         view = AnyView(view.onChange(of: selectedSummaryModel) { _, newValue in
             updateSettings(\.openAIModel, with: newValue, settingName: "Summary model")
+        })
+
+        view = AnyView(view.onChange(of: selectedTab) { _, newValue in
+            guard newValue != .summary else { return }
+            if focusedEditor == .summary {
+                focusedEditor = nil
+            }
+            if isSummaryEditing {
+                isSummaryEditing = false
+                updateSummaryMarkdownContentIfNeeded()
+            }
         })
 
         view = AnyView(view.onChange(of: transcriptionDraft) { _, newValue in
@@ -765,7 +921,13 @@ struct RecordDetailView: View {
                 saveTranscriptionIfNeeded()
             }
             if oldValue == .summary, newValue != .summary {
+                // Leaving summary editor: ensure preview reflects latest text
+                isSummaryEditing = false
+                updateSummaryMarkdownContentIfNeeded(force: true)
                 saveSummaryIfNeeded()
+            }
+            if newValue == .summary {
+                isSummaryEditing = true
             }
         })
 
@@ -943,6 +1105,30 @@ struct RecordDetailView: View {
         )
     }
 
+    private func activateSummaryEditing() {
+        guard !isSummaryEditing else { return }
+        isSummaryEditing = true
+        DispatchQueue.main.async {
+            focusedEditor = .summary
+        }
+    }
+
+    private func updateSummaryMarkdownContentIfNeeded(force: Bool = false) {
+        let currentValue = summaryDraft
+        guard force || currentValue != renderedSummarySnapshot else {
+            return
+        }
+
+        let trimmed = currentValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            summaryMarkdownContent = nil
+        } else {
+            summaryMarkdownContent = MarkdownContent(currentValue)
+        }
+
+        renderedSummarySnapshot = currentValue
+    }
+
     private func saveSummaryIfNeeded() {
         summarySaveWorkItem?.cancel()
         summarySaveWorkItem = nil
@@ -954,6 +1140,9 @@ struct RecordDetailView: View {
         }
 
         record.summaryText = newStoredValue
+        if focusedEditor != .summary {
+            updateSummaryMarkdownContentIfNeeded(force: true)
+        }
 
         do {
             try modelContext.save()
