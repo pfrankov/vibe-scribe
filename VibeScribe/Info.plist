@@ -28,5 +28,7 @@
 	<string>VibeScribe needs microphone access to record audio for transcription.</string>
 	<key>NSScreenCaptureDescription</key>
 	<string>VibeScribe needs screen capture permission to record system audio output for transcription.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>VibeScribe uses speech recognition to convert recordings into text on this Mac.</string>
 </dict>
 </plist>

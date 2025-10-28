@@ -11,6 +11,9 @@ import SwiftData
 import AVFoundation
 import AppKit
 import UniformTypeIdentifiers
+#if canImport(Speech)
+import Speech
+#endif
 
 // Detail view for a single record
 struct RecordDetailView: View {
@@ -38,6 +41,8 @@ struct RecordDetailView: View {
 
     @State private var selectedWhisperModel: String = ""
     @State private var selectedSummaryModel: String = ""
+    @State private var selectedSpeechAnalyzerLocale: String = ""
+    @State private var speechAnalyzerLocales: [Locale] = []
 
     @State private var transcriptionDraft: String
     @State private var summaryDraft: String
@@ -469,43 +474,72 @@ struct RecordDetailView: View {
                     .padding(.bottom, 4)
             }
 
-            InlineEditableTextArea(
-                text: $transcriptionDraft,
-                placeholder: "Start typing transcription...",
-                statusMessage: transcriptionStatusMessage,
-                focusBinding: $focusedEditor,
-                editor: .transcription
-            )
+        InlineEditableTextArea(
+            text: $transcriptionDraft,
+            placeholder: "Start typing transcription...",
+            statusMessage: transcriptionStatusMessage,
+            focusBinding: $focusedEditor,
+            editor: .transcription
+        )
 
-            HStack(spacing: 12) {
+        HStack(spacing: 12) {
+            if settings.whisperProvider == .speechAnalyzer {
+                let localeOptions = ["Automatic"] + speechAnalyzerLocales.map { localeDisplayName($0) }
+                
+                ComboBoxView(
+                    placeholder: speechAnalyzerLocales.isEmpty ? "Loading languages..." : "Choose language",
+                    options: localeOptions,
+                    selectedOption: Binding(
+                        get: {
+                            if selectedSpeechAnalyzerLocale.isEmpty {
+                                return "Automatic"
+                            }
+                            if let locale = speechAnalyzerLocales.first(where: { $0.identifier == selectedSpeechAnalyzerLocale }) {
+                                return localeDisplayName(locale)
+                            }
+                            return "Automatic"
+                        },
+                        set: { newValue in
+                            if newValue == "Automatic" {
+                                selectedSpeechAnalyzerLocale = ""
+                            } else if let locale = speechAnalyzerLocales.first(where: { localeDisplayName($0) == newValue }) {
+                                selectedSpeechAnalyzerLocale = locale.identifier
+                            }
+                        }
+                    ),
+                    allowsCustomInput: false
+                )
+                .frame(width: 220, height: 32)
+            } else if settings.whisperProvider != .speechAnalyzer {
                 ComboBoxView(
                     placeholder: whisperModelOptions.isEmpty ? "Select transcription model" : "Choose model",
                     options: whisperModelOptions,
                     selectedOption: $selectedWhisperModel
                 )
                 .frame(width: 220, height: 32)
-
-                Button {
-                    requestTranscription(from: .transcription)
-                } label: {
-                    HStack {
-                        if isTranscribing {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "waveform")
-                        }
-                        Text("Transcribe")
-                    }
-                    .frame(minWidth: 130)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(isTranscribing || record.fileURL == nil)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.top, 4)
+
+            Button {
+                requestTranscription(from: .transcription)
+            } label: {
+                HStack {
+                    if isTranscribing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "waveform")
+                    }
+                    Text("Transcribe")
+                }
+                .frame(minWidth: 130)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(isTranscribing || record.fileURL == nil)
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.top, 4)
+    }
     }
 
     private var summaryTab: some View {
@@ -792,6 +826,9 @@ struct RecordDetailView: View {
         view = AnyView(view.onAppear {
             selectedWhisperModel = settings.whisperModel
             selectedSummaryModel = settings.openAIModel
+            selectedSpeechAnalyzerLocale = settings.speechAnalyzerLocaleIdentifier
+            
+            loadSpeechAnalyzerLocales()
 
             // Initialize processing state based on current record state
             // --- Refined File Loading Logic ---
@@ -888,11 +925,33 @@ struct RecordDetailView: View {
                 selectedWhisperModel = newValue
             }
         })
+        
+        view = AnyView(view.onChange(of: selectedWhisperModel) { _, newValue in
+            updateSettings(\.whisperModel, with: newValue, settingName: "whisperModel")
+        })
 
         view = AnyView(view.onChange(of: appSettings.first?.openAIModel ?? "") { _, newValue in
             if newValue != selectedSummaryModel {
                 selectedSummaryModel = newValue
             }
+        })
+        
+        view = AnyView(view.onChange(of: selectedSummaryModel) { _, newValue in
+            updateSettings(\.openAIModel, with: newValue, settingName: "openAIModel")
+        })
+        
+        view = AnyView(view.onChange(of: appSettings.first?.speechAnalyzerLocaleIdentifier ?? "") { _, newValue in
+            if newValue != selectedSpeechAnalyzerLocale {
+                selectedSpeechAnalyzerLocale = newValue
+            }
+        })
+        
+        view = AnyView(view.onChange(of: selectedSpeechAnalyzerLocale) { _, newValue in
+            updateSettings(\.speechAnalyzerLocaleIdentifier, with: newValue, settingName: "speechAnalyzerLocale")
+        })
+        
+        view = AnyView(view.onChange(of: settings.whisperProvider) { _, _ in
+            loadSpeechAnalyzerLocales()
         })
 
         view = AnyView(view.onReceive(processingManager.$recordStates) { _ in
@@ -1339,5 +1398,30 @@ struct RecordDetailView: View {
             selectedTab = .summary
             isAutomaticMode = false
         }
+    }
+    
+    // MARK: - Speech Analyzer Locale Support
+    
+    private func loadSpeechAnalyzerLocales() {
+        guard settings.whisperProvider == .speechAnalyzer else { return }
+        guard speechAnalyzerLocales.isEmpty else { return }
+        
+        Task {
+            if #available(macOS 26, *) {
+                #if canImport(Speech)
+                let locales = await Speech.SpeechTranscriber.supportedLocales
+                let sorted = locales.sorted {
+                    localeDisplayName($0).localizedCaseInsensitiveCompare(localeDisplayName($1)) == .orderedAscending
+                }
+                await MainActor.run {
+                    self.speechAnalyzerLocales = sorted
+                }
+                #endif
+            }
+        }
+    }
+    
+    private func localeDisplayName(_ locale: Locale) -> String {
+        Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
     }
 }

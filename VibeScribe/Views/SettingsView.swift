@@ -9,6 +9,9 @@ import SwiftUI
 import SwiftData
 import Combine
 import AppKit
+#if canImport(Speech)
+import Speech
+#endif
 
 // MARK: - UI Constants
 private struct UIConstants {
@@ -147,6 +150,11 @@ struct SettingsView: View {
     @FocusState private var focusedField: FocusedField?
     @State private var selectedTab: SettingsTab = .speechToText
     @State private var chunkSizeText: String = ""
+#if canImport(Speech)
+    @State private var speechAnalyzerLocales: [Locale] = []
+    @State private var isLoadingSpeechAnalyzerLocales = false
+    @State private var speechAnalyzerLocalesError: String? = nil
+#endif
     
     @StateObject private var modelService = ModelService.shared
     
@@ -219,6 +227,7 @@ struct SettingsView: View {
         }
         .onChange(of: settings.whisperProviderRawValue) { _, _ in
             loadWhisperModelsIfURLValid()
+            loadSpeechAnalyzerLocalesIfNeeded()
         }
         .onChange(of: settings.openAIBaseURL) { _, _ in
             loadOpenAIModelsIfURLValid()
@@ -226,6 +235,63 @@ struct SettingsView: View {
         .onChange(of: settings.openAIAPIKey) { _, _ in
             loadOpenAIModelsIfURLValid()
         }
+    }
+
+    @ViewBuilder
+    private var speechAnalyzerLanguageSection: some View {
+#if canImport(Speech)
+        VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+            HStack {
+                Text("Language")
+                    .font(.system(size: UIConstants.fontSize))
+
+                Spacer()
+
+                Button {
+                    loadSpeechAnalyzerLocales(force: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isLoadingSpeechAnalyzerLocales)
+                .help("Refresh languages list")
+            }
+
+            if isLoadingSpeechAnalyzerLocales {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading languages...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(height: 22)
+            } else {
+                Picker("", selection: Binding(
+                    get: { settings.speechAnalyzerLocaleIdentifier },
+                    set: { newValue in
+                        settings.speechAnalyzerLocaleIdentifier = newValue
+                        trySave()
+                    }
+                )) {
+                    Text("Automatic").tag("")
+                    ForEach(speechAnalyzerLocales, id: \.identifier) { locale in
+                        Text(localeDisplayName(locale)).tag(locale.identifier)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 260, alignment: .leading)
+            }
+
+            if let error = speechAnalyzerLocalesError {
+                InlineMessageView(error)
+            }
+        }
+#else
+        InlineMessageView("Native transcription language selection requires the Speech framework.")
+#endif
     }
 
     // MARK: - Content Sections
@@ -267,6 +333,10 @@ struct SettingsView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+        }
+
+        if settings.whisperProvider == .speechAnalyzer {
+            speechAnalyzerLanguageSection
         }
 
         // Group: WhisperServer
@@ -714,6 +784,7 @@ struct SettingsView: View {
     private func loadModelsIfNeeded() {
         loadWhisperModelsIfURLValid()
         loadOpenAIModelsIfURLValid()
+        loadSpeechAnalyzerLocalesIfNeeded()
     }
     
     private func loadWhisperModelsIfURLValid() {
@@ -743,6 +814,53 @@ struct SettingsView: View {
         }
         
         modelService.loadOpenAIModels(baseURL: settings.openAIBaseURL, apiKey: settings.openAIAPIKey)
+    }
+
+#if canImport(Speech)
+    private func loadSpeechAnalyzerLocalesIfNeeded() {
+        guard settings.whisperProvider == .speechAnalyzer else { return }
+        if !speechAnalyzerLocales.isEmpty || isLoadingSpeechAnalyzerLocales {
+            return
+        }
+        loadSpeechAnalyzerLocales(force: true)
+    }
+    
+    private func loadSpeechAnalyzerLocales(force: Bool) {
+        guard settings.whisperProvider == .speechAnalyzer else { return }
+        if isLoadingSpeechAnalyzerLocales && !force {
+            return
+        }
+        isLoadingSpeechAnalyzerLocales = true
+        speechAnalyzerLocalesError = nil
+        Task {
+            if #available(macOS 26, *) {
+                let locales = await Speech.SpeechTranscriber.supportedLocales
+                let sorted = locales.sorted { 
+                    localeDisplayName($0).localizedCaseInsensitiveCompare(localeDisplayName($1)) == .orderedAscending 
+                }
+                await MainActor.run {
+                    self.speechAnalyzerLocales = sorted
+                    self.isLoadingSpeechAnalyzerLocales = false
+                    if sorted.isEmpty {
+                        self.speechAnalyzerLocalesError = "No speech languages available. Install Dictation assets in System Settings."
+                    }
+                }
+            } else {
+                await MainActor.run {
+                    self.speechAnalyzerLocales = []
+                    self.isLoadingSpeechAnalyzerLocales = false
+                    self.speechAnalyzerLocalesError = "Requires macOS 26 or newer."
+                }
+            }
+        }
+    }
+#else
+    private func loadSpeechAnalyzerLocalesIfNeeded() {}
+    private func loadSpeechAnalyzerLocales(force: Bool) {}
+#endif
+    
+    private func localeDisplayName(_ locale: Locale) -> String {
+        Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
     }
 }
 

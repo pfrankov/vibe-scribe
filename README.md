@@ -14,6 +14,8 @@ VibeScribe is a macOS app that records your meetings from any app and turns them
 - Record a meeting from any app (Zoom, Meet, Teams, Discord, Slack, or others) and get a summary in the same language as the conversation.
 - Import, transcribe, and summarize existing audio or video files via drag and drop.
 - Automatically title your notes from the summary.
+- Native transcription option on macOS 26+ with the `Native` provider.
+- Pick the on-device transcription language directly in Settings when using the native provider.
 
 ## Quick Start
 
@@ -57,7 +59,7 @@ The app will ask for these permissions:
 
 ## 1️⃣ Transcription Setup
 
-VibeScribe needs a Whisper-compatible server to turn audio into text.
+On macOS 26 or later the default `Native` provider handles speech-to-text locally. Make sure **System Settings → Keyboard → Dictation → On-Device** is enabled and the required locale is downloaded. Follow the steps below only if you prefer a server workflow or your Mac is running an earlier release.
 
 ### Option 1: WhisperServer (recommended, private)
 

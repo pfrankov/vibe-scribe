@@ -11,13 +11,24 @@ import SwiftData
 // MARK: - Whisper Provider Configuration
 
 enum WhisperProvider: String, CaseIterable, Identifiable, Codable {
+    case speechAnalyzer
     case whisperServer
     case compatibleAPI
     
     var id: String { rawValue }
     
+    static var allCases: [WhisperProvider] {
+        if #available(macOS 26, *) {
+            return [.speechAnalyzer, .whisperServer, .compatibleAPI]
+        } else {
+            return [.whisperServer, .compatibleAPI]
+        }
+    }
+    
     var displayName: String {
         switch self {
+        case .speechAnalyzer:
+            return "Native"
         case .whisperServer:
             return "WhisperServer"
         case .compatibleAPI:
@@ -27,6 +38,8 @@ enum WhisperProvider: String, CaseIterable, Identifiable, Codable {
     
     var defaultBaseURL: String {
         switch self {
+        case .speechAnalyzer:
+            return ""
         case .whisperServer:
             return "http://localhost:12017/v1/"
         case .compatibleAPI:
@@ -36,6 +49,8 @@ enum WhisperProvider: String, CaseIterable, Identifiable, Codable {
     
     var defaultAPIKey: String {
         switch self {
+        case .speechAnalyzer:
+            return ""
         case .whisperServer:
             return ""
         case .compatibleAPI:
@@ -45,6 +60,8 @@ enum WhisperProvider: String, CaseIterable, Identifiable, Codable {
     
     var allowsCustomCredentials: Bool {
         switch self {
+        case .speechAnalyzer:
+            return false
         case .whisperServer:
             return false
         case .compatibleAPI:
@@ -64,6 +81,7 @@ final class AppSettings {
     var whisperAPIKey: String = ""
     var whisperModel: String = ""
     var whisperProviderRawValue: String = WhisperProvider.compatibleAPI.rawValue
+    var speechAnalyzerLocaleIdentifier: String = ""
     
     // LLM Context settings
     var useChunking: Bool = true // Option to enable/disable chunking entirely
@@ -127,7 +145,7 @@ final class AppSettings {
 """
     
     init() {
-        // Use default values from above
+        // Use default values - let user choose provider explicitly
     }
     
     init(id: String = "app_settings", 
@@ -170,8 +188,13 @@ Create a concise title of at most five words that captures the essence of this s
 extension AppSettings {
     /// Validate if Whisper settings are properly configured
     var isWhisperConfigured: Bool {
-        let baseURL = resolvedWhisperBaseURL
-        return !baseURL.isEmpty && APIURLBuilder.isValidBaseURL(baseURL)
+        switch whisperProvider {
+        case .speechAnalyzer:
+            return true
+        case .whisperServer, .compatibleAPI:
+            let baseURL = resolvedWhisperBaseURL
+            return !baseURL.isEmpty && APIURLBuilder.isValidBaseURL(baseURL)
+        }
     }
     
     /// Validate if OpenAI settings are properly configured
@@ -180,12 +203,38 @@ extension AppSettings {
     }
     
     var whisperProvider: WhisperProvider {
-        get { WhisperProvider(rawValue: whisperProviderRawValue) ?? .compatibleAPI }
-        set { whisperProviderRawValue = newValue.rawValue }
+        get {
+            guard let provider = WhisperProvider(rawValue: whisperProviderRawValue) else {
+                return .compatibleAPI
+            }
+            
+            if provider == .speechAnalyzer {
+                if #available(macOS 26, *) {
+                    return provider
+                } else {
+                    return .compatibleAPI
+                }
+            }
+            
+            return provider
+        }
+        set {
+            if newValue == .speechAnalyzer {
+                if #available(macOS 26, *) {
+                    whisperProviderRawValue = newValue.rawValue
+                } else {
+                    whisperProviderRawValue = WhisperProvider.compatibleAPI.rawValue
+                }
+            } else {
+                whisperProviderRawValue = newValue.rawValue
+            }
+        }
     }
     
     var resolvedWhisperBaseURL: String {
         switch whisperProvider {
+        case .speechAnalyzer:
+            return ""
         case .whisperServer:
             return WhisperProvider.whisperServer.defaultBaseURL
         case .compatibleAPI:
@@ -195,6 +244,8 @@ extension AppSettings {
     
     var resolvedWhisperAPIKey: String {
         switch whisperProvider {
+        case .speechAnalyzer:
+            return ""
         case .whisperServer:
             return WhisperProvider.whisperServer.defaultAPIKey
         case .compatibleAPI:
@@ -204,5 +255,12 @@ extension AppSettings {
     
     var allowsCustomWhisperCredentials: Bool {
         whisperProvider.allowsCustomCredentials
+    }
+    
+    var resolvedSpeechAnalyzerLocale: Locale {
+        if speechAnalyzerLocaleIdentifier.isEmpty {
+            return Locale.current
+        }
+        return Locale(identifier: speechAnalyzerLocaleIdentifier)
     }
 }

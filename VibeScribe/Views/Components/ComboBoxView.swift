@@ -13,20 +13,23 @@ struct ComboBoxView: NSViewRepresentable {
     var placeholder: String
     var options: [String]
     @Binding var selectedOption: String
+    var allowsCustomInput: Bool = true
     
     func makeNSView(context: Context) -> NSPopUpButton {
         let popUpButton = NSPopUpButton(frame: .zero, pullsDown: false)
         popUpButton.target = context.coordinator
         popUpButton.action = #selector(Coordinator.selectionChanged(_:))
         
-        // Add option for entering custom value
-        popUpButton.menu?.addItem(NSMenuItem.separator())
-        
-        let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
-        customItem.tag = -1
-        customItem.target = context.coordinator
-        customItem.action = #selector(Coordinator.customOptionSelected(_:))
-        popUpButton.menu?.addItem(customItem)
+        if allowsCustomInput {
+            // Add option for entering custom value
+            popUpButton.menu?.addItem(NSMenuItem.separator())
+            
+            let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
+            customItem.tag = -1
+            customItem.target = context.coordinator
+            customItem.action = #selector(Coordinator.customOptionSelected(_:))
+            popUpButton.menu?.addItem(customItem)
+        }
         
         return popUpButton
     }
@@ -39,14 +42,16 @@ struct ComboBoxView: NSViewRepresentable {
             nsView.addItem(withTitle: option)
         }
         
-        // Add option for entering custom value
-        nsView.menu?.addItem(NSMenuItem.separator())
-        
-        let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
-        customItem.tag = -1
-        customItem.target = context.coordinator
-        customItem.action = #selector(Coordinator.customOptionSelected(_:))
-        nsView.menu?.addItem(customItem)
+        if allowsCustomInput {
+            // Add option for entering custom value
+            nsView.menu?.addItem(NSMenuItem.separator())
+            
+            let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
+            customItem.tag = -1
+            customItem.target = context.coordinator
+            customItem.action = #selector(Coordinator.customOptionSelected(_:))
+            nsView.menu?.addItem(customItem)
+        }
         
         // If selected value exists in list, select it
         if let index = options.firstIndex(of: selectedOption) {

@@ -38,6 +38,7 @@ final class RecordProcessingManager: ObservableObject {
         let summaryPrompt: String
         let autoGenerateTitleFromSummary: Bool
         let summaryTitlePrompt: String
+        let speechAnalyzerLocaleIdentifier: String
         
         init(settings: AppSettings) {
             self.whisperProviderRawValue = settings.whisperProviderRawValue
@@ -53,6 +54,7 @@ final class RecordProcessingManager: ObservableObject {
             self.summaryPrompt = settings.summaryPrompt
             self.autoGenerateTitleFromSummary = settings.autoGenerateTitleFromSummary
             self.summaryTitlePrompt = settings.summaryTitlePrompt
+            self.speechAnalyzerLocaleIdentifier = settings.speechAnalyzerLocaleIdentifier
         }
         
         var resolvedWhisperModel: String {
@@ -65,6 +67,8 @@ final class RecordProcessingManager: ObservableObject {
         
         var resolvedWhisperBaseURL: String {
             switch whisperProvider {
+            case .speechAnalyzer:
+                return ""
             case .whisperServer:
                 return WhisperProvider.whisperServer.defaultBaseURL
             case .compatibleAPI:
@@ -74,6 +78,8 @@ final class RecordProcessingManager: ObservableObject {
         
         var resolvedWhisperAPIKey: String {
             switch whisperProvider {
+            case .speechAnalyzer:
+                return ""
             case .whisperServer:
                 return WhisperProvider.whisperServer.defaultAPIKey
             case .compatibleAPI:
@@ -81,21 +87,29 @@ final class RecordProcessingManager: ObservableObject {
             }
         }
         
-        func asTransientSettingsModel() -> AppSettings {
+        var usesSpeechAnalyzer: Bool {
+            whisperProvider == .speechAnalyzer
+        }
+        
+        var selectedSpeechAnalyzerLocale: Locale? {
+            guard !speechAnalyzerLocaleIdentifier.isEmpty else { return nil }
+            return Locale(identifier: speechAnalyzerLocaleIdentifier)
+        }
+        
+        /// Creates minimal AppSettings for Whisper API calls
+        func makeWhisperSettings() -> AppSettings {
             AppSettings(
-                whisperProvider: whisperProvider,
+                whisperProvider: .compatibleAPI,
                 whisperBaseURL: resolvedWhisperBaseURL,
                 whisperAPIKey: resolvedWhisperAPIKey,
-                whisperModel: whisperModel,
-                useChunking: useChunking,
-                chunkSize: chunkSize,
-                openAIBaseURL: openAIBaseURL,
-                openAIAPIKey: openAIAPIKey,
-                openAIModel: openAIModel,
-                chunkPrompt: chunkPrompt,
-                summaryPrompt: summaryPrompt,
-                autoGenerateTitleFromSummary: autoGenerateTitleFromSummary,
-                summaryTitlePrompt: summaryTitlePrompt
+                whisperModel: resolvedWhisperModel,
+                useChunking: false,
+                chunkSize: 0,
+                openAIBaseURL: "",
+                openAIAPIKey: "",
+                openAIModel: "",
+                chunkPrompt: "",
+                summaryPrompt: ""
             )
         }
     }
@@ -176,11 +190,12 @@ final class RecordProcessingManager: ObservableObject {
         preferStreaming: Bool = true
     ) {
         let snapshot = SettingsSnapshot(settings: settings)
+        let resolvedPreferStreaming = preferStreaming && snapshot.whisperProvider != .speechAnalyzer
         let job = ProcessingJob(
             recordID: record.id,
             modelContext: context,
             settings: snapshot,
-            operation: .transcription(preferStreaming: preferStreaming, automatic: automatic)
+            operation: .transcription(preferStreaming: resolvedPreferStreaming, automatic: automatic)
         )
         append(job)
     }
@@ -311,7 +326,18 @@ final class RecordProcessingManager: ObservableObject {
         
         do {
             let transcriptionText: String
-            if preferStreaming {
+            if job.settings.usesSpeechAnalyzer {
+                do {
+                    let localeOverride = job.settings.selectedSpeechAnalyzerLocale
+                    transcriptionText = try await performSpeechAnalyzerTranscription(fileURL: fileURL, locale: localeOverride)
+                } catch let error as TranscriptionError {
+                    Logger.warning("Native transcription failed: \(error.description). Falling back to configured service.", category: .transcription)
+                    transcriptionText = try await performRegularTranscription(job: job, fileURL: fileURL)
+                } catch {
+                    Logger.warning("Native transcription failed with unexpected error: \(error.localizedDescription). Falling back to configured service.", category: .transcription)
+                    transcriptionText = try await performRegularTranscription(job: job, fileURL: fileURL)
+                }
+            } else if preferStreaming {
                 do {
                     transcriptionText = try await attemptStreamingTranscription(job: job, fileURL: fileURL)
                 } catch let error as TranscriptionError {
@@ -357,11 +383,9 @@ final class RecordProcessingManager: ObservableObject {
             }
         }
     }
-    
     private func attemptStreamingTranscription(job: ProcessingJob, fileURL: URL) async throws -> String {
         var accumulatedText = ""
-        let settingsModel = job.settings.asTransientSettingsModel()
-        settingsModel.whisperModel = job.settings.resolvedWhisperModel
+        let settingsModel = job.settings.makeWhisperSettings()
         
         return try await withCheckedThrowingContinuation { continuation in
             let cancellable = WhisperTranscriptionManager.shared
@@ -405,15 +429,20 @@ final class RecordProcessingManager: ObservableObject {
         }
     }
     
+    private func performSpeechAnalyzerTranscription(fileURL: URL, locale: Locale?) async throws -> String {
+        guard SpeechAnalyzerTranscriptionManager.shared.isSupported() else {
+            throw TranscriptionError.featureUnavailable
+        }
+        return try await SpeechAnalyzerTranscriptionManager.shared.transcribeAudio(at: fileURL, locale: locale)
+    }
+    
     private func performRegularTranscription(job: ProcessingJob, fileURL: URL) async throws -> String {
-    let settingsModel = job.settings.asTransientSettingsModel()
-        settingsModel.whisperModel = job.settings.resolvedWhisperModel
-        
+        let settingsModel = job.settings.makeWhisperSettings()
         var didResume = false
         
         return try await withCheckedThrowingContinuation { continuation in
             let cancellable = WhisperTranscriptionManager.shared
-                .transcribeAudio(audioURL: fileURL, settings: settingsModel)
+                .transcribeAudio(audioURL: fileURL, settings: settingsModel, useStreaming: false)
                 .receive(on: DispatchQueue.main)
                 .sink(
                     receiveCompletion: { [weak self] completion in
@@ -448,16 +477,13 @@ final class RecordProcessingManager: ObservableObject {
         updateState(for: recordID) { state in
             state.isStreaming = true
             
-            let words = cleanText.split(whereSeparator: { $0.isWhitespace })
-            guard !words.isEmpty else { return }
-            
+            let words = cleanText.split(whereSeparator: \.isWhitespace)
             let chunk = words.suffix(12).joined(separator: " ")
-            guard !chunk.isEmpty else { return }
             
-            if state.streamingChunks.last != chunk {
+            if !chunk.isEmpty, state.streamingChunks.last != chunk {
                 state.streamingChunks.append(chunk)
                 if state.streamingChunks.count > 10 {
-                    state.streamingChunks.removeFirst(state.streamingChunks.count - 10)
+                    state.streamingChunks.removeFirst()
                 }
             }
         }
@@ -487,12 +513,7 @@ final class RecordProcessingManager: ObservableObject {
             return
         }
         
-        let cleanText: String
-        if transcriptionText.contains("-->") && transcriptionText.contains("\n\n") {
-            cleanText = WhisperTranscriptionManager.shared.extractTextFromSRT(transcriptionText)
-        } else {
-            cleanText = transcriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        let cleanText = extractCleanText(from: transcriptionText)
         
         guard !cleanText.isEmpty else {
             updateState(for: job.recordID) { state in
@@ -520,49 +541,42 @@ final class RecordProcessingManager: ObservableObject {
                 await maybeGenerateTitle(for: record, summary: trimmedSummary, job: job)
             }
         } catch {
-            let message: String
-            if let processingError = error as? RecordProcessingError {
-                message = processingError.localizedDescription
-            } else {
-                message = error.localizedDescription
-            }
-            
             updateState(for: job.recordID) { state in
-                state.summaryError = "Error: \(message)"
+                state.summaryError = "Error: \((error as? RecordProcessingError)?.localizedDescription ?? error.localizedDescription)"
             }
         }
     }
     
     private func generateSummary(for text: String, job: ProcessingJob) async throws -> String {
-        if job.settings.useChunking {
-            let chunks = TextChunker.chunkText(text, maxChunkSize: job.settings.chunkSize, forceChunking: false)
-            var chunkSummaries: [String] = []
-            
-            for (index, chunk) in chunks.enumerated() {
-                let prompt = job.settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: chunk)
-                do {
-                    let summary = try await callOpenAIAPI(prompt: prompt, settings: job.settings)
-                    chunkSummaries.append(summary)
-                } catch {
-                    throw RecordProcessingError.chunkFailed(index, error.localizedDescription)
-                }
-            }
-            
-            guard !chunkSummaries.isEmpty else {
-                throw RecordProcessingError.summaryEmpty
-            }
-            
-            if chunkSummaries.count == 1 {
-                return chunkSummaries[0]
-            } else {
-                let combined = chunkSummaries.joined(separator: "\n\n")
-                let prompt = job.settings.summaryPrompt.replacingOccurrences(of: "{transcription}", with: combined)
-                return try await callOpenAIAPI(prompt: prompt, settings: job.settings)
-            }
-        } else {
+        guard job.settings.useChunking else {
             let prompt = job.settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: text)
             return try await callOpenAIAPI(prompt: prompt, settings: job.settings)
         }
+        
+        let chunks = TextChunker.chunkText(text, maxChunkSize: job.settings.chunkSize, forceChunking: false)
+        var chunkSummaries: [String] = []
+        
+        for (index, chunk) in chunks.enumerated() {
+            let prompt = job.settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: chunk)
+            do {
+                let summary = try await callOpenAIAPI(prompt: prompt, settings: job.settings)
+                chunkSummaries.append(summary)
+            } catch {
+                throw RecordProcessingError.chunkFailed(index, error.localizedDescription)
+            }
+        }
+        
+        guard !chunkSummaries.isEmpty else {
+            throw RecordProcessingError.summaryEmpty
+        }
+        
+        if chunkSummaries.count == 1 {
+            return chunkSummaries[0]
+        }
+        
+        let combined = chunkSummaries.joined(separator: "\n\n")
+        let prompt = job.settings.summaryPrompt.replacingOccurrences(of: "{transcription}", with: combined)
+        return try await callOpenAIAPI(prompt: prompt, settings: job.settings)
     }
     
     private func maybeGenerateTitle(for record: Record, summary: String, job: ProcessingJob) async {
@@ -697,5 +711,13 @@ final class RecordProcessingManager: ObservableObject {
     private func fetchRecord(id: UUID, in context: ModelContext) -> Record? {
         let descriptor = FetchDescriptor<Record>(predicate: #Predicate { $0.id == id })
         return try? context.fetch(descriptor).first
+    }
+    
+    /// Extracts clean text from transcription, handling SRT format if present
+    private func extractCleanText(from transcriptionText: String) -> String {
+        if transcriptionText.contains("-->"), transcriptionText.contains("\n\n") {
+            return WhisperTranscriptionManager.shared.extractTextFromSRT(transcriptionText)
+        }
+        return transcriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

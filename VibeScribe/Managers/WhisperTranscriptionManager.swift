@@ -19,6 +19,10 @@ enum TranscriptionError: Error {
     case dataParsingError(String)
     case streamingNotSupported
     case streamingError(String)
+    case permissionDenied
+    case engineUnavailable
+    case processingFailed(String)
+    case featureUnavailable
     
     var description: String {
         switch self {
@@ -38,6 +42,14 @@ enum TranscriptionError: Error {
             return "Server doesn't support SSE streaming"
         case .streamingError(let message):
             return "Streaming error: \(message)"
+        case .permissionDenied:
+            return "Permission was denied"
+        case .engineUnavailable:
+            return "Transcription engine is unavailable"
+        case .processingFailed(let message):
+            return "Processing failed: \(message)"
+        case .featureUnavailable:
+            return "Transcription feature unavailable on this platform"
         }
     }
 }
@@ -99,8 +111,21 @@ class WhisperTranscriptionManager: NSObject {
     // MARK: - Main API Methods
     
     // Main transcription method - always tries SSE first, then fallback
-    func transcribeAudio(audioURL: URL, settings: AppSettings) -> AnyPublisher<String, TranscriptionError> {
+    func transcribeAudio(
+        audioURL: URL,
+        settings: AppSettings,
+        useStreaming: Bool = true
+    ) -> AnyPublisher<String, TranscriptionError> {
         print("🎯 Starting transcription for: \(audioURL.lastPathComponent)")
+        
+        if !useStreaming {
+            return transcribeAudioRegular(
+                audioURL: audioURL,
+                whisperBaseURL: settings.resolvedWhisperBaseURL,
+                apiKey: settings.resolvedWhisperAPIKey,
+                model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
+            )
+        }
         
         // Check if we already know this server doesn't support SSE
         let serverKey = settings.resolvedWhisperBaseURL
