@@ -66,25 +66,11 @@ final class RecordProcessingManager: ObservableObject {
         }
         
         var resolvedWhisperBaseURL: String {
-            switch whisperProvider {
-            case .speechAnalyzer:
-                return ""
-            case .whisperServer:
-                return WhisperProvider.whisperServer.defaultBaseURL
-            case .compatibleAPI:
-                return whisperBaseURL
-            }
+            whisperProvider.resolvedBaseURL(using: whisperBaseURL)
         }
-        
+
         var resolvedWhisperAPIKey: String {
-            switch whisperProvider {
-            case .speechAnalyzer:
-                return ""
-            case .whisperServer:
-                return WhisperProvider.whisperServer.defaultAPIKey
-            case .compatibleAPI:
-                return whisperAPIKey
-            }
+            whisperProvider.resolvedAPIKey(using: whisperAPIKey)
         }
         
         var usesSpeechAnalyzer: Bool {
@@ -98,10 +84,12 @@ final class RecordProcessingManager: ObservableObject {
         
         /// Creates minimal AppSettings for Whisper API calls
         func makeWhisperSettings() -> AppSettings {
-            AppSettings(
+            let baseURL = resolvedWhisperBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            let apiKey = resolvedWhisperAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            return AppSettings(
                 whisperProvider: .compatibleAPI,
-                whisperBaseURL: resolvedWhisperBaseURL,
-                whisperAPIKey: resolvedWhisperAPIKey,
+                whisperBaseURL: baseURL,
+                whisperAPIKey: apiKey,
                 whisperModel: resolvedWhisperModel,
                 useChunking: false,
                 chunkSize: 0,
@@ -437,6 +425,15 @@ final class RecordProcessingManager: ObservableObject {
     }
     
     private func performRegularTranscription(job: ProcessingJob, fileURL: URL) async throws -> String {
+        let fallbackBaseURL = job.settings.resolvedWhisperBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fallbackBaseURL.isEmpty else {
+            throw TranscriptionError.processingFailed("Remote transcription fallback requires a configured Whisper endpoint.")
+        }
+
+        guard APIURLBuilder.isValidBaseURL(fallbackBaseURL) else {
+            throw TranscriptionError.processingFailed("Whisper endpoint \(fallbackBaseURL) is not a valid base URL.")
+        }
+
         let settingsModel = job.settings.makeWhisperSettings()
         var didResume = false
         

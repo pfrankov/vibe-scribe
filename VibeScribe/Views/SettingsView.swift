@@ -789,8 +789,13 @@ struct SettingsView: View {
     
     private func loadWhisperModelsIfURLValid() {
         let provider = settings.whisperProvider
-        let baseURL = settings.resolvedWhisperBaseURL
-        let apiKey = settings.resolvedWhisperAPIKey
+        let baseURL = settings.resolvedWhisperBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = settings.resolvedWhisperAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard provider != .speechAnalyzer else {
+            modelService.whisperModelsError = nil
+            return
+        }
 
         // For compatible API: don't trigger load if field is empty
         if provider == .compatibleAPI && settings.whisperBaseURL.isEmpty {

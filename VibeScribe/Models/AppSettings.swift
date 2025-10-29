@@ -70,6 +70,26 @@ enum WhisperProvider: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+extension WhisperProvider {
+    func resolvedBaseURL(using storedBaseURL: String) -> String {
+        switch self {
+        case .whisperServer:
+            return WhisperProvider.whisperServer.defaultBaseURL
+        case .compatibleAPI, .speechAnalyzer:
+            return storedBaseURL
+        }
+    }
+
+    func resolvedAPIKey(using storedAPIKey: String) -> String {
+        switch self {
+        case .whisperServer:
+            return WhisperProvider.whisperServer.defaultAPIKey
+        case .compatibleAPI, .speechAnalyzer:
+            return storedAPIKey
+        }
+    }
+}
+
 // --- SwiftData Model for Application Settings ---
 @Model
 final class AppSettings {
@@ -232,25 +252,11 @@ extension AppSettings {
     }
     
     var resolvedWhisperBaseURL: String {
-        switch whisperProvider {
-        case .speechAnalyzer:
-            return ""
-        case .whisperServer:
-            return WhisperProvider.whisperServer.defaultBaseURL
-        case .compatibleAPI:
-            return whisperBaseURL
-        }
+        whisperProvider.resolvedBaseURL(using: whisperBaseURL)
     }
     
     var resolvedWhisperAPIKey: String {
-        switch whisperProvider {
-        case .speechAnalyzer:
-            return ""
-        case .whisperServer:
-            return WhisperProvider.whisperServer.defaultAPIKey
-        case .compatibleAPI:
-            return whisperAPIKey
-        }
+        whisperProvider.resolvedAPIKey(using: whisperAPIKey)
     }
     
     var allowsCustomWhisperCredentials: Bool {
