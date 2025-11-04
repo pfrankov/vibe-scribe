@@ -147,7 +147,7 @@ struct VibeScribeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .modelContainer(for: [Record.self, AppSettings.self])
+                .modelContainer(for: [Record.self, Tag.self, AppSettings.self])
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

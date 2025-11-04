@@ -31,8 +31,10 @@ struct RecordDetailView: View {
     var onRecordDeleted: ((UUID) -> Void)? = nil
     var isSidebarCollapsed: Bool = false
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
     @Query private var appSettings: [AppSettings]
-    
+    @Query(sort: [SortDescriptor(\Tag.name)]) private var availableTags: [Tag]
+
     @StateObject private var playerManager = AudioPlayerManager()
     @ObservedObject private var modelService = ModelService.shared
     @ObservedObject private var processingManager = RecordProcessingManager.shared
@@ -57,6 +59,12 @@ struct RecordDetailView: View {
     @State private var editingTitle: String = ""
     @FocusState private var isTitleFieldFocused: Bool
     @FocusState private var focusedEditor: ActiveEditor?
+    @FocusState private var isTagFieldFocused: Bool
+
+    @State private var tagInput: String = ""
+    @State private var highlightedSuggestionID: Tag.ID?
+
+    private let tagManager = TagManager.shared
 
     // Action menu state
     @State private var isShowingDeleteConfirmation = false
@@ -359,67 +367,342 @@ struct RecordDetailView: View {
     }
 
     private var headerSection: some View {
-        HStack {
-            ZStack(alignment: .leading) {
-                // --- TextField (Visible when editing title) ---
-                TextField("Name", text: $editingTitle)
-                    .textFieldStyle(.plain)
-                    .focused($isTitleFieldFocused)
-                    .onSubmit { saveTitle() }
-                    .font(.title2.bold())
-                    .opacity(isEditingTitle ? 1 : 0)
-                    .disabled(!isEditingTitle)
-                    .onTapGesture {}
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ZStack(alignment: .leading) {
+                    // --- TextField (Visible when editing title) ---
+                    TextField("Name", text: $editingTitle)
+                        .textFieldStyle(.plain)
+                        .focused($isTitleFieldFocused)
+                        .onSubmit { saveTitle() }
+                        .font(.title2.bold())
+                        .opacity(isEditingTitle ? 1 : 0)
+                        .disabled(!isEditingTitle)
+                        .onTapGesture {}
 
-                // --- Text (Visible when not editing title) ---
-                Text(record.name)
-                    .font(.title2.bold())
-                    .opacity(isEditingTitle ? 0 : 1)
-                    .onTapGesture(count: 2) {
-                        startEditingTitle()
+                    // --- Text (Visible when not editing title) ---
+                    Text(record.name)
+                        .font(.title2.bold())
+                        .opacity(isEditingTitle ? 0 : 1)
+                        .onTapGesture(count: 2) {
+                            startEditingTitle()
+                        }
+                }
+                Spacer()
+
+                Menu {
+                    Button {
+                        triggerDownload()
+                    } label: {
+                        Label("Download Audio", systemImage: "arrow.down.to.line")
                     }
+                    .disabled(record.fileURL == nil || isDownloading)
+
+                    Button {
+                        startEditingTitle()
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    .disabled(isEditingTitle)
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        isShowingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    if isDownloading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.9)
+                            .frame(width: 24, height: 24)
+                    } else {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .frame(width: 28, height: 28)
             }
-            Spacer()
 
-            Menu {
-                Button {
-                    triggerDownload()
-                } label: {
-                    Label("Download Audio", systemImage: "arrow.down.to.line")
-                }
-                .disabled(record.fileURL == nil || isDownloading)
-
-                Button {
-                    startEditingTitle()
-                } label: {
-                    Label("Rename", systemImage: "pencil")
-                }
-                .disabled(isEditingTitle)
-
-                Divider()
-
-                Button(role: .destructive) {
-                    isShowingDeleteConfirmation = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            } label: {
-                if isDownloading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.9)
-                        .frame(width: 24, height: 24)
-                } else {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.title3)
-                }
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .frame(width: 28, height: 28)
+            tagsSection
         }
-        .padding(.bottom, 4)
+    }
+
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 8, lineSpacing: 8) {
+                ForEach(record.sortedTags) { tag in
+                    tagChip(for: tag)
+                }
+
+                tagInputField
+            }
+            .animation(.easeInOut(duration: 0.18), value: record.tags.count)
+        }
+        .padding(.bottom, tagSuggestionBottomPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tagChip(for tag: Tag) -> some View {
+        HStack(spacing: 8) {
+            Text(tag.name)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+
+            Button {
+                removeTag(tag)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 16, height: 16)
+                    .accessibilityLabel("Remove tag")
+            }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(tagChipBackgroundColor)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(tagChipBorderColor, lineWidth: 1)
+        )
+        .foregroundStyle(Color.accentColor)
+        .shadow(color: tagChipShadowColor, radius: 6, x: 0, y: 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Tag: \(tag.name)")
+    }
+
+    private var tagInputField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(tagInputIconColor)
+
+            TextField("Add tag", text: $tagInput)
+                .textFieldStyle(.plain)
+                .focused($isTagFieldFocused)
+                .disableAutocorrection(true)
+                .multilineTextAlignment(.leading)
+                .onSubmit { commitTagInput() }
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 72, alignment: .leading)
+                .environment(\.layoutDirection, .leftToRight) // keep text left-aligned even in RTL contexts
+#if os(macOS)
+                .onExitCommand { commitTagInput() }
+#endif
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(tagInputBackgroundColor)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(tagInputBorderColor, lineWidth: isTagFieldFocused ? 1.3 : 1)
+        )
+        .overlay(alignment: .bottomLeading) {
+            if shouldShowTagSuggestions {
+                suggestionList
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .offset(y: 8)
+            }
+        }
+        .zIndex(shouldShowTagSuggestions ? 1 : 0)
+        .animation(.easeInOut(duration: 0.18), value: isTagFieldFocused)
+        .accessibilityLabel("Add a tag")
+    }
+
+    private var tagInputBorderColor: Color {
+        if isTagFieldFocused {
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.7 : 0.5)
+        }
+        return Color(NSColor.separatorColor).opacity(colorScheme == .dark ? 0.5 : 0.35)
+    }
+
+    private var tagInputBackgroundColor: Color {
+        let base = Color(NSColor.controlBackgroundColor)
+        return isTagFieldFocused
+            ? base.opacity(colorScheme == .dark ? 0.85 : 1.0)
+            : base.opacity(colorScheme == .dark ? 0.65 : 0.85)
+    }
+
+    private var tagInputIconColor: Color {
+        isTagFieldFocused ? Color.accentColor : Color(NSColor.secondaryLabelColor)
+    }
+
+    private var tagChipBackgroundColor: Color {
+        colorScheme == .dark ? Color.accentColor.opacity(0.24) : Color.accentColor.opacity(0.14)
+    }
+
+    private var tagChipBorderColor: Color {
+        colorScheme == .dark ? Color.accentColor.opacity(0.45) : Color.accentColor.opacity(0.26)
+    }
+
+    private var tagChipShadowColor: Color {
+        Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08)
+    }
+
+    private var suggestionList: some View {
+        VStack(spacing: 0) {
+            ForEach(filteredTagSuggestions) { suggestion in
+                Button {
+                    commitTagInput(using: suggestion)
+                } label: {
+                    HStack {
+                        Text(suggestion.name)
+                            .font(.system(size: 13))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(highlightedSuggestionID == suggestion.id ? Color.accentColor.opacity(0.14) : Color.clear)
+                }
+                .buttonStyle(.plain)
+#if os(macOS)
+                .onHover { hovering in
+                    guard hovering else { return }
+                    highlightedSuggestionID = suggestion.id
+                }
+#endif
+            }
+        }
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(NSColor.windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 14, x: 0, y: 6)
+        .frame(maxWidth: 240, alignment: .leading)
+    }
+
+    private var shouldShowTagSuggestions: Bool {
+        isTagFieldFocused && !filteredTagSuggestions.isEmpty
+    }
+
+    private var tagSuggestionBottomPadding: CGFloat {
+        guard shouldShowTagSuggestions else { return 0 }
+        let rowHeight: CGFloat = 28
+        let verticalInsets: CGFloat = 28
+        let rows = CGFloat(filteredTagSuggestions.count)
+        return rows * rowHeight + verticalInsets
+    }
+
+    private var filteredTagSuggestions: [Tag] {
+        let trimmedInput = tagInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return [] }
+
+        let excludedIDs = assignedTagIDs
+        let matches = availableTags.filter { tag in
+            guard !excludedIDs.contains(tag.id) else { return false }
+            return tag.name.localizedCaseInsensitiveContains(trimmedInput)
+        }
+
+        return Array(matches.prefix(8))
+    }
+
+    private var assignedTagIDs: Set<Tag.ID> {
+        Set(record.tags.map(\.id))
+    }
+
+    private func commitTagInput(using suggestion: Tag? = nil) {
+        if let suggestion {
+            if attach(tag: suggestion) {
+                persistTagChanges(reason: "attach existing tag")
+            }
+            return
+        }
+
+        if let highlightedID = highlightedSuggestionID,
+           let highlighted = filteredTagSuggestions.first(where: { $0.id == highlightedID }) {
+            if attach(tag: highlighted) {
+                persistTagChanges(reason: "attach highlighted tag")
+            }
+            return
+        }
+
+        let trimmedInput = tagInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else {
+            clearTagInput()
+            return
+        }
+
+        do {
+            if let tag = try tagManager.ensureTag(named: trimmedInput, in: modelContext) {
+                if attach(tag: tag) {
+                    persistTagChanges(reason: "create tag \(trimmedInput)")
+                }
+            } else {
+                clearTagInput()
+            }
+        } catch {
+            Logger.error("Failed to create or attach tag", error: error, category: .data)
+        }
+    }
+
+    @discardableResult
+    private func attach(tag: Tag) -> Bool {
+        let didChange = withAnimation(.easeInOut(duration: 0.2)) {
+            tagManager.attach(tag, to: record)
+        }
+
+        clearTagInput()
+        return didChange
+    }
+
+    private func removeTag(_ tag: Tag) {
+        let didChange = withAnimation(.easeInOut(duration: 0.2)) {
+            tagManager.detach(tag, from: record, in: modelContext)
+        }
+
+        if didChange {
+            persistTagChanges(reason: "remove tag \(tag.name)")
+        }
+    }
+
+    private func clearTagInput() {
+        tagInput = ""
+        highlightedSuggestionID = nil
+    }
+
+    private func persistTagChanges(reason: String) {
+        do {
+            try modelContext.save()
+        } catch {
+            Logger.error("Failed to persist tag changes (\(reason))", error: error, category: .data)
+        }
+    }
+
+    private func handleTagInputChange(_ newValue: String) {
+        guard !newValue.isEmpty else {
+            highlightedSuggestionID = nil
+            return
+        }
+
+        if let last = newValue.last, tagDelimiterCharacters.contains(last) {
+            tagInput = String(newValue.dropLast())
+            commitTagInput()
+            return
+        }
+
+        highlightedSuggestionID = filteredTagSuggestions.first?.id
+    }
+
+    private var tagDelimiterCharacters: Set<Character> {
+        [",", ";"]
     }
 
     private var tabsSection: some View {
@@ -804,8 +1087,10 @@ struct RecordDetailView: View {
 
     private var mainStack: some View {
         VStack(alignment: .leading, spacing: 12) {
-            headerSection
-            playerControls
+            VStack(alignment: .leading, spacing: 4) {
+                headerSection
+                playerControls
+            }
             Divider()
             processingSection
             tabsSection
@@ -878,6 +1163,18 @@ struct RecordDetailView: View {
         view = AnyView(view.onChange(of: isTitleFieldFocused) { oldValue, newValue in
             if !newValue && isEditingTitle { // If focus is lost AND we were editing
                 cancelEditingTitle()
+            }
+        })
+
+        view = AnyView(view.onChange(of: tagInput) { _, newValue in
+            handleTagInputChange(newValue)
+        })
+
+        view = AnyView(view.onChange(of: isTagFieldFocused) { _, newValue in
+            if newValue {
+                highlightedSuggestionID = filteredTagSuggestions.first?.id
+            } else {
+                clearTagInput()
             }
         })
 
@@ -1347,6 +1644,11 @@ struct RecordDetailView: View {
         playerManager.stopAndCleanup()
 
         let recordId = record.id
+        let associatedTags = record.tags
+        for tag in associatedTags {
+            _ = tagManager.detach(tag, from: record, in: modelContext)
+        }
+
         if let fileURL = record.fileURL {
             do {
                 try FileManager.default.removeItem(at: fileURL)

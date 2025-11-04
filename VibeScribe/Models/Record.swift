@@ -20,8 +20,20 @@ final class Record: Identifiable {
     var transcriptionText: String?
     var summaryText: String?
     var includesSystemAudio: Bool?
+    @Relationship(deleteRule: .nullify, inverse: \Tag.records) var tags: [Tag]
 
-    init(id: UUID = UUID(), name: String, fileURL: URL?, date: Date = Date(), duration: TimeInterval, hasTranscription: Bool = false, transcriptionText: String? = nil, summaryText: String? = nil, includesSystemAudio: Bool = false) {
+    init(
+        id: UUID = UUID(),
+        name: String,
+        fileURL: URL?,
+        date: Date = Date(),
+        duration: TimeInterval,
+        hasTranscription: Bool = false,
+        transcriptionText: String? = nil,
+        summaryText: String? = nil,
+        includesSystemAudio: Bool = false,
+        tags: [Tag] = []
+    ) {
         self.id = id
         self.name = name
         self.fileURL = fileURL // Store the URL object
@@ -31,6 +43,7 @@ final class Record: Identifiable {
         self.transcriptionText = transcriptionText
         self.summaryText = summaryText
         self.includesSystemAudio = includesSystemAudio
+        self.tags = tags
     }
 }
 
@@ -69,6 +82,13 @@ extension Record {
             return attributes[.size] as? Int64 ?? 0
         } catch {
             return 0
+        }
+    }
+
+    /// Tags sorted using localized, case-insensitive comparison so UI chips appear predictable
+    var sortedTags: [Tag] {
+        tags.sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
     }
 }

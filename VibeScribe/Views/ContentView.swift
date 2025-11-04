@@ -860,7 +860,7 @@ private struct WelcomeEmptyDetailView: View {
 
 #Preview {
     do {
-        let schema = Schema([Record.self, AppSettings.self])
+        let schema = Schema([Record.self, Tag.self, AppSettings.self])
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [config])
         

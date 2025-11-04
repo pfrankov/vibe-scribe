@@ -7,12 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		43ABB78FBE234DF3A3393E8E /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D28CC8D28DBA4AD398D23E82 /* FlowLayout.swift */; };
+		50E699AF57304336AC357A09 /* Tag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA6B20ED73D4346B5F8EFAA /* Tag.swift */; };
+		9D3852F178594519B6BBE65C /* TagManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9B5CBCD49A46B1B9840288 /* TagManager.swift */; };
 		7A8E8A6B2C88EC9F00DC14A4 /* (null) in Sources */ = {isa = PBXBuildFile; };
 		E6ADCD5E2DBF2F5A00E8B7C3 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E6ADCD5C2DBF2F5A00E8B7C3 /* MarkdownUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1C9B5CBCD49A46B1B9840288 /* TagManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TagManager.swift; path = VibeScribe/Managers/TagManager.swift; sourceTree = SOURCE_ROOT; };
+		8CA6B20ED73D4346B5F8EFAA /* Tag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Tag.swift; path = VibeScribe/Models/Tag.swift; sourceTree = SOURCE_ROOT; };
 		8DC158442DAC281A00BECEAC /* VibeScribe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VibeScribe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D28CC8D28DBA4AD398D23E82 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FlowLayout.swift; path = VibeScribe/Views/Components/FlowLayout.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -142,6 +148,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				50E699AF57304336AC357A09 /* Tag.swift in Sources */,
+				9D3852F178594519B6BBE65C /* TagManager.swift in Sources */,
+				43ABB78FBE234DF3A3393E8E /* FlowLayout.swift in Sources */,
 				7A8E8A6B2C88EC9F00DC14A4 /* (null) in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -284,9 +293,9 @@
 				DEVELOPMENT_ASSET_PATHS = "\"VibeScribe/Preview Content\"";
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=macosx*]" = "";
-				GENERATE_APP_INTENTS_METADATA = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				GENERATE_APP_INTENTS_METADATA = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VibeScribe/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -320,9 +329,9 @@
 				DEVELOPMENT_ASSET_PATHS = "\"VibeScribe/Preview Content\"";
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=macosx*]" = "";
-				GENERATE_APP_INTENTS_METADATA = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				GENERATE_APP_INTENTS_METADATA = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VibeScribe/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
