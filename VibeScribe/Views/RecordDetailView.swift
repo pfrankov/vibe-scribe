@@ -232,11 +232,9 @@ struct RecordDetailView: View {
                     .disableAutocorrection(true)
                     .background(Color.clear)
                     .padding(8)
-#if os(macOS)
                     .onExitCommand {
                         onExit?()
                     }
-#endif
 
                 if text.isEmpty {
                     Text(statusMessage ?? placeholder)
@@ -299,7 +297,6 @@ struct RecordDetailView: View {
         }
     }
 
-#if os(macOS)
     private struct DoubleClickCatchingView: NSViewRepresentable {
         var onDoubleClick: () -> Void
 
@@ -345,24 +342,16 @@ struct RecordDetailView: View {
             gesture.buttonMask = 0x1
         }
     }
-#endif
 
     private struct SummaryPreviewActivationModifier: ViewModifier {
         var onActivateEditing: () -> Void
 
         func body(content: Content) -> some View {
-#if os(macOS)
             content
                 .background(DoubleClickCatchingView(onDoubleClick: onActivateEditing))
                 .highPriorityGesture(
                     TapGesture(count: 2).onEnded(onActivateEditing)
                 )
-#else
-            content
-                .highPriorityGesture(
-                    TapGesture(count: 2).onEnded(onActivateEditing)
-                )
-#endif
         }
     }
 
@@ -485,20 +474,32 @@ struct RecordDetailView: View {
         HStack(spacing: 6) {
             Image(systemName: "plus")
                 .font(.system(size: 12, weight: .bold))
+                .frame(width: 16, height: 16)
                 .foregroundStyle(tagInputIconColor)
 
-            TextField("Add tag", text: $tagInput)
-                .textFieldStyle(.plain)
-                .focused($isTagFieldFocused)
-                .disableAutocorrection(true)
-                .multilineTextAlignment(.leading)
-                .onSubmit { commitTagInput() }
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 72, alignment: .leading)
-                .environment(\.layoutDirection, .leftToRight) // keep text left-aligned even in RTL contexts
-#if os(macOS)
-                .onExitCommand { commitTagInput() }
-#endif
+            TagComboBoxView(
+                placeholder: "Add tag",
+                options: availableTagNamesExcludingAssigned,
+                usageCounts: tagUsageCounts,
+                initialMinWidth: 72,
+                trailingGap: 20,
+                text: $tagInput,
+                onCommit: { selected in
+                    if let name = selected {
+                        return commitTagByName(name)
+                    } else {
+                        return commitTagInput()
+                    }
+                },
+                onFocusChange: { isFocused in
+                    isTagFieldFocused = isFocused
+                }
+            )
+            .frame(minWidth: 72, alignment: .leading)
+            .frame(height: 16)
+            // Keep horizontal hugging for content width but allow the
+            // parent to enforce height so it matches tag chips exactly.
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -507,8 +508,11 @@ struct RecordDetailView: View {
                 .fill(tagInputBackgroundColor)
         )
         .overlay(
+            // Keep the outer bounds identical to tag chips.
+            // Thicken border on focus, inset inward to preserve outside size.
             Capsule(style: .continuous)
-                .stroke(tagInputBorderColor, lineWidth: isTagFieldFocused ? 1.3 : 1)
+                .inset(by: isTagFieldFocused ? 0.5 : 0)
+                .stroke(tagInputBorderColor, lineWidth: isTagFieldFocused ? 2 : 1)
         )
         .overlay(alignment: .bottomLeading) {
             if shouldShowTagSuggestions {
@@ -552,6 +556,64 @@ struct RecordDetailView: View {
         Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08)
     }
 
+    // NSComboBox-based suggestions: provide list of available tag names excluding already assigned
+    private var availableTagNamesExcludingAssigned: [String] {
+        let assigned = Set(record.tags.map { $0.name.lowercased() })
+        let base = availableTags
+            .filter { !assigned.contains($0.name.lowercased()) }
+        let names = base.map { $0.name }
+        // Sort by usage when empty query; dynamic sorting on input is handled inside TagComboBoxView
+        return names.sorted { lhs, rhs in
+            let lc = tagUsageCounts[lhs, default: 0]
+            let rc = tagUsageCounts[rhs, default: 0]
+            if lc != rc { return lc > rc }
+            return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private var tagUsageCounts: [String: Int] {
+        var dict: [String: Int] = [:]
+        for tag in availableTags {
+            dict[tag.name] = tag.records.count
+        }
+        return dict
+    }
+
+    private var filteredTagSuggestions: [Tag] {
+        let trimmedInput = tagInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return [] }
+
+        let excludedIDs = assignedTagIDs
+        let matches = availableTags.filter { tag in
+            guard !excludedIDs.contains(tag.id) else { return false }
+            return tag.name.range(of: trimmedInput, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+        let sorted = matches.sorted { a, b in
+            let ra = matchRank(for: a.name, query: trimmedInput)
+            let rb = matchRank(for: b.name, query: trimmedInput)
+            if ra != rb { return ra < rb }
+            let ua = a.records.count
+            let ub = b.records.count
+            if ua != ub { return ua > ub }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+        return Array(sorted.prefix(8))
+    }
+
+    private var assignedTagIDs: Set<Tag.ID> { Set(record.tags.map(\.id)) }
+
+    private var shouldShowTagSuggestions: Bool {
+        isTagFieldFocused && !filteredTagSuggestions.isEmpty
+    }
+
+    private var tagSuggestionBottomPadding: CGFloat {
+        guard shouldShowTagSuggestions else { return 0 }
+        let rowHeight: CGFloat = 28
+        let verticalInsets: CGFloat = 28
+        let rows = CGFloat(filteredTagSuggestions.count)
+        return rows * rowHeight + verticalInsets
+    }
+
     private var suggestionList: some View {
         VStack(spacing: 0) {
             ForEach(filteredTagSuggestions) { suggestion in
@@ -562,18 +624,17 @@ struct RecordDetailView: View {
                         Text(suggestion.name)
                             .font(.system(size: 13))
                             .frame(maxWidth: .infinity, alignment: .leading)
+                        if suggestion.records.count > 0 {
+                            Text("\(suggestion.records.count)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.secondary)
+                        }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(highlightedSuggestionID == suggestion.id ? Color.accentColor.opacity(0.14) : Color.clear)
                 }
                 .buttonStyle(.plain)
-#if os(macOS)
-                .onHover { hovering in
-                    guard hovering else { return }
-                    highlightedSuggestionID = suggestion.id
-                }
-#endif
             }
         }
         .padding(.vertical, 4)
@@ -589,68 +650,50 @@ struct RecordDetailView: View {
         .frame(maxWidth: 240, alignment: .leading)
     }
 
-    private var shouldShowTagSuggestions: Bool {
-        isTagFieldFocused && !filteredTagSuggestions.isEmpty
-    }
-
-    private var tagSuggestionBottomPadding: CGFloat {
-        guard shouldShowTagSuggestions else { return 0 }
-        let rowHeight: CGFloat = 28
-        let verticalInsets: CGFloat = 28
-        let rows = CGFloat(filteredTagSuggestions.count)
-        return rows * rowHeight + verticalInsets
-    }
-
-    private var filteredTagSuggestions: [Tag] {
-        let trimmedInput = tagInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedInput.isEmpty else { return [] }
-
-        let excludedIDs = assignedTagIDs
-        let matches = availableTags.filter { tag in
-            guard !excludedIDs.contains(tag.id) else { return false }
-            return tag.name.localizedCaseInsensitiveContains(trimmedInput)
+    private func matchRank(for name: String, query: String) -> Int {
+        let s = name.lowercased()
+        let q = query.lowercased()
+        if s.hasPrefix(q) { return 0 }
+        if let r = s.range(of: q) {
+            if r.lowerBound == s.startIndex { return 0 }
+            let prev = s.index(before: r.lowerBound)
+            let scalars = String(s[prev]).unicodeScalars
+            if let u = scalars.first, CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters).contains(u) { return 1 }
+            return 2
         }
-
-        return Array(matches.prefix(8))
+        return 3
     }
 
-    private var assignedTagIDs: Set<Tag.ID> {
-        Set(record.tags.map(\.id))
-    }
-
-    private func commitTagInput(using suggestion: Tag? = nil) {
+    @discardableResult
+    private func commitTagInput(using suggestion: Tag? = nil) -> Bool {
         if let suggestion {
             if attach(tag: suggestion) {
                 persistTagChanges(reason: "attach existing tag")
+                return true
             }
-            return
-        }
-
-        if let highlightedID = highlightedSuggestionID,
-           let highlighted = filteredTagSuggestions.first(where: { $0.id == highlightedID }) {
-            if attach(tag: highlighted) {
-                persistTagChanges(reason: "attach highlighted tag")
-            }
-            return
+            return false
         }
 
         let trimmedInput = tagInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedInput.isEmpty else {
             clearTagInput()
-            return
+            return false
         }
 
         do {
             if let tag = try tagManager.ensureTag(named: trimmedInput, in: modelContext) {
                 if attach(tag: tag) {
                     persistTagChanges(reason: "create tag \(trimmedInput)")
+                    return true
                 }
             } else {
                 clearTagInput()
+                return false
             }
         } catch {
             Logger.error("Failed to create or attach tag", error: error, category: .data)
         }
+        return false
     }
 
     @discardableResult
@@ -675,7 +718,22 @@ struct RecordDetailView: View {
 
     private func clearTagInput() {
         tagInput = ""
-        highlightedSuggestionID = nil
+    }
+
+    @discardableResult
+    private func commitTagByName(_ name: String) -> Bool {
+        // Prefer existing tag if present
+        if let tag = availableTags.first(where: { $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            if attach(tag: tag) {
+                persistTagChanges(reason: "attach existing tag by selection")
+                return true
+            }
+            return false
+        }
+
+        // Otherwise create
+        tagInput = name
+        return commitTagInput()
     }
 
     private func persistTagChanges(reason: String) {
@@ -687,18 +745,11 @@ struct RecordDetailView: View {
     }
 
     private func handleTagInputChange(_ newValue: String) {
-        guard !newValue.isEmpty else {
-            highlightedSuggestionID = nil
-            return
-        }
-
+        guard !newValue.isEmpty else { return }
         if let last = newValue.last, tagDelimiterCharacters.contains(last) {
             tagInput = String(newValue.dropLast())
-            commitTagInput()
-            return
+            _ = commitTagInput()
         }
-
-        highlightedSuggestionID = filteredTagSuggestions.first?.id
     }
 
     private var tagDelimiterCharacters: Set<Character> {
