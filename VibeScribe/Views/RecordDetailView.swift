@@ -18,10 +18,16 @@ import Speech
 // Detail view for a single record
 struct RecordDetailView: View {
     
-    init(record: Record, isSidebarCollapsed: Bool = false, onRecordDeleted: ((UUID) -> Void)? = nil) {
+    init(
+        record: Record,
+        isSidebarCollapsed: Bool = false,
+        onRecordDeleted: ((UUID) -> Void)? = nil,
+        onTagTapped: ((Tag) -> Void)? = nil
+    ) {
         self.record = record
         self.isSidebarCollapsed = isSidebarCollapsed
         self.onRecordDeleted = onRecordDeleted
+        self.onTagTapped = onTagTapped
         _transcriptionDraft = State(initialValue: record.transcriptionText ?? "")
         _summaryDraft = State(initialValue: record.summaryText ?? "")
     }
@@ -29,6 +35,7 @@ struct RecordDetailView: View {
     // Use @Bindable for direct modification of @Model properties
     @Bindable var record: Record
     var onRecordDeleted: ((UUID) -> Void)? = nil
+    var onTagTapped: ((Tag) -> Void)? = nil
     var isSidebarCollapsed: Bool = false
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -439,10 +446,18 @@ struct RecordDetailView: View {
 
     private func tagChip(for tag: Tag) -> some View {
         HStack(spacing: 8) {
-            Text(tag.name)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
+            // Make the tag label interactive via a Button so it is keyboard-focusable and accessible.
+            Button(action: { onTagTapped?(tag) }) {
+                Text(tag.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .help("Filter by \(tag.name)")
+            .accessibilityLabel("Filter recordings by \(tag.name)")
 
+            // Keep remove as a separate plain button to avoid nesting buttons.
             Button {
                 removeTag(tag)
             } label: {

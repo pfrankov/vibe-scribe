@@ -17,6 +17,7 @@ struct ContentView: View {
     @StateObject private var importManager = AudioFileImportManager()
     @State private var isDragOver = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var activeTagFilterName: String? = nil
 
     @Query(sort: \Record.date, order: .reverse) private var records: [Record]
 #if DEBUG
@@ -28,7 +29,10 @@ struct ContentView: View {
             // Main content
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 RecordsSidebarView(
-                    records: effectiveRecords,
+                    title: sidebarTitle,
+                    isFiltering: activeTagFilterName != nil,
+                    onClearFilter: { activeTagFilterName = nil },
+                    records: filteredRecords,
                     selectedRecord: $selectedRecord,
                     shouldScrollToSelectedRecord: $shouldScrollToSelectedRecord,
                     onCreateRecording: presentRecordingOverlay
@@ -96,6 +100,12 @@ struct ContentView: View {
             }
         }
 #endif
+        .onChange(of: filteredRecords) { _, newFiltered in
+            // Keep selection valid when filter changes
+            if let selected = selectedRecord, !newFiltered.contains(where: { $0.id == selected.id }) {
+                selectedRecord = newFiltered.first
+            }
+        }
         // Legacy sheet flow kept disabled; overlay replaces it
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -123,6 +133,24 @@ struct ContentView: View {
 #endif
     }
 
+    // Returns records filtered by the active tag name.
+    // Comparison is case- and diacritic-insensitive to avoid surprising empty results
+    // when tag names differ only by case or diacritics.
+    private var filteredRecords: [Record] {
+        guard let raw = activeTagFilterName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return effectiveRecords }
+        let normalizedFilter = raw
+        return effectiveRecords.filter { record in
+            record.tags.contains { tag in
+                tag.name.compare(normalizedFilter, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }
+        }
+    }
+
+    private var sidebarTitle: String {
+        if let name = activeTagFilterName, !name.isEmpty { return name }
+        return NSLocalizedString("All Recordings", comment: "Sidebar header title for all recordings")
+    }
+
     // MARK: - Subviews
     
     @ViewBuilder
@@ -139,6 +167,9 @@ struct ContentView: View {
                 isSidebarCollapsed: columnVisibility == .detailOnly,
                 onRecordDeleted: { _ in
                     self.selectedRecord = nil
+                },
+                onTagTapped: { tag in
+                    self.activeTagFilterName = tag.name
                 }
             )
             .id(selectedRecord.id)
@@ -349,6 +380,9 @@ struct ContentView: View {
 // MARK: - Drag Overlay Content
 
 private struct RecordsSidebarView: View {
+    let title: String
+    let isFiltering: Bool
+    let onClearFilter: () -> Void
     let records: [Record]
     @Binding var selectedRecord: Record?
     @Binding var shouldScrollToSelectedRecord: Bool
@@ -361,11 +395,15 @@ private struct RecordsSidebarView: View {
 
             VStack(spacing: 0) {
                 SidebarHeader(
-                    showQuickAction: !records.isEmpty,
-                    onCreateRecording: onCreateRecording
+                    title: title,
+                    isFiltering: isFiltering,
+                    onClearFilter: onClearFilter
                 )
                 content
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            sidebarBottomBar
         }
     }
 
@@ -402,6 +440,28 @@ private struct RecordsSidebarView: View {
                     shouldScrollToSelectedRecord = false
                 }
             }
+        }
+    }
+
+    private var sidebarBottomBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .padding(.horizontal, 0)
+            HStack {
+                Button(action: onCreateRecording) {
+                    Label("New Recording", systemImage: "plus.circle.fill")
+                        .font(.body)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.regular)
+                .accessibilityHint("Start a new recording")
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                VisualEffectBlurView(material: .sidebar, blendingMode: .behindWindow)
+            )
         }
     }
 
@@ -582,25 +642,28 @@ private struct RecordSection: Identifiable {
 }
 
 private struct SidebarHeader: View {
-    let showQuickAction: Bool
-    let onCreateRecording: () -> Void
+    let title: String
+    let isFiltering: Bool
+    let onClearFilter: () -> Void
 
     var body: some View {
-        HStack(alignment: .center) {
-            Text("All Recordings")
+        HStack(alignment: .center, spacing: 8) {
+            Text(title)
                 .font(.title3)
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
-            Spacer()
-
-            if showQuickAction {
-                 Button(action: onCreateRecording) {
-                    Label("New Recording", systemImage: "plus.circle.fill")
-                        .font(.body)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if isFiltering {
+                Button(action: onClearFilter) {
+                    Image(systemName: "xmark.circle")
+                        .imageScale(.medium)
                 }
                 .buttonStyle(.borderless)
-                .controlSize(.regular)
+                .help("Reset filter")
+                .accessibilityLabel(Text("Reset filter"))
             }
+            Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
