@@ -2,7 +2,7 @@
 
 <table>
   <tr>
-    <td><img width="700" alt="VibeScribe" src="https://github.com/user-attachments/assets/6ee7410c-40fb-42e0-9b4b-ae3d12443c0b" /></td>
+    <td><img width="700" alt="VibeScribe" src="https://github.com/user-attachments/assets/374c108c-7ad9-45e0-b625-9878e67dedb8" /></td>
     <td align="center" valign="top"><img width="300" alt="Recording overlay" src="https://github.com/user-attachments/assets/6e0be794-e3fd-42c3-9918-afdf257e20e6" /><br/><i>Always-on-top recording overlay</i></td>
   </tr>
 </table>
