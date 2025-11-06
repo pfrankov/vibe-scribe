@@ -648,12 +648,23 @@ private struct SidebarHeader: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            Text(title)
-                .font(.title3)
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            Group {
+                if isFiltering {
+                    HStack(spacing: 0) {
+                        Text("#")
+                            .padding(.trailing, 1)
+                        Text(title)
+                    }
+                    .foregroundColor(.accentColor)
+                } else {
+                    Text(title)
+                        .foregroundColor(.primary)
+                }
+            }
+            .font(.title3)
+            .fontWeight(.semibold)
+            .lineLimit(1)
+            .truncationMode(.tail)
             if isFiltering {
                 Button(action: onClearFilter) {
                     Image(systemName: "xmark.circle")
@@ -892,7 +903,7 @@ private struct WelcomeEmptyDetailView: View {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
                     .foregroundColor(.accentColor)
-                Text("The recordings, transcriptions, and sammaries stay on your Mac and only you determine what to do with them.")
+                Text("The recordings, transcriptions, and summaries stay on your Mac and only you determine what to do with them.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

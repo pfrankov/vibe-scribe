@@ -66,6 +66,17 @@ struct RecordRow: View {
 
                 iconGroup
             }
+
+            if !record.tags.isEmpty {
+                Text(singleLineTags)
+                    .font(.caption)
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityLabel(
+                        "Tags: \(record.sortedTags.map { "#\($0.name)" }.joined(separator: "  "))"
+                    )
+            }
         }
         .padding(.vertical, 8) // Increase padding for better readability
         .contentShape(Rectangle()) // Ensures that the entire row is clickable
@@ -77,6 +88,11 @@ struct RecordRow: View {
             }
         }
     }
+
+    private var singleLineTags: String {
+        record.sortedTags.map { "#\($0.name)" }.joined(separator: "  ")
+    }
+
 
     @ViewBuilder
     private var iconGroup: some View {
@@ -117,14 +133,22 @@ struct RecordRow: View {
     }
 
     private func saveName() {
-        // Only save if the name is valid and actually changed
-        if !editingName.isEmpty && editingName != record.name {
-            Logger.info("Saving new name: \(editingName) for record ID: \(record.id)", category: .data)
-            record.name = editingName
-            // SwiftData @Bindable should handle the save automatically
-        } else {
-            Logger.debug("Name unchanged or empty, reverting", category: .ui)
+        // Trim whitespace and ensure the final name is non-empty
+        let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            Logger.debug("Name empty after trimming, reverting", category: .ui)
+            isEditing = false
+            isNameFieldFocused = false
+            return
         }
+
+        if trimmed != record.name {
+            Logger.info("Saving new name: \(trimmed) for record ID: \(record.id)", category: .data)
+            record.name = trimmed
+        } else {
+            Logger.debug("Name unchanged, reverting", category: .ui)
+        }
+
         isEditing = false // Exit editing mode
         isNameFieldFocused = false // Ensure focus is released
     }
@@ -136,11 +160,15 @@ struct RecordRow: View {
         // No need to reset editingName, it will be re-initialized on next edit
     }
     
-    // Helper function to format the date with time
-    private func formattedDateTime(_ date: Date) -> String {
+    // Helper: single, shared DateFormatter to avoid allocations per row
+    private static let dateTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private func formattedDateTime(_ date: Date) -> String {
+        Self.dateTimeFormatter.string(from: date)
     }
 } 
