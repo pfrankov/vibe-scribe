@@ -70,7 +70,7 @@ struct RecordRow: View {
             if !record.tags.isEmpty {
                 Text(singleLineTags)
                     .font(.caption)
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .accessibilityLabel(
