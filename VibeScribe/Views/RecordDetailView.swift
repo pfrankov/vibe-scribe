@@ -193,7 +193,6 @@ struct RecordDetailView: View {
         }
         .background(Color(NSColor.controlBackgroundColor).opacity(0.9))
         .cornerRadius(10)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
         .disabled(!playerManager.isReady)
         .padding(.vertical, 4)
     }
