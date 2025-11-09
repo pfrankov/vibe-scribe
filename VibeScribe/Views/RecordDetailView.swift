@@ -70,6 +70,9 @@ struct RecordDetailView: View {
 
     @State private var tagInput: String = ""
     @State private var highlightedSuggestionID: Tag.ID?
+    
+    @State private var showTranscriptionCopied: Bool = false
+    @State private var showSummaryCopied: Bool = false
 
     private let tagManager = TagManager.shared
 
@@ -81,6 +84,7 @@ struct RecordDetailView: View {
     private let speedControlColumnSpacing: CGFloat = 12
     private let controlRowHeight: CGFloat = 28
     private let inlineSaveDebounceInterval: TimeInterval = 0.75
+    private let copiedIndicationDuration: TimeInterval = 2.0
     @State private var spaceKeyMonitor: Any?
 
     // Removed tuning controls (auto-optimized waveform)
@@ -217,6 +221,23 @@ struct RecordDetailView: View {
         case transcription
         case summary
     }
+    
+    // Reusable copy button component
+    private struct CopyButton: View {
+        let onCopy: () -> Void
+        let showCopied: Bool
+        
+        var body: some View {
+            Button(action: onCopy) {
+                Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(showCopied ? .green : .primary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.borderless)
+            .help(showCopied ? "Copied!" : "Copy to clipboard")
+        }
+    }
 
     // Reusable inline editor to keep body lightweight for type-checker
     private struct InlineEditableTextArea: View {
@@ -226,6 +247,8 @@ struct RecordDetailView: View {
         var focusBinding: FocusState<ActiveEditor?>.Binding
         var editor: ActiveEditor
         var onExit: (() -> Void)? = nil
+        var onCopy: (() -> Void)? = nil
+        var showCopied: Bool = false
 
         var body: some View {
             ZStack(alignment: .topLeading) {
@@ -238,6 +261,7 @@ struct RecordDetailView: View {
                     .disableAutocorrection(true)
                     .background(Color.clear)
                     .padding(8)
+                    .padding(.trailing, 36) // Make room for copy button
                     .onExitCommand {
                         onExit?()
                     }
@@ -249,6 +273,18 @@ struct RecordDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .allowsHitTesting(false)
+                }
+                
+                // Copy button overlay
+                if !text.isEmpty, let copyAction = onCopy {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            CopyButton(onCopy: copyAction, showCopied: showCopied)
+                                .padding(8)
+                        }
+                        Spacer()
+                    }
                 }
             }
             .overlay(
@@ -264,6 +300,8 @@ struct RecordDetailView: View {
         var plainText: String
         var placeholder: String
         var onActivateEditing: () -> Void
+        var onCopy: (() -> Void)? = nil
+        var showCopied: Bool = false
 
         private var trimmedText: String {
             plainText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -291,6 +329,19 @@ struct RecordDetailView: View {
                 }
                 .textSelection(.enabled)
                 .padding(8)
+                .padding(.trailing, 36) // Make room for copy button
+                
+                // Copy button overlay
+                if !trimmedText.isEmpty, let copyAction = onCopy {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            CopyButton(onCopy: copyAction, showCopied: showCopied)
+                                .padding(8)
+                        }
+                        Spacer()
+                    }
+                }
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
@@ -803,20 +854,6 @@ struct RecordDetailView: View {
 
     private var transcriptionTab: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Spacer()
-                Button {
-                    copyTranscription()
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                        .labelStyle(.iconOnly)
-                        .symbolRenderingMode(.hierarchical)
-                }
-                .buttonStyle(.borderless)
-                .help("Copy Transcription")
-                .disabled(!hasTranscriptionContent)
-            }
-
             if let error = transcriptionError {
                 InlineMessageView(error)
                     .padding(.bottom, 4)
@@ -827,7 +864,11 @@ struct RecordDetailView: View {
             placeholder: "Start typing transcription...",
             statusMessage: transcriptionStatusMessage,
             focusBinding: $focusedEditor,
-            editor: .transcription
+            editor: .transcription,
+            onCopy: {
+                copyTranscription()
+            },
+            showCopied: showTranscriptionCopied
         )
 
         HStack(spacing: 12) {
@@ -892,20 +933,6 @@ struct RecordDetailView: View {
 
     private var summaryTab: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Spacer()
-                Button {
-                    copySummary()
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                        .labelStyle(.iconOnly)
-                        .symbolRenderingMode(.hierarchical)
-                }
-                .buttonStyle(.borderless)
-                .help("Copy Summary")
-                .disabled(!hasSummaryContent)
-            }
-
             if let error = summaryError {
                 InlineMessageView(error)
                     .padding(.bottom, 4)
@@ -918,14 +945,22 @@ struct RecordDetailView: View {
                     statusMessage: nil,
                     focusBinding: $focusedEditor,
                     editor: .summary,
-                    onExit: { focusedEditor = nil }
+                    onExit: { focusedEditor = nil },
+                    onCopy: {
+                        copySummary()
+                    },
+                    showCopied: showSummaryCopied
                 )
             } else {
                 MarkdownSummaryPreview(
                     markdownContent: summaryMarkdownContent,
                     plainText: summaryDraft,
                     placeholder: "No summary available yet.",
-                    onActivateEditing: activateSummaryEditing
+                    onActivateEditing: activateSummaryEditing,
+                    onCopy: {
+                        copySummary()
+                    },
+                    showCopied: showSummaryCopied
                 )
             }
 
@@ -1451,27 +1486,36 @@ struct RecordDetailView: View {
     }
 
     private func copyTranscription() {
-        let text = trimmedTranscriptionDraft
-        guard !text.isEmpty else { return }
-
-        commitPendingInlineEdits()
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        Logger.info("Transcription copied to clipboard.", category: .ui)
+        copyToClipboard(
+            text: trimmedTranscriptionDraft,
+            showCopiedBinding: { showTranscriptionCopied = $0 },
+            logMessage: "Transcription copied to clipboard."
+        )
     }
 
     private func copySummary() {
-        let text = trimmedSummaryDraft
+        copyToClipboard(
+            text: trimmedSummaryDraft,
+            showCopiedBinding: { showSummaryCopied = $0 },
+            logMessage: "Summary copied to clipboard."
+        )
+    }
+    
+    private func copyToClipboard(text: String, showCopiedBinding: @escaping (Bool) -> Void, logMessage: String) {
         guard !text.isEmpty else { return }
-
+        
         commitPendingInlineEdits()
-
+        
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        Logger.info("Summary copied to clipboard.", category: .ui)
+        Logger.info(logMessage, category: .ui)
+        
+        // Show copied indication
+        showCopiedBinding(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + copiedIndicationDuration) {
+            showCopiedBinding(false)
+        }
     }
 
     private func scheduleTranscriptionSave() {
