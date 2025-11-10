@@ -102,7 +102,7 @@ struct RecordDetailView: View {
                     Image(systemName: "gobackward.10")
                         .font(.system(size: 24))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(Color.secondary)
                 }
                 .buttonStyle(.plain)
                 .disabled(!playerManager.isPlaying)
@@ -117,7 +117,7 @@ struct RecordDetailView: View {
                     Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 44))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.primary)
                 }
                 .buttonStyle(.plain)
                 .disabled(!playerManager.isReady)
@@ -132,7 +132,7 @@ struct RecordDetailView: View {
                     Image(systemName: "goforward.10")
                         .font(.system(size: 24))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(playerManager.isPlaying ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(Color.secondary)
                 }
                 .buttonStyle(.plain)
                 .disabled(!playerManager.isPlaying)
@@ -922,7 +922,7 @@ struct RecordDetailView: View {
                 }
                 .frame(minWidth: 130)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(isTranscribing || record.fileURL == nil)
         }
@@ -986,7 +986,7 @@ struct RecordDetailView: View {
                     }
                     .frame(minWidth: 130)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .disabled(isSummarizing || !hasTranscriptionContent)
             }
