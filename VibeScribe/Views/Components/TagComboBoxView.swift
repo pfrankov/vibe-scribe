@@ -33,8 +33,6 @@ struct TagComboBoxView: NSViewRepresentable {
         combo.delegate = context.coordinator
         combo.completes = true   // enable native inline autocomplete
         combo.placeholderString = placeholder
-        combo.target = context.coordinator
-        combo.action = #selector(Coordinator.selectionChanged(_:))
         combo.numberOfVisibleItems = 8
         combo.stringValue = text
 
@@ -59,6 +57,11 @@ struct TagComboBoxView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSComboBox, context: Context) {
+        // Clean up event monitor if view is being disabled/removed
+        if !nsView.isEnabled {
+            context.coordinator.removeOutsideClickMonitor()
+        }
+        
         // Update placeholder
         if nsView.placeholderString != placeholder {
             nsView.placeholderString = placeholder
@@ -96,6 +99,10 @@ struct TagComboBoxView: NSViewRepresentable {
         var filtered: [String] = []
         var usage: [String: Int] = [:]
         var widthConstraint: NSLayoutConstraint?
+        weak var activeComboBox: NSComboBox?
+        var outsideClickMonitor: Any?
+        var dropdownOpenedByMouse = false
+        var isPopupVisible = false
 
         init(_ parent: TagComboBoxView) {
             self.parent = parent
@@ -104,26 +111,52 @@ struct TagComboBoxView: NSViewRepresentable {
             self.usage = parent.usageCounts
         }
 
-        // MARK: - Target/Action
-        @objc func selectionChanged(_ sender: NSComboBox) {
-            let selected = sender.indexOfSelectedItem >= 0 ? sender.objectValueOfSelectedItem as? String : nil
-            if let value = selected, !value.isEmpty {
-                parent.text = value
-                let ok = parent.onCommit(value)
-                if ok {
-                    parent.text = ""
-                    sender.stringValue = ""
-                    updateFilter(for: "")
-                    sender.reloadData()
-                    sender.noteNumberOfItemsChanged()
-                    updateWidth(for: sender, baseMin: parent.initialMinWidth, gap: parent.trailingGap)
+        deinit {
+            removeOutsideClickMonitor()
+        }
+
+        // MARK: - NSComboBoxDelegate
+        func comboBoxWillPopUp(_ notification: Notification) {
+            dropdownOpenedByMouse = Self.isMouseEvent(NSApp?.currentEvent)
+            // Don't show dropdown if there are no items to display
+            guard !filtered.isEmpty else {
+                // Cancel the popup by returning to the field
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let combo = notification.object as? NSComboBox else { return }
+                    self.preventDropdownDisplay(for: combo)
                 }
+                return
+            }
+            isPopupVisible = true
+        }
+
+        /// Prevents dropdown display when there are no items to show
+        private func preventDropdownDisplay(for combo: NSComboBox) {
+            combo.window?.makeFirstResponder(combo)
+        }
+
+        func comboBoxWillDismiss(_ notification: Notification) {
+            dropdownOpenedByMouse = false
+            isPopupVisible = false
+        }
+
+
+        func comboBoxSelectionDidChange(_ notification: Notification) {
+            guard dropdownOpenedByMouse,
+                  let combo = notification.object as? NSComboBox else { return }
+            DispatchQueue.main.async { [weak self, weak combo] in
+                guard let self, let combo else { return }
+                self.commitSelection(from: combo)
             }
         }
 
         // MARK: - NSControlTextEditingDelegate
         func controlTextDidBeginEditing(_ obj: Notification) {
             parent.onFocusChange(true)
+            if let field = obj.object as? NSComboBox {
+                activeComboBox = field
+                installOutsideClickMonitor(for: field)
+            }
         }
 
         func controlTextDidChange(_ obj: Notification) {
@@ -139,37 +172,189 @@ struct TagComboBoxView: NSViewRepresentable {
         func controlTextDidEndEditing(_ obj: Notification) {
             parent.onFocusChange(false)
             guard let field = obj.object as? NSComboBox else { return }
-            if !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let ok = parent.onCommit(nil)
-                if ok {
-                    parent.text = ""
-                    field.stringValue = ""
-                    updateFilter(for: "")
-                    field.reloadData()
-                    field.noteNumberOfItemsChanged()
-                    updateWidth(for: field, baseMin: parent.initialMinWidth, gap: parent.trailingGap)
-                }
+            activeComboBox = nil
+            removeOutsideClickMonitor()
+            
+            let trimmedText = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty else { return }
+            
+            let ok = parent.onCommit(nil)
+            if ok {
+                resetField(field)
             }
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            // Commit on Enter/Return
-            if commandSelector == #selector(NSResponder.insertNewline(_:)) ||
-               commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
-                let ok = parent.onCommit(nil)
-                if ok, let field = control as? NSComboBox {
-                    parent.text = ""
-                    field.stringValue = ""
-                    textView.string = ""
-                    updateFilter(for: "")
-                    field.reloadData()
-                    field.noteNumberOfItemsChanged()
-                    updateWidth(for: field, baseMin: parent.initialMinWidth, gap: parent.trailingGap)
-                }
+            switch commandSelector {
+            case #selector(NSResponder.moveDown(_:)):
+                return handleArrowDown(in: control)
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                return handleEnterKey(in: control, textView: textView)
+            case #selector(NSResponder.cancelOperation(_:)):
+                handleEscapeKey(in: control, textView: textView)
                 return true
+            default:
+                return false
             }
-            return false
         }
+
+        /// Handles arrow down key - prevents dropdown if no items
+        private func handleArrowDown(in control: NSControl) -> Bool {
+            return control is NSComboBox && filtered.isEmpty // Return true to prevent default behavior when no items
+        }
+
+        /// Handles Enter/Return key to commit selection or text
+        private func handleEnterKey(in control: NSControl, textView: NSTextView) -> Bool {
+            guard let combo = control as? NSComboBox else { return false }
+            
+            let value = selectedValue(from: combo)
+            parent.text = value ?? combo.stringValue
+            let ok = parent.onCommit(value)
+            
+            if ok {
+                resetField(combo, editor: textView)
+                dismissDropdown(for: combo)
+                if value != nil {
+                    dropdownOpenedByMouse = false
+                }
+            }
+            return true
+        }
+
+        /// Handles Escape key to abort editing
+        private func handleEscapeKey(in control: NSControl, textView: NSTextView) {
+            guard let field = control as? NSComboBox else { return }
+            resetField(field, editor: textView)
+            DispatchQueue.main.async {
+                field.window?.makeFirstResponder(nil)
+            }
+        }
+
+        // MARK: - Private helpers
+
+        /// Commits a selection from dropdown or typed text
+        private func commitSelection(from combo: NSComboBox) {
+            let value = selectedValue(from: combo) ?? trimmedNonEmpty(combo.stringValue)
+            guard let value else { return }
+
+            parent.text = value
+            let ok = parent.onCommit(value)
+            if ok {
+                resetField(combo)
+                dismissDropdown(for: combo)
+            }
+            dropdownOpenedByMouse = false
+        }
+
+        /// Resets the field state and clears content
+        private func resetField(_ field: NSComboBox, editor: NSText? = nil) {
+            parent.text = ""
+            field.stringValue = ""
+            
+            let targetEditor = editor as? NSTextView ?? field.currentEditor() as? NSTextView
+            targetEditor?.string = ""
+            targetEditor?.selectedRange = NSRange(location: 0, length: 0)
+            
+            updateFilter(for: "")
+            field.reloadData()
+            field.noteNumberOfItemsChanged()
+            updateWidth(for: field, baseMin: parent.initialMinWidth, gap: parent.trailingGap)
+        }
+
+        /// Installs a monitor to detect clicks outside the combo box
+        private func installOutsideClickMonitor(for combo: NSComboBox) {
+            removeOutsideClickMonitor()
+            outsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self, weak combo] event in
+                guard let self, let combo else { return event }
+                self.handleOutsideClick(event, combo: combo)
+                return event
+            }
+        }
+
+        /// Handles clicks outside the combo box to dismiss focus
+        /// - Parameter event: The mouse event
+        /// - Parameter combo: The combo box to check against
+        private func handleOutsideClick(_ event: NSEvent, combo: NSComboBox) {
+            guard event.window === combo.window,
+                  isComboFirstResponder(combo) else { return }
+            
+            // Convert from window coordinates (nil = window coordinate space)
+            let locationInWindow = event.locationInWindow
+            let convertedLocation = combo.convert(locationInWindow, from: nil)
+            guard !combo.bounds.contains(convertedLocation) else { return }
+            
+            DispatchQueue.main.async { [weak self, weak combo] in
+                guard let self, let combo, self.isComboFirstResponder(combo) else { return }
+                combo.window?.makeFirstResponder(nil)
+            }
+        }
+
+        /// Removes the outside click monitor
+        fileprivate func removeOutsideClickMonitor() {
+            if let monitor = outsideClickMonitor {
+                NSEvent.removeMonitor(monitor)
+                outsideClickMonitor = nil
+            }
+        }
+
+        /// Checks if the combo box or its editor is the first responder
+        private func isComboFirstResponder(_ combo: NSComboBox) -> Bool {
+            guard let responder = combo.window?.firstResponder else { return false }
+            return responder === combo ||
+                   (combo.currentEditor() != nil && responder === combo.currentEditor())
+        }
+
+        private static func isMouseEvent(_ event: NSEvent?) -> Bool {
+            guard let event else { return false }
+            switch event.type {
+            case .leftMouseDown, .leftMouseUp,
+                 .rightMouseDown, .rightMouseUp,
+                 .otherMouseDown, .otherMouseUp:
+                return true
+            default:
+                return false
+            }
+        }
+
+        /// Gets the selected value from the combo box if any
+        private func selectedValue(from combo: NSComboBox) -> String? {
+            let index = combo.indexOfSelectedItem
+            guard index >= 0 && index < filtered.count else { return nil }
+            return trimmedNonEmpty(filtered[index])
+        }
+
+        /// Trims whitespace and returns nil if empty
+        private func trimmedNonEmpty(_ string: String) -> String? {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        /// Dismisses the dropdown if visible
+        /// - Note: Uses private API selectors as a last resort; wrapped in main thread for safety
+        private func dismissDropdown(for combo: NSComboBox) {
+            guard isPopupVisible else { return }
+            isPopupVisible = false
+            dropdownOpenedByMouse = false
+            
+            guard let cell = combo.cell as? NSComboBoxCell else { return }
+            
+            // Try to dismiss using private API methods (thread-safe)
+            let dismissSelectors = [
+                NSSelectorFromString("dismissPopUp:"),
+                NSSelectorFromString("closePopUp:")
+            ]
+            
+            DispatchQueue.main.async {
+                for selector in dismissSelectors {
+                    if cell.responds(to: selector) {
+                        cell.perform(selector, with: nil)
+                        break
+                    }
+                }
+            }
+        }
+
 
         // MARK: - Filtering
         func updateFilter(for query: String) {
@@ -234,21 +419,29 @@ struct TagComboBoxView: NSViewRepresentable {
         }
 
         // MARK: - NSComboBoxDataSource
-        func numberOfItems(in comboBox: NSComboBox) -> Int { filtered.count }
 
+        /// Returns the number of items in the dropdown
+        func numberOfItems(in comboBox: NSComboBox) -> Int {
+            // Return 0 if filtered is empty to prevent empty dropdown
+            return filtered.isEmpty ? 0 : filtered.count
+        }
+
+        /// Returns the object value for the given index
         func comboBox(_ comboBox: NSComboBox, objectValueForItemAt index: Int) -> Any? {
-            guard index >= 0 && index < filtered.count else { return nil }
+            guard filtered.indices.contains(index) else { return nil }
             return filtered[index]
         }
 
+        /// Finds the index of an item with the given string value
         func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int {
-            if let idx = filtered.firstIndex(where: { $0.compare(string, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
-                return idx
-            }
-            return NSNotFound
+            filtered.firstIndex { 
+                $0.compare(string, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame 
+            } ?? NSNotFound
         }
 
+        /// Returns the completed string for autocomplete
         func comboBox(_ comboBox: NSComboBox, completedString string: String) -> String? {
+            guard !filtered.isEmpty else { return nil }
             let lower = string.lowercased()
             return allOptions.first { $0.lowercased().hasPrefix(lower) }
         }
