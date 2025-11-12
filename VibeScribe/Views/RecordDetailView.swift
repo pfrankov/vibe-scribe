@@ -530,7 +530,8 @@ struct RecordDetailView: View {
             Capsule(style: .continuous)
                 .stroke(tagChipBorderColor, lineWidth: 1)
         )
-        .foregroundStyle(Color.accentColor)
+        // Use neutral, non-accented styling for tag chips
+        .foregroundStyle(Color.primary)
         .shadow(color: tagChipShadowColor, radius: 6, x: 0, y: 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Tag: \(tag.name)")
@@ -611,8 +612,15 @@ struct RecordDetailView: View {
         isTagFieldFocused ? Color.accentColor : Color(NSColor.secondaryLabelColor)
     }
 
-    private var tagChipBackgroundColor: Color { tagColor(0.14, 0.24) }
-    private var tagChipBorderColor: Color { tagColor(0.26, 0.45) }
+    // Neutral chip colors (no accent tint)
+    private var tagChipBackgroundColor: Color {
+        // Subtle neutral fill that adapts to light/dark
+        Color(NSColor.labelColor).opacity(colorScheme == .dark ? 0.18 : 0.08)
+    }
+    private var tagChipBorderColor: Color {
+        // Use separator for a neutral outline
+        Color(NSColor.separatorColor).opacity(colorScheme == .dark ? 0.5 : 0.35)
+    }
     private var tagChipShadowColor: Color { Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08) }
 
     // NSComboBox-based suggestions: provide list of available tag names excluding already assigned
