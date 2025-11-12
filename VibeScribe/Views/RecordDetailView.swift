@@ -261,7 +261,6 @@ struct RecordDetailView: View {
                     .disableAutocorrection(true)
                     .background(Color.clear)
                     .padding(8)
-                    .padding(.trailing, 36) // Make room for copy button
                     .onExitCommand {
                         onExit?()
                     }
@@ -313,7 +312,9 @@ struct RecordDetailView: View {
                     .fill(Color(NSColor.textBackgroundColor))
 
                 ScrollView(.vertical) {
-                    Group {
+                    // Add internal padding to content, not the ScrollView itself,
+                    // so the scroll indicator reaches the field edge.
+                    VStack(alignment: .leading, spacing: 0) {
                         if let content = markdownContent {
                             Markdown(content)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -326,10 +327,10 @@ struct RecordDetailView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    .padding(8)
+                    .padding(.trailing, 36) // Reserve space for copy button without shrinking scroll area
                 }
                 .textSelection(.enabled)
-                .padding(8)
-                .padding(.trailing, 36) // Make room for copy button
                 
                 // Copy button overlay
                 if !trimmedText.isEmpty, let copyAction = onCopy {
