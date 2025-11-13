@@ -142,7 +142,7 @@ struct RecordingView: View {
             let wasRecording = recorderManager.isRecording
              
             if wasRecording {
-                print("RecordingView disappeared while recording. Cancelling.")
+                Logger.warning("RecordingView disappeared during active recording. Cancelling.", category: .ui)
                 cancelActiveRecording()
             }
         }

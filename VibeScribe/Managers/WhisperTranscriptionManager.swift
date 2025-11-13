@@ -56,9 +56,9 @@ enum TranscriptionError: Error {
 
 // Structure for real-time transcription updates
 struct TranscriptionUpdate: Sendable {
-    let isPartial: Bool     // Whether this is a partial or final result
-    let text: String        // The transcription text
-    let timestamp: Date     // When this update was received
+    let isPartial: Bool
+    let text: String
+    let timestamp: Date
     
     init(isPartial: Bool, text: String) {
         self.isPartial = isPartial
@@ -69,696 +69,449 @@ struct TranscriptionUpdate: Sendable {
 
 // MARK: - WhisperTranscriptionManager
 
-// Manager class for working with Whisper API with custom SSE support
-class WhisperTranscriptionManager: NSObject {
+final class WhisperTranscriptionManager: NSObject {
     static let shared = WhisperTranscriptionManager()
-    
-    // Cache for server SSE support to avoid repeated checks
-    private var serverSupportsSSE: [String: Bool] = [:]
-    private let cacheQueue = DispatchQueue(label: "whisper.cache.queue", attributes: .concurrent)
-    
-    // Custom URLSession with no timeout for long transcription tasks
+
+    // MARK: Caches and session
     private var urlSession: URLSession!
-    
-    // SSE streaming support
-    private var streamingCompletions: [Int: (Result<String, TranscriptionError>) -> Void] = [:]
-    private var streamingSubjects: [Int: PassthroughSubject<TranscriptionUpdate, TranscriptionError>] = [:]
-    private var streamingBuffers: [Int: String] = [:]
-    private var streamingTexts: [Int: String] = [:]
-    
-    // Retry support  
-    private var streamingRetryInfo: [Int: StreamingRetryInfo] = [:]
-    
-    // Struct to hold retry information
-    private struct StreamingRetryInfo {
+
+    // Server SSE capability cache
+    private var serverSSECache: [String: Bool] = [:]
+    private let serverCacheQueue = DispatchQueue(label: "vibescribe.whisper.sse.cache", attributes: .concurrent)
+
+    // Streaming task contexts keyed by task identifier
+    private struct StreamingContext {
+        var subject: PassthroughSubject<TranscriptionUpdate, TranscriptionError>?
+        var completion: ((Result<String, TranscriptionError>) -> Void)?
+        var buffer: String = ""
+        var accumulated: String = ""
+        var retry: RetryInfo?
+    }
+    private struct RetryInfo {
         let audioURL: URL
-        let serverURL: URL  
+        let serverURL: URL
         let apiKey: String
         let model: String
-        let subject: PassthroughSubject<TranscriptionUpdate, TranscriptionError>
         let maxRetries: Int
-        let currentRetry: Int
+        var currentRetry: Int
     }
-    
+    private var contexts: [Int: StreamingContext] = [:]
+    private let contextsQueue = DispatchQueue(label: "vibescribe.whisper.contexts")
+
     override init() {
         super.init()
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 0  // No timeout
-        config.timeoutIntervalForResource = 0  // No timeout
-        self.urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        config.timeoutIntervalForRequest = 0
+        config.timeoutIntervalForResource = 0
+        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
-    
-    // MARK: - Main API Methods
-    
-    // Main transcription method - always tries SSE first, then fallback
+
+    // MARK: Public API
     func transcribeAudio(
         audioURL: URL,
         settings: AppSettings,
         useStreaming: Bool = true
     ) -> AnyPublisher<String, TranscriptionError> {
-        print("🎯 Starting transcription for: \(audioURL.lastPathComponent)")
-        
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            Logger.error("Audio file not found at path: \(audioURL.path)", category: .transcription)
+            return Fail(error: .invalidAudioFile).eraseToAnyPublisher()
+        }
+
         if !useStreaming {
-            return transcribeAudioRegular(
-                audioURL: audioURL,
-                whisperBaseURL: settings.resolvedWhisperBaseURL,
-                apiKey: settings.resolvedWhisperAPIKey,
-                model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
-            )
+            return transcribeRegular(audioURL: audioURL,
+                                     baseURL: settings.resolvedWhisperBaseURL,
+                                     apiKey: settings.resolvedWhisperAPIKey,
+                                     model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel,
+                                     responseFormat: "srt")
         }
-        
-        // Check if we already know this server doesn't support SSE
+
         let serverKey = settings.resolvedWhisperBaseURL
-        if let cachedResult = getCachedSSESupport(for: serverKey), !cachedResult {
-            print("📋 Server \(serverKey) known to not support SSE, using regular mode")
-            return transcribeAudioRegular(
-                audioURL: audioURL,
-                whisperBaseURL: settings.resolvedWhisperBaseURL,
-                apiKey: settings.resolvedWhisperAPIKey,
-                model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
-            )
+        if let supportsSSE = getSSESupport(for: serverKey), supportsSSE == false {
+            Logger.info("Server \(serverKey) known to not support SSE; using regular mode", category: .transcription)
+            return transcribeRegular(audioURL: audioURL,
+                                     baseURL: settings.resolvedWhisperBaseURL,
+                                     apiKey: settings.resolvedWhisperAPIKey,
+                                     model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel,
+                                     responseFormat: "srt")
         }
-        
-        // Always try SSE streaming first (same endpoint, stream=true)
-        print("🚀 Attempting SSE streaming with stream=true parameter...")
-        return transcribeAudioStreaming(
-            audioURL: audioURL,
-            whisperBaseURL: settings.resolvedWhisperBaseURL,
-            apiKey: settings.resolvedWhisperAPIKey,
-            model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
-        )
-        .catch { error -> AnyPublisher<String, TranscriptionError> in
+
+        Logger.info("Attempting SSE streaming for \(audioURL.lastPathComponent)", category: .transcription)
+        return transcribeStreaming(audioURL: audioURL,
+                                   baseURL: settings.resolvedWhisperBaseURL,
+                                   apiKey: settings.resolvedWhisperAPIKey,
+                                   model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel)
+        .catch { [weak self] error -> AnyPublisher<String, TranscriptionError> in
+            guard let self else { return Fail(error: error).eraseToAnyPublisher() }
             if case .streamingNotSupported = error {
-                print("⚠️ SSE streaming not supported, falling back to regular mode")
-                self.setCachedSSESupport(for: serverKey, supports: false)
-                
-                return self.transcribeAudioRegular(
-                    audioURL: audioURL,
-                    whisperBaseURL: settings.resolvedWhisperBaseURL,
-                    apiKey: settings.resolvedWhisperAPIKey,
-                    model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel
-                )
-            } else {
-                print("❌ SSE streaming failed with error: \(error.description)")
-                return Fail(error: error).eraseToAnyPublisher()
+                self.setSSESupport(false, for: serverKey)
+                Logger.warning("SSE not supported; falling back to regular", category: .transcription)
+                return self.transcribeRegular(audioURL: audioURL,
+                                              baseURL: settings.resolvedWhisperBaseURL,
+                                              apiKey: settings.resolvedWhisperAPIKey,
+                                              model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel,
+                                              responseFormat: "srt")
             }
+            return Fail(error: error).eraseToAnyPublisher()
         }
         .eraseToAnyPublisher()
     }
-    
-    // Real-time streaming method with intermediate updates using custom SSE
+
     func transcribeAudioRealTime(audioURL: URL, settings: AppSettings) -> AnyPublisher<TranscriptionUpdate, TranscriptionError> {
-        print("⚡ Starting REAL-TIME streaming transcription for: \(audioURL.lastPathComponent)")
-        
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
-            print("❌ Error: Audio file not found at path: \(audioURL.path)")
-            return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
+            Logger.error("Audio file not found at path: \(audioURL.path)", category: .transcription)
+            return Fail(error: .invalidAudioFile).eraseToAnyPublisher()
         }
-        
+
         guard let serverURL = APIURLBuilder.buildURL(baseURL: settings.resolvedWhisperBaseURL, endpoint: "audio/transcriptions") else {
-            print("❌ Error: Invalid Whisper API base URL: \(settings.resolvedWhisperBaseURL)")
-            return Fail(error: TranscriptionError.networkError(NSError(domain: "InvalidURL", code: -1, userInfo: nil))).eraseToAnyPublisher()
+            Logger.error("Invalid Whisper API base URL: \(settings.resolvedWhisperBaseURL)", category: .transcription)
+            return Fail(error: .networkError(NSError(domain: "InvalidURL", code: -1))).eraseToAnyPublisher()
         }
-        
-        print("🔗 Using transcription endpoint with stream=true for REAL-TIME: \(serverURL.absoluteString)")
-        
-        // Use PassthroughSubject to send multiple updates
+
         let subject = PassthroughSubject<TranscriptionUpdate, TranscriptionError>()
-        
-        Task {
-            await self.startStreamingWithRetry(
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.startStreaming(
                 audioURL: audioURL,
                 serverURL: serverURL,
                 apiKey: settings.resolvedWhisperAPIKey,
                 model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel,
                 subject: subject,
-                maxRetries: 3
+                completion: nil,
+                retry: RetryInfo(audioURL: audioURL, serverURL: serverURL, apiKey: settings.resolvedWhisperAPIKey, model: settings.whisperModel.isEmpty ? "whisper-1" : settings.whisperModel, maxRetries: 3, currentRetry: 0)
             )
         }
-        
+
         return subject.eraseToAnyPublisher()
     }
-    
-    // MARK: - Private Methods
-    
-    // SSE streaming transcription using custom SSE implementation
-    private func transcribeAudioStreaming(
+
+    // MARK: Regular transcription
+    private func transcribeRegular(
         audioURL: URL,
-        whisperBaseURL: String,
+        baseURL: String,
+        apiKey: String,
+        model: String,
+        responseFormat: String
+    ) -> AnyPublisher<String, TranscriptionError> {
+        guard let serverURL = APIURLBuilder.buildURL(baseURL: baseURL, endpoint: "audio/transcriptions") else {
+            Logger.error("Invalid Whisper API base URL: \(baseURL)", category: .transcription)
+            return Fail(error: .networkError(NSError(domain: "InvalidURL", code: -1))).eraseToAnyPublisher()
+        }
+
+        do {
+            var request = try buildMultipartRequest(
+                url: serverURL,
+                apiKey: apiKey,
+                headers: [:],
+                fields: ["model": model, "response_format": responseFormat],
+                fileParam: "file",
+                fileURL: audioURL,
+                fileMime: "audio/m4a"
+            )
+            request.timeoutInterval = 0
+
+            return urlSession.dataTaskPublisher(for: request)
+                .tryMap { output -> Data in
+                    guard let http = output.response as? HTTPURLResponse else {
+                        throw TranscriptionError.invalidResponse
+                    }
+                    guard 200..<300 ~= http.statusCode else {
+                        let message = String(data: output.data, encoding: .utf8) ?? "Status code: \(http.statusCode)"
+                        throw TranscriptionError.serverError(message)
+                    }
+                    return output.data
+                }
+                .tryMap { data -> String in
+                    guard let text = String(data: data, encoding: .utf8) else {
+                        throw TranscriptionError.dataParsingError("Could not decode UTF-8 text")
+                    }
+                    Logger.info("Received transcription (\(text.count) chars)", category: .transcription)
+                    return text
+                }
+                .mapError { error in
+                    (error as? TranscriptionError) ?? .networkError(error)
+                }
+                .eraseToAnyPublisher()
+        } catch {
+            return Fail(error: .invalidAudioFile).eraseToAnyPublisher()
+        }
+    }
+
+    // MARK: Streaming transcription
+    private func transcribeStreaming(
+        audioURL: URL,
+        baseURL: String,
         apiKey: String,
         model: String
     ) -> AnyPublisher<String, TranscriptionError> {
-        
-        guard FileManager.default.fileExists(atPath: audioURL.path) else {
-            print("❌ Error: Audio file not found at path: \(audioURL.path)")
-            return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
+        guard let serverURL = APIURLBuilder.buildURL(baseURL: baseURL, endpoint: "audio/transcriptions") else {
+            Logger.error("Invalid Whisper API base URL: \(baseURL)", category: .transcription)
+            return Fail(error: .networkError(NSError(domain: "InvalidURL", code: -1))).eraseToAnyPublisher()
         }
-        
-        // Build API URL (same endpoint as regular transcription)
-        guard let serverURL = APIURLBuilder.buildURL(baseURL: whisperBaseURL, endpoint: "audio/transcriptions") else {
-            print("❌ Error: Invalid Whisper API base URL: \(whisperBaseURL)")
-            return Fail(error: TranscriptionError.networkError(NSError(domain: "InvalidURL", code: -1, userInfo: nil))).eraseToAnyPublisher()
-        }
-        
-        print("🔗 Using transcription endpoint with stream=true: \(serverURL.absoluteString)")
-        
-        return Future<String, TranscriptionError> { promise in
-            Task {
+
+        return Future<String, TranscriptionError> { [weak self] promise in
+            guard let self else { return }
+            Task { [weak self] in
+                guard let self else { return }
                 do {
-                    let request = try self.buildStreamingRequest(
+                    var request = try self.buildMultipartRequest(
                         url: serverURL,
-                        audioURL: audioURL,
                         apiKey: apiKey,
-                        model: model
+                        headers: [
+                            "Accept": "text/event-stream",
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive"
+                        ],
+                        fields: [
+                            "stream": "true",
+                            "model": model,
+                            "response_format": "text"
+                        ],
+                        fileParam: "file",
+                        fileURL: audioURL,
+                        fileMime: "audio/m4a"
                     )
-                    
-                    // Use custom SSE implementation with URLSessionDataDelegate
-                    let dataTask = self.urlSession.dataTask(with: request)
-                    let taskId = dataTask.taskIdentifier
-                    
-                    // Store the completion handler for this task
-                    self.streamingCompletions[taskId] = { result in
-                        promise(result)
+                    request.timeoutInterval = 0
+
+                    let task = self.urlSession.dataTask(with: request)
+                    let id = task.taskIdentifier
+                    self.contextsQueue.sync {
+                        self.contexts[id] = StreamingContext(subject: nil, completion: { result in
+                            promise(result)
+                        }, buffer: "", accumulated: "", retry: nil)
                     }
-                    
-                    // Start the task
-                    dataTask.resume()
-                    print("✅ SSE streaming started, task ID: \(taskId)")
-                    
+                    task.resume()
+                    Logger.info("SSE streaming started (taskId=\(id))", category: .transcription)
                 } catch {
-                    print("❌ Streaming transcription setup failed: \(error.localizedDescription)")
                     promise(.failure(.networkError(error)))
                 }
             }
         }
         .eraseToAnyPublisher()
     }
-    
 
-    
-    // Regular (non-streaming) transcription method
-    private func transcribeAudioRegular(audioURL: URL, whisperBaseURL: String, apiKey: String = "", model: String = "whisper-1", responseFormat: String = "srt") -> AnyPublisher<String, TranscriptionError> {
-        // Check if the file exists
-        guard FileManager.default.fileExists(atPath: audioURL.path) else {
-            print("Error: Audio file not found at path: \(audioURL.path)")
-            return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
-        }
-        
-        // Build the full URL with endpoint
-        guard let serverURL = APIURLBuilder.buildURL(baseURL: whisperBaseURL, endpoint: "audio/transcriptions") else {
-            print("Error: Invalid Whisper API base URL: \(whisperBaseURL)")
-            return Fail(error: TranscriptionError.networkError(NSError(domain: "InvalidURL", code: -1, userInfo: nil))).eraseToAnyPublisher()
-        }
-        
-        print("Starting transcription for: \(audioURL.path), using Whisper API at URL: \(serverURL.absoluteString)")
-        
-        // Create multipart request for sending audio
-        var request = URLRequest(url: serverURL)
-        let boundary = UUID().uuidString
-        
-        request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        
-        // Add API Key if provided
-        if !apiKey.isEmpty {
-            // Sanitize API key to prevent header injection
-            let cleanAPIKey = SecurityUtils.sanitizeAPIKey(apiKey)
-            request.setValue("Bearer \(cleanAPIKey)", forHTTPHeaderField: "Authorization")
-            print("Request will use API key: \(SecurityUtils.maskAPIKey(cleanAPIKey))")
-        } else {
-            print("No API key provided for request")
-        }
-        
-        // Get audio file data
-        do {
-            let audioData = try Data(contentsOf: audioURL)
-            print("Loaded audio data, size: \(ByteCountFormatter.string(fromByteCount: Int64(audioData.count), countStyle: .file))")
-            
-            var body = Data()
-            
-            // Add model parameter
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(model)\r\n".data(using: .utf8)!)
-            
-            // Add response_format parameter
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(responseFormat)\r\n".data(using: .utf8)!)
-            
-
-            // Add file
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
-            body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
-            body.append(audioData)
-            body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-            
-            request.httpBody = body
-            
-            // Output request information for debugging
-            print("Request headers: \(request.allHTTPHeaderFields ?? [:])")
-            print("Request body size: \(ByteCountFormatter.string(fromByteCount: Int64(body.count), countStyle: .file))")
-            
-            return urlSession.dataTaskPublisher(for: request)
-                .tryMap { data, response -> Data in
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        print("Error: Invalid response type")
-                        throw TranscriptionError.invalidResponse
-                    }
-                    
-                    print("Response status code: \(httpResponse.statusCode)")
-                    print("Response headers: \(httpResponse.allHeaderFields)")
-                    
-                    if (200..<300).contains(httpResponse.statusCode) {
-                        // Check that data is not empty
-                        guard !data.isEmpty else {
-                            print("Error: Empty response data")
-                            throw TranscriptionError.invalidResponse
-                        }
-                        
-                        // Log the size of received data
-                        print("Response data size: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))")
-                        
-                        return data
-                    } else {
-                        if let errorMessage = String(data: data, encoding: .utf8) {
-                            print("Error response: \(errorMessage)")
-                            throw TranscriptionError.serverError(errorMessage)
-                        } else {
-                            throw TranscriptionError.serverError("Status code: \(httpResponse.statusCode)")
-                        }
-                    }
-                }
-                .tryMap { data -> String in
-                    // Try to parse the response
-                    guard let responseText = String(data: data, encoding: .utf8) else {
-                        print("Error: Could not decode response data as UTF-8 string")
-                        throw TranscriptionError.dataParsingError("Could not decode response as UTF-8 string")
-                    }
-                    
-                    // For SRT format, check its structure
-                    if responseFormat == "srt" {
-                        if responseText.contains("-->") && responseText.contains("\n\n") {
-                            // Looks like proper SRT format
-                            print("Response appears to be valid SRT format, length: \(responseText.count) characters")
-                        } else {
-                            print("Warning: Response doesn't appear to be in SRT format: \(responseText.prefix(100))...")
-                        }
-                    } else {
-                        // For other formats, log the beginning of the response
-                        print("Response format: \(responseFormat), preview: \(responseText.prefix(100))...")
-                    }
-                    
-                    // Extract only text from SRT if required
-                    // In this case, return as is, but SRT parsing can be added
-                    return responseText
-                }
-                .mapError { error -> TranscriptionError in
-                    if let transcriptionError = error as? TranscriptionError {
-                        return transcriptionError
-                    } else {
-                        print("Mapped error: \(error.localizedDescription)")
-                        return TranscriptionError.networkError(error)
-                    }
-                }
-                .eraseToAnyPublisher()
-        } catch {
-            print("Error loading audio file: \(error.localizedDescription)")
-            return Fail(error: TranscriptionError.invalidAudioFile).eraseToAnyPublisher()
-        }
-    }
-    
-    // Helper method for parsing SRT format and extracting clean text
-    func extractTextFromSRT(_ srtContent: String) -> String {
-        // Simple SRT format parsing - split into blocks and extract only text
-        let blocks = srtContent.components(separatedBy: "\n\n")
-        var extractedText = ""
-        
-        for block in blocks {
-            let lines = block.components(separatedBy: "\n")
-            // Skip the first two lines (number and timecode), take the rest as text
-            if lines.count > 2 {
-                let textLines = lines.dropFirst(2).joined(separator: " ")
-                extractedText += textLines + " "
-            }
-        }
-        
-        return extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    // MARK: - Helper Methods
-    
-    // Build multipart request with stream=true parameter
-    private func buildStreamingRequest(
+    // MARK: Multipart builder
+    private func buildMultipartRequest(
         url: URL,
-        audioURL: URL,
         apiKey: String,
-        model: String
+        headers: [String: String],
+        fields: [String: String],
+        fileParam: String,
+        fileURL: URL,
+        fileMime: String
     ) throws -> URLRequest {
-        let audioData = try Data(contentsOf: audioURL)
-        print("📊 Loaded audio data, size: \(ByteCountFormatter.string(fromByteCount: Int64(audioData.count), countStyle: .file))")
-        
-        var request = URLRequest(url: url)
+        let audioData = try Data(contentsOf: fileURL)
         let boundary = UUID().uuidString
-        
+
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        request.setValue("keep-alive", forHTTPHeaderField: "Connection")
-        
-        // Add API Key if provided
+        for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }
         if !apiKey.isEmpty {
-            // Sanitize API key to prevent header injection
-            let cleanAPIKey = SecurityUtils.sanitizeAPIKey(apiKey)
-            request.setValue("Bearer \(cleanAPIKey)", forHTTPHeaderField: "Authorization")
-            print("Request will use API key: \(SecurityUtils.maskAPIKey(cleanAPIKey))")
-        } else {
-            print("No API key provided for request")
+            let clean = SecurityUtils.sanitizeAPIKey(apiKey)
+            request.setValue("Bearer \(clean)", forHTTPHeaderField: "Authorization")
+            Logger.debug("Using Whisper API key \(SecurityUtils.maskAPIKey(clean))", category: .security)
         }
-        
+
         var body = Data()
-        
-        // Add streaming parameter
+        for (name, value) in fields {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"stream\"\r\n\r\n".data(using: .utf8)!)
-        body.append("true\r\n".data(using: .utf8)!)
-        
-        // Add model parameter
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(model)\r\n".data(using: .utf8)!)
-        
-        // Add response format as text for streaming
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
-        body.append("text\r\n".data(using: .utf8)!)
-        
-        // Add audio file
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(fileParam)\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(fileMime)\r\n\r\n".data(using: .utf8)!)
         body.append(audioData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        
+
         request.httpBody = body
-        
-        print("📡 Streaming request headers: \(request.allHTTPHeaderFields ?? [:])")
-        print("📦 Request body size: \(ByteCountFormatter.string(fromByteCount: Int64(body.count), countStyle: .file))")
-        
         return request
     }
-    
-    // Parse streaming SSE data into TranscriptionUpdate
-    private func parseStreamingData(_ data: String) -> TranscriptionUpdate? {
-        // Handle OpenAI's data-only streaming format
-        if data.hasPrefix("{") {
-            // Try to parse as JSON
-            if let jsonData = data.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                
-                // Extract text from various possible JSON structures
+
+    // MARK: SRT text extraction
+    func extractTextFromSRT(_ srtContent: String) -> String {
+        let blocks = srtContent.components(separatedBy: "\n\n")
+        var extracted = ""
+        for block in blocks {
+            let lines = block.components(separatedBy: "\n")
+            if lines.count > 2 {
+                let text = lines.dropFirst(2).joined(separator: " ")
+                extracted += text + " "
+            }
+        }
+        return extracted.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: SSE helpers
+    private func parseEvent(_ raw: String) -> TranscriptionUpdate? {
+        if raw == "[DONE]" { return nil }
+        if raw.hasPrefix("{") {
+            if let data = raw.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let text = json["text"] as? String {
-                    let isPartial = json["partial"] as? Bool ?? true // Default to partial for streaming
+                    let isPartial = json["partial"] as? Bool ?? true
                     return TranscriptionUpdate(isPartial: isPartial, text: text)
                 }
-                
-                // Handle OpenAI streaming format
                 if let choices = json["choices"] as? [[String: Any]],
-                   let firstChoice = choices.first,
-                   let text = firstChoice["text"] as? String {
+                   let first = choices.first,
+                   let text = first["text"] as? String {
                     let isPartial = json["partial"] as? Bool ?? true
                     return TranscriptionUpdate(isPartial: isPartial, text: text)
                 }
             }
+        } else {
+            let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !clean.isEmpty { return TranscriptionUpdate(isPartial: true, text: clean) }
         }
-        
-        // Handle plain text data - all chunks are partial by default in streaming
-        if !data.isEmpty && data != "[DONE]" {
-            let cleanText = data.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleanText.isEmpty {
-                // All streaming chunks are partial by default
-                // Only mark as final when connection closes or we get explicit signal
-                return TranscriptionUpdate(isPartial: true, text: cleanText)
-            }
-        }
-        
         return nil
     }
-    
-    // Thread-safe cache methods
-    private func getCachedSSESupport(for server: String) -> Bool? {
-        return cacheQueue.sync {
-            return serverSupportsSSE[server]
-        }
+
+    private func getSSESupport(for server: String) -> Bool? {
+        serverCacheQueue.sync { serverSSECache[server] }
     }
-    
-    private func setCachedSSESupport(for server: String, supports: Bool) {
-        cacheQueue.async(flags: .barrier) {
-            self.serverSupportsSSE[server] = supports
-            print("📋 Cached SSE support for \(server): \(supports)")
-        }
+    private func setSSESupport(_ supports: Bool, for server: String) {
+        serverCacheQueue.async(flags: .barrier) { self.serverSSECache[server] = supports }
     }
-    
-    // MARK: - Retry Logic for Streaming
-    
-    private func startStreamingWithRetry(
+
+    private func startStreaming(
         audioURL: URL,
         serverURL: URL,
         apiKey: String,
         model: String,
-        subject: PassthroughSubject<TranscriptionUpdate, TranscriptionError>,
-        maxRetries: Int,
-        currentRetry: Int = 0
+        subject: PassthroughSubject<TranscriptionUpdate, TranscriptionError>?,
+        completion: ((Result<String, TranscriptionError>) -> Void)?,
+        retry: RetryInfo?
     ) async {
         do {
-            let request = try self.buildStreamingRequest(
+            var request = try buildMultipartRequest(
                 url: serverURL,
-                audioURL: audioURL,
                 apiKey: apiKey,
-                model: model
+                headers: [
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive"
+                ],
+                fields: [
+                    "stream": "true",
+                    "model": model,
+                    "response_format": "text"
+                ],
+                fileParam: "file",
+                fileURL: audioURL,
+                fileMime: "audio/m4a"
             )
-            
-            // Use custom SSE implementation with URLSessionDataDelegate
-            let dataTask = self.urlSession.dataTask(with: request)
-            let taskId = dataTask.taskIdentifier
-            
-            // Store the subject for this task
-            self.streamingSubjects[taskId] = subject
-            
-            // Store retry info for this task
-            self.streamingRetryInfo[taskId] = StreamingRetryInfo(
-                audioURL: audioURL,
-                serverURL: serverURL,
-                apiKey: apiKey,
-                model: model,
-                subject: subject,
-                maxRetries: maxRetries,
-                currentRetry: currentRetry
-            )
-            
-            // Start the task
-            dataTask.resume()
-            print("✅ Real-time SSE streaming started, task ID: \(taskId), retry: \(currentRetry)/\(maxRetries)")
-            
-        } catch {
-            print("❌ Real-time transcription setup failed: \(error.localizedDescription)")
-            if currentRetry < maxRetries {
-                let delay = Double(currentRetry + 1) * 2.0 // 2, 4, 6 seconds
-                print("🔄 Retrying in \(delay) seconds... (\(currentRetry + 1)/\(maxRetries))")
-                
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                await startStreamingWithRetry(
-                    audioURL: audioURL,
-                    serverURL: serverURL,
-                    apiKey: apiKey,
-                    model: model,
-                    subject: subject,
-                    maxRetries: maxRetries,
-                    currentRetry: currentRetry + 1
-                )
-            } else {
-                print("❌ All retries exhausted, failing transcription")
-                subject.send(completion: .failure(.networkError(error)))
+            request.timeoutInterval = 0
+
+            let task = urlSession.dataTask(with: request)
+            let id = task.taskIdentifier
+            contextsQueue.sync {
+                contexts[id] = StreamingContext(subject: subject, completion: completion, buffer: "", accumulated: "", retry: retry)
             }
+            task.resume()
+            Logger.info("SSE streaming started (taskId=\(id))", category: .transcription)
+        } catch {
+            if let subject { subject.send(completion: .failure(.networkError(error))) }
+            if let completion { completion(.failure(.networkError(error))) }
         }
     }
 }
 
 // MARK: - URLSessionDataDelegate
 extension WhisperTranscriptionManager: URLSessionDataDelegate {
-    
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        let taskId = dataTask.taskIdentifier
-        
-        // Convert data to string
-        guard let sseData = String(data: data, encoding: .utf8) else { return }
-        
-        // Append to buffer
-        if streamingBuffers[taskId] == nil {
-            streamingBuffers[taskId] = ""
-        }
-        streamingBuffers[taskId]! += sseData
-        
-        // Process SSE events
-        if let events = parseSSEBuffer(streamingBuffers[taskId]!) {
-            // Update buffer with remaining data
-            streamingBuffers[taskId] = events.remainder
-            
-            // Process each complete event
-            for eventData in events.events {
-                print("📨 SSE Event: '\(eventData)'")
-                
-                if let update = parseStreamingData(eventData) {
-                    // Send update to subject for real-time display
-                    if let subject = streamingSubjects[taskId] {
-                        subject.send(update)
-                    }
-                    
-                    // Accumulate text for completion handlers
-                    if streamingTexts[taskId] == nil {
-                        streamingTexts[taskId] = ""
-                    }
-                    if !update.text.isEmpty {
-                        streamingTexts[taskId]! += (streamingTexts[taskId]!.isEmpty ? "" : " ") + update.text
-                        print("🔄 Accumulated: \(streamingTexts[taskId]!.count) chars")
-                    }
-                }
-            }
-        }
-    }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        let taskId = task.taskIdentifier
-        
-        if let error = error {
-            print("❌ SSE task \(taskId) completed with error: \(error.localizedDescription)")
-            
-            // Check if we should retry this connection
-            if let retryInfo = streamingRetryInfo[taskId], 
-               retryInfo.currentRetry < retryInfo.maxRetries {
-                
-                let nextRetry = retryInfo.currentRetry + 1
-                let delay = Double(nextRetry) * 2.0 // 2, 4, 6 seconds
-                print("🔄 Connection lost, retrying in \(delay) seconds... (\(nextRetry)/\(retryInfo.maxRetries))")
-                
-                Task {
-                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    await startStreamingWithRetry(
-                        audioURL: retryInfo.audioURL,
-                        serverURL: retryInfo.serverURL,
-                        apiKey: retryInfo.apiKey,
-                        model: retryInfo.model,
-                        subject: retryInfo.subject,
-                        maxRetries: retryInfo.maxRetries,
-                        currentRetry: nextRetry
-                    )
-                }
-                
-                // Only cleanup buffers for this attempt, keep subject/completion for retry
-                streamingBuffers.removeValue(forKey: taskId)
-                streamingTexts.removeValue(forKey: taskId)
-                streamingRetryInfo.removeValue(forKey: taskId)
-                return
-            }
-            
-            // No more retries, notify about failure
-            if let subject = streamingSubjects[taskId] {
-                subject.send(completion: .failure(.streamingError(error.localizedDescription)))
-            }
-            
-            if let completion = streamingCompletions[taskId] {
-                completion(.failure(.streamingError(error.localizedDescription)))
-            }
-        } else {
-            print("📡 SSE task \(taskId) completed successfully")
-            
-            // Process any remaining buffer content (last chunk might be here!)
-            if let buffer = streamingBuffers[taskId], !buffer.isEmpty {
-                print("🔍 Processing final buffer content: '\(buffer)'")
-                
-                // Parse any remaining SSE data in buffer
-                let lines = buffer.components(separatedBy: "\n")
-                for line in lines {
-                    if line.hasPrefix("data: ") {
-                        let eventData = String(line.dropFirst(6)) // Remove "data: " prefix
-                        print("📨 Final SSE Event: '\(eventData)'")
-                        
-                        if let update = parseStreamingData(eventData) {
-                            // Send update to subject for real-time display
-                            if let subject = streamingSubjects[taskId] {
-                                subject.send(update)
-                            }
-                            
-                            // Accumulate text for completion handlers
-                            if streamingTexts[taskId] == nil {
-                                streamingTexts[taskId] = ""
-                            }
-                            if !update.text.isEmpty {
-                                streamingTexts[taskId]! += (streamingTexts[taskId]!.isEmpty ? "" : " ") + update.text
-                                print("🔄 Final accumulated: \(streamingTexts[taskId]!.count) chars")
-                            }
+        let id = dataTask.taskIdentifier
+        guard let chunk = String(data: data, encoding: .utf8) else { return }
+
+        contextsQueue.sync {
+            var ctx = contexts[id] ?? StreamingContext()
+            ctx.buffer += chunk
+
+            // Split events by blank line
+            let blocks = ctx.buffer.components(separatedBy: "\n\n")
+            // Keep last as remainder
+            ctx.buffer = blocks.last ?? ""
+            let completeBlocks = blocks.dropLast()
+
+            for block in completeBlocks {
+                for line in block.components(separatedBy: "\n") {
+                    guard line.hasPrefix("data:") else { continue }
+                    let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    if let update = parseEvent(payload) {
+                        if let subject = ctx.subject { subject.send(update) }
+                        if !update.text.isEmpty {
+                            ctx.accumulated += (ctx.accumulated.isEmpty ? "" : " ") + update.text
                         }
                     }
                 }
             }
-            
-            // Send final accumulated text
-            let finalText = streamingTexts[taskId] ?? ""
-            
-            if let subject = streamingSubjects[taskId] {
-                if !finalText.isEmpty {
-                    let finalUpdate = TranscriptionUpdate(isPartial: false, text: finalText)
-                    subject.send(finalUpdate)
-                }
-                subject.send(completion: .finished)
-            }
-            
-            if let completion = streamingCompletions[taskId] {
-                if !finalText.isEmpty {
-                    completion(.success(finalText))
-                } else {
-                    completion(.failure(.streamingNotSupported))
-                }
-            }
+
+            contexts[id] = ctx
         }
-        
-        // Clean up
-        streamingCompletions.removeValue(forKey: taskId)
-        streamingSubjects.removeValue(forKey: taskId)
-        streamingBuffers.removeValue(forKey: taskId)
-        streamingTexts.removeValue(forKey: taskId)
-        streamingRetryInfo.removeValue(forKey: taskId)
     }
-    
-    // Parse SSE buffer and extract complete events
-    private func parseSSEBuffer(_ buffer: String) -> (events: [String], remainder: String)? {
-        var events: [String] = []
-        var remainder = buffer
-        
-        // Split by double newlines (SSE event separator)
-        let eventBlocks = buffer.components(separatedBy: "\n\n")
-        
-        // Process all complete events (all but the last block)
-        for i in 0..<eventBlocks.count - 1 {
-            let block = eventBlocks[i]
-            
-            // Extract data from SSE block
-            let lines = block.components(separatedBy: "\n")
-            for line in lines {
-                if line.hasPrefix("data: ") {
-                    let eventData = String(line.dropFirst(6)) // Remove "data: " prefix
-                    events.append(eventData)
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let id = task.taskIdentifier
+
+        contextsQueue.sync {
+            guard var ctx = contexts[id] else { return }
+
+            if let error = error {
+                Logger.warning("SSE task \(id) error: \(error.localizedDescription)", category: .transcription)
+
+                if var retry = ctx.retry, retry.currentRetry < retry.maxRetries {
+                    retry.currentRetry += 1
+                    contexts[id] = nil // Cleanup this attempt
+                    Task { [retry, ctx] in
+                        let delay = Double(retry.currentRetry) * 2.0
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        await self.startStreaming(audioURL: retry.audioURL,
+                                                  serverURL: retry.serverURL,
+                                                  apiKey: retry.apiKey,
+                                                  model: retry.model,
+                                                  subject: ctx.subject,
+                                                  completion: ctx.completion,
+                                                  retry: retry)
+                    }
+                    return
+                }
+
+                if let subject = ctx.subject {
+                    subject.send(completion: .failure(.streamingError(error.localizedDescription)))
+                }
+                if let completion = ctx.completion {
+                    completion(.failure(.streamingError(error.localizedDescription)))
+                }
+            } else {
+                // Flush remaining buffer lines
+                for line in ctx.buffer.components(separatedBy: "\n") where line.hasPrefix("data:") {
+                    let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    if let update = parseEvent(payload) {
+                        if let subject = ctx.subject { subject.send(update) }
+                        if !update.text.isEmpty {
+                            ctx.accumulated += (ctx.accumulated.isEmpty ? "" : " ") + update.text
+                        }
+                    }
+                }
+
+                if let subject = ctx.subject {
+                    if !ctx.accumulated.isEmpty {
+                        subject.send(TranscriptionUpdate(isPartial: false, text: ctx.accumulated))
+                    }
+                    subject.send(completion: .finished)
+                }
+                if let completion = ctx.completion {
+                    if !ctx.accumulated.isEmpty {
+                        completion(.success(ctx.accumulated))
+                    } else {
+                        completion(.failure(.streamingNotSupported))
+                    }
                 }
             }
+
+            contexts[id] = nil
         }
-        
-        // Keep the last block as remainder (might be incomplete)
-        if let lastBlock = eventBlocks.last {
-            remainder = lastBlock
-        }
-        
-        return events.isEmpty ? nil : (events: events, remainder: remainder)
     }
-} 
+}
+
