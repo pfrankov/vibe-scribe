@@ -43,20 +43,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         
         // Open main window
-        menu.addItem(NSMenuItem(title: "Open", action: #selector(openMainWindow), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(
+            title: AppLanguage.localized("open"),
+            action: #selector(openMainWindow),
+            keyEquivalent: "o"
+        ))
         
         // Start recording
-        menu.addItem(NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(
+            title: AppLanguage.localized("start.recording"),
+            action: #selector(startRecording),
+            keyEquivalent: "r"
+        ))
         
         menu.addItem(NSMenuItem.separator())
         
         // Settings
-        menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(
+            title: AppLanguage.localized("settings"),
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        ))
         
         menu.addItem(NSMenuItem.separator())
         
         // Quit application
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(
+            title: AppLanguage.localized("quit"),
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
         
         statusBarItem?.menu = menu
     }
@@ -124,11 +140,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func showPermissionAlert() {
         let alert = NSAlert()
-        alert.messageText = "Microphone Permission Required"
-        alert.informativeText = "VibeScribe needs microphone access to record audio. Please grant permission in System Preferences > Security & Privacy > Microphone."
+        alert.messageText = AppLanguage.localized("microphone.permission.required")
+        alert.informativeText = AppLanguage.localized("vibescribe.needs.microphone.access.to.record.audio.please.grant.permission.in.system.preferences.security.privacy.microphone")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Preferences")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: AppLanguage.localized("open.system.preferences"))
+        alert.addButton(withTitle: AppLanguage.localized("cancel"))
         
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
@@ -143,11 +159,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct VibeScribeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @AppStorage("ui.language.code") private var appLanguageCode: String = ""
+
+    private var appLocale: Locale {
+        AppLanguage.applyPreferredLanguagesIfNeeded(code: appLanguageCode)
+        return AppLanguage.locale(for: appLanguageCode)
+    }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .modelContainer(for: [Record.self, Tag.self, AppSettings.self])
+                .environment(\.locale, appLocale)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -156,7 +179,7 @@ struct VibeScribeApp: App {
             CommandGroup(replacing: .newItem) { }
             
             CommandGroup(after: .appInfo) {
-                Button("Settings...") {
+                Button(AppLanguage.localized("settings.ellipsis")) {
                     appDelegate.openSettings()
                 }
                 .keyboardShortcut(",", modifiers: .command)

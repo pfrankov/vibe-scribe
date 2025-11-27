@@ -62,7 +62,7 @@ struct RecordingOverlayView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close")
+                .accessibilityLabel(Text(AppLanguage.localized("close")))
 
                 Spacer(minLength: 8)
 
@@ -79,14 +79,14 @@ struct RecordingOverlayView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .opacity(0.8)
-                .help("Microphone source")
+                .help(AppLanguage.localized("microphone.source"))
 
             if manager.isSystemAudioEnabled {
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .opacity(0.8)
-                    .help("System audio is captured when available")
+                    .help(AppLanguage.localized("system.audio.is.captured.when.available"))
             }
 
             // Compact monochrome waveform (taller, slightly narrower)
@@ -95,7 +95,7 @@ struct RecordingOverlayView: View {
                 .opacity(manager.isPaused ? 0.2 : 1)
                 .animation(.easeInOut(duration: 0.2), value: manager.isPaused)
         }
-        .help("Audio source indicators: microphone and system audio")
+        .help(AppLanguage.localized("audio.source.indicators.microphone.and.system.audio"))
     }
 
     // MARK: - Controls
@@ -107,7 +107,7 @@ struct RecordingOverlayView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "play.fill")
-                        Text("Resume")
+                        Text(AppLanguage.localized("resume"))
                             .lineLimit(1)
                             .minimumScaleFactor(0.9)
                     }
@@ -120,7 +120,7 @@ struct RecordingOverlayView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "square.and.arrow.down")
-                        Text("Save")
+                        Text(AppLanguage.localized("save"))
                             .lineLimit(1)
                             .minimumScaleFactor(0.9)
                     }
@@ -134,7 +134,7 @@ struct RecordingOverlayView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "stop.fill")
-                        Text("Stop")
+                        Text(AppLanguage.localized("stop"))
                             .lineLimit(1)
                             .minimumScaleFactor(0.9)
                     }
@@ -171,7 +171,10 @@ struct RecordingOverlayView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        let name = "Recording \(formatter.string(from: Date()))"
+        let name = String(
+            format: AppLanguage.localized("recording.arg1", comment: "Default recording name with timestamp"),
+            formatter.string(from: Date())
+        )
         let newRecord = Record(name: name, fileURL: url, duration: duration, includesSystemAudio: includesSystemAudio)
         modelContext.insert(newRecord)
         do {

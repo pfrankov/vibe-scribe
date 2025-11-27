@@ -31,10 +31,14 @@ private struct UIConstants {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case speechToText = "Speech to Text"
-    case summary = "Summary"
+    case speechToText = "speech.to.text"
+    case summary = "summary"
     
     var id: String { self.rawValue }
+
+    var titleKey: LocalizedStringKey {
+        LocalizedStringKey(rawValue)
+    }
 }
 
 enum FocusedField {
@@ -146,7 +150,9 @@ struct SettingsView: View {
 #if DEBUG
     @AppStorage("debug.simulateEmptyRecordings") private var simulateEmptyRecordings = false
 #endif
+    @AppStorage("ui.language.code") private var appLanguageCode: String = ""
     
+    @State private var showRestartAlert = false
     @FocusState private var focusedField: FocusedField?
     @State private var selectedTab: SettingsTab = .speechToText
     @State private var chunkSizeText: String = ""
@@ -160,22 +166,39 @@ struct SettingsView: View {
     
     private var settings: AppSettings {
         if let existingSettings = appSettings.first {
+            // Sync AppStorage to model if needed (e.g., first launch after update)
+            if !appLanguageCode.isEmpty, existingSettings.appLanguageCode != appLanguageCode {
+                existingSettings.appLanguageCode = appLanguageCode
+                try? modelContext.save()
+            } else if appLanguageCode.isEmpty, !existingSettings.appLanguageCode.isEmpty {
+                appLanguageCode = existingSettings.appLanguageCode
+            }
             return existingSettings
         } else {
             let newSettings = AppSettings()
+            if !appLanguageCode.isEmpty {
+                newSettings.appLanguageCode = appLanguageCode
+            }
             modelContext.insert(newSettings)
             return newSettings
         }
     }
     
+    private let supportedLanguageCodes: [String] = {
+        Bundle.main.localizations
+            .filter { $0 != "Base" }
+            .sorted()
+    }()
+
     var body: some View {
         VStack(spacing: 0) {
             header
+            appLanguageSection
 
             // Tab selector
-            Picker("Settings", selection: $selectedTab) {
+            Picker(AppLanguage.localized("settings"), selection: $selectedTab) {
                 ForEach(SettingsTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
+                    Text(tab.titleKey).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
@@ -218,6 +241,7 @@ struct SettingsView: View {
             _ = settings
             chunkSizeText = String(settings.chunkSize)
             loadModelsIfNeeded()
+            AppLanguage.applyPreferredLanguagesIfNeeded(code: appLanguageCode)
         }
         .onChange(of: settings.whisperBaseURL) { _, _ in
             loadWhisperModelsIfURLValid()
@@ -242,7 +266,7 @@ struct SettingsView: View {
 #if canImport(Speech)
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
             HStack {
-                Text("Language")
+                Text(AppLanguage.localized("language"))
                     .font(.system(size: UIConstants.fontSize))
 
                 Spacer()
@@ -255,14 +279,14 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(isLoadingSpeechAnalyzerLocales)
-                .help("Refresh languages list")
+                .help(AppLanguage.localized("refresh.languages.list"))
             }
 
             if isLoadingSpeechAnalyzerLocales {
                 HStack {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Loading languages...")
+                    Text(AppLanguage.localized("loading.languages.ellipsis"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -275,7 +299,7 @@ struct SettingsView: View {
                         trySave()
                     }
                 )) {
-                    Text("Automatic").tag("")
+                    Text(AppLanguage.localized("automatic")).tag("")
                     ForEach(speechAnalyzerLocales, id: \.identifier) { locale in
                         Text(localeDisplayName(locale)).tag(locale.identifier)
                     }
@@ -290,7 +314,7 @@ struct SettingsView: View {
             }
         }
 #else
-        InlineMessageView("Native transcription language selection requires the Speech framework.")
+        InlineMessageView(AppLanguage.localized("native.transcription.language.selection.requires.the.speech.framework"))
 #endif
     }
 
@@ -298,7 +322,7 @@ struct SettingsView: View {
 
     private var header: some View {
         HStack(spacing: UIConstants.smallSpacing) {
-            Text("Settings")
+            Text(AppLanguage.localized("settings"))
                 .font(.system(size: UIConstants.fontSize, weight: .semibold))
 
             Spacer()
@@ -343,7 +367,7 @@ struct SettingsView: View {
         if settings.whisperProvider == .whisperServer {
             VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
                 HStack {
-                    Text("Model")
+                    Text(AppLanguage.localized("model"))
                         .font(.system(size: UIConstants.fontSize))
 
                     Spacer()
@@ -359,21 +383,23 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(modelService.isLoadingWhisperModels)
-                    .help("Refresh models list")
+                    .help(AppLanguage.localized("refresh.models.list"))
                 }
 
                 if modelService.isLoadingWhisperModels {
                     HStack {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Loading models...")
+                        Text(AppLanguage.localized("loading.models.ellipsis"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     .frame(height: 22)
                 } else {
                     ComboBoxView(
-                        placeholder: modelService.whisperModels.isEmpty ? "Enter model name or refresh list" : "Select model",
+                        placeholder: modelService.whisperModels.isEmpty
+                            ? AppLanguage.localized("enter.model.name.or.refresh.list")
+                            : AppLanguage.localized("select.model"),
                         options: modelService.whisperModels,
                         selectedOption: Binding(
                             get: { settings.whisperModel },
@@ -395,8 +421,8 @@ struct SettingsView: View {
         // Group: Whisper compatible API
         if settings.whisperProvider == .compatibleAPI {
             settingsField(
-                title: "Whisper compatible API base URL",
-                placeholder: "https://api.example.com/v1/",
+                title: LocalizedStringKey("whisper.compatible.api.base.url"),
+                placeholder: LocalizedStringKey("https.api.example.com.v1"),
                 value: Binding(
                     get: { settings.whisperBaseURL },
                     set: { newValue in
@@ -404,12 +430,12 @@ struct SettingsView: View {
                         trySave()
                     }
                 ),
-                caption: "e.g., https://api.openai.com/v1/ or your local Whisper instance base URL. Endpoint will be appended automatically."
+                caption: LocalizedStringKey("e.g.https.api.openai.com.v1.or.your.local.whisper.instance.base.url.endpoint.will.be.appended.automatically")
             )
 
             settingsField(
-                title: "Whisper API Key",
-                placeholder: "sk-...",
+                title: LocalizedStringKey("whisper.api.key"),
+                placeholder: LocalizedStringKey("sk.ellipsis"),
                 value: Binding(
                     get: { settings.whisperAPIKey },
                     set: { newValue in
@@ -417,12 +443,12 @@ struct SettingsView: View {
                         trySave()
                     }
                 ),
-                caption: "Your Whisper API key. Leave empty for local servers that don't require authentication."
+                caption: LocalizedStringKey("your.whisper.api.key.leave.empty.for.local.servers.that.dont.require.authentication")
             )
 
             VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
                 HStack {
-                    Text("Whisper Model")
+                    Text(AppLanguage.localized("whisper.model"))
                         .font(.system(size: UIConstants.fontSize))
 
                     Spacer()
@@ -438,21 +464,23 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(modelService.isLoadingWhisperModels || settings.whisperBaseURL.isEmpty)
-                    .help("Refresh models list")
+                    .help(AppLanguage.localized("refresh.models.list"))
                 }
 
                 if modelService.isLoadingWhisperModels {
                     HStack {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Loading models...")
+                        Text(AppLanguage.localized("loading.models.ellipsis"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     .frame(height: 22)
                 } else {
                     ComboBoxView(
-                        placeholder: modelService.whisperModels.isEmpty ? "Enter model name or refresh list" : "Select Whisper model",
+                        placeholder: modelService.whisperModels.isEmpty
+                            ? AppLanguage.localized("enter.model.name.or.refresh.list")
+                            : AppLanguage.localized("select.whisper.model"),
                         options: modelService.whisperModels,
                         selectedOption: Binding(
                             get: { settings.whisperModel },
@@ -469,7 +497,7 @@ struct SettingsView: View {
                     InlineMessageView(error)
                 }
 
-                captionText("Specify the Whisper model to use for transcription. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
+                captionText(LocalizedStringKey("specify.the.whisper.model.to.use.for.transcription.you.can.select.from.the.list.refresh.to.load.from.server.or.choose.custom.ellipsis.to.enter.manually"))
             }
         }
     }
@@ -477,8 +505,8 @@ struct SettingsView: View {
     @ViewBuilder
     private var summaryContent: some View {
         settingsField(
-            title: "OpenAI compatible API base URL",
-            placeholder: "https://api.example.com/v1/",
+            title: LocalizedStringKey("openai.compatible.api.base.url"),
+            placeholder: LocalizedStringKey("https.api.example.com.v1"),
             value: Binding(
                 get: { settings.openAIBaseURL },
                 set: { newValue in
@@ -486,12 +514,12 @@ struct SettingsView: View {
                     trySave()
                 }
             ),
-            caption: "e.g., https://api.openai.com/v1/ or your custom summarization endpoint base URL. Endpoint will be appended automatically."
+            caption: LocalizedStringKey("openai.base.url.caption")
         )
         
         settingsField(
-            title: "OpenAI API Key",
-            placeholder: "sk-...",
+            title: LocalizedStringKey("openai.api.key"),
+            placeholder: LocalizedStringKey("sk.ellipsis"),
             value: Binding(
                 get: { settings.openAIAPIKey },
                 set: { newValue in
@@ -499,12 +527,12 @@ struct SettingsView: View {
                     trySave()
                 }
             ),
-            caption: "Your OpenAI API key. Leave empty for local servers that don't require authentication."
+            caption: LocalizedStringKey("your.openai.api.key.leave.empty.for.local.servers.that.dont.require.authentication")
         )
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
             HStack {
-                Text("OpenAI Model")
+                Text(AppLanguage.localized("openai.model"))
                     .font(.system(size: UIConstants.fontSize))
                 
                 Spacer()
@@ -515,21 +543,23 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(modelService.isLoadingOpenAIModels || settings.openAIBaseURL.isEmpty)
-                .help("Refresh models list")
+                .help(AppLanguage.localized("refresh.models.list"))
             }
             
             if modelService.isLoadingOpenAIModels {
                 HStack {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Loading models...")
+                    Text(AppLanguage.localized("loading.models.ellipsis"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 .frame(height: 22)
             } else {
                 ComboBoxView(
-                    placeholder: modelService.openAIModels.isEmpty ? "Enter model name or refresh list" : "Select LLM model",
+                    placeholder: modelService.openAIModels.isEmpty
+                        ? AppLanguage.localized("enter.model.name.or.refresh.list")
+                        : AppLanguage.localized("select.llm.model"),
                     options: modelService.openAIModels,
                     selectedOption: Binding(
                         get: { settings.openAIModel },
@@ -546,11 +576,11 @@ struct SettingsView: View {
                 InlineMessageView(error)
             }
             
-            captionText("Specify the model to use for summarization. You can select from the list, refresh to load from server, or choose 'Custom...' to enter manually.")
+            captionText(LocalizedStringKey("specify.the.model.to.use.for.summarization.you.can.select.from.the.list.refresh.to.load.from.server.or.choose.custom.ellipsis.to.enter.manually"))
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("Prompt")
+            Text(AppLanguage.localized("prompt"))
                 .font(.system(size: UIConstants.fontSize))
             
             styledTextEditor(
@@ -564,11 +594,11 @@ struct SettingsView: View {
                 focusField: .chunkPromptEditor
             )
             
-            captionText("Use {transcription} as a placeholder for the individual chunk text.")
+            captionText(LocalizedStringKey("use.transcription.as.a.placeholder.for.the.individual.chunk.text"))
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Toggle("Generate short title after summarization", isOn: Binding(
+            Toggle(AppLanguage.localized("generate.short.title.after.summarization"), isOn: Binding(
                 get: { settings.autoGenerateTitleFromSummary },
                 set: { newValue in
                     settings.autoGenerateTitleFromSummary = newValue
@@ -577,11 +607,11 @@ struct SettingsView: View {
             ))
             .toggleStyle(.checkbox)
             
-            captionText("When enabled, the app asks the language model for a concise title based on the final summary.")
+            captionText(LocalizedStringKey("when.enabled.the.app.asks.the.language.model.for.a.concise.title.based.on.the.final.summary"))
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-            Text("Title generation prompt")
+            Text(AppLanguage.localized("title.generation.prompt"))
                 .font(.system(size: UIConstants.fontSize))
             
             styledTextEditor(
@@ -596,12 +626,12 @@ struct SettingsView: View {
             )
             .disabled(!settings.autoGenerateTitleFromSummary)
             
-            captionText("Use {summary} as a placeholder for the completed summary text. The model should answer with a title only.")
+            captionText(LocalizedStringKey("use.summary.as.a.placeholder.for.the.completed.summary.text.the.model.should.answer.with.a.title.only"))
         }
         
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
             HStack {
-                Toggle("Split long texts into chunks", isOn: Binding(
+                Toggle(AppLanguage.localized("split.long.texts.into.chunks"), isOn: Binding(
                     get: { settings.useChunking },
                     set: { newValue in
                         settings.useChunking = newValue
@@ -613,12 +643,12 @@ struct SettingsView: View {
                 Spacer()
             }
             
-            captionText("When enabled, long texts are split into smaller chunks before processing.")
+            captionText(LocalizedStringKey("when.enabled.long.texts.are.split.into.smaller.chunks.before.processing"))
         }
         
         if settings.useChunking {
             VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-                Text("Final summary prompt")
+                Text(AppLanguage.localized("final.summary.prompt"))
                     .font(.system(size: UIConstants.fontSize))
                 
                 styledTextEditor(
@@ -632,11 +662,11 @@ struct SettingsView: View {
                     focusField: .summaryPromptEditor
                 )
                 
-                captionText("Use {transcription} as a placeholder for the text to be processed.")
+                captionText(LocalizedStringKey("use.transcription.as.a.placeholder.for.the.text.to.be.processed"))
             }
             
             VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
-                Text("Chunk Size (characters)")
+                Text(AppLanguage.localized("chunk.size.characters"))
                     .font(.system(size: UIConstants.fontSize))
                 
                 TextField("25000", text: $chunkSizeText)
@@ -656,7 +686,7 @@ struct SettingsView: View {
                         }
                     }
                 
-                captionText("Maximum size for each text chunk in characters. Text is split intelligently by paragraphs first, then sentences, then words.")
+                captionText(LocalizedStringKey("maximum.size.for.each.text.chunk.in.characters.text.is.split.intelligently.by.paragraphs.first.then.sentences.then.words"))
             }
         }
     }
@@ -666,18 +696,18 @@ struct SettingsView: View {
     private var adminSettingsSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: UIConstants.smallSpacing) {
-                Toggle("Simulate empty recordings list", isOn: Binding(
+                Toggle(AppLanguage.localized("simulate.empty.recordings.list"), isOn: Binding(
                     get: { simulateEmptyRecordings },
                     set: { newValue in
                         simulateEmptyRecordings = newValue
                     }
                 ))
                 
-                captionText("Hides all recordings so you can preview the empty state. Available in Debug builds only.")
+                captionText(LocalizedStringKey("hides.all.recordings.so.you.can.preview.the.empty.state.available.in.debug.builds.only"))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Admin Tools", systemImage: "wrench.and.screwdriver")
+            Label(AppLanguage.localized("admin.tools"), systemImage: "wrench.and.screwdriver")
                 .font(.system(size: UIConstants.fontSize, weight: .semibold))
         }
     }
@@ -687,10 +717,10 @@ struct SettingsView: View {
     
     @ViewBuilder
     private func settingsField(
-        title: String,
-        placeholder: String,
+        title: LocalizedStringKey,
+        placeholder: LocalizedStringKey,
         value: Binding<String>,
-        caption: String
+        caption: LocalizedStringKey
     ) -> some View {
         VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
             Text(title)
@@ -752,10 +782,64 @@ struct SettingsView: View {
             }
     }
     
-    private func captionText(_ text: String) -> some View {
+    private func captionText(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(.system(size: UIConstants.captionFontSize))
             .foregroundColor(Color(NSColor.secondaryLabelColor))
+    }
+
+    @ViewBuilder
+    private var appLanguageSection: some View {
+        VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+            Text(AppLanguage.localized("app.language"))
+                .font(.system(size: UIConstants.fontSize, weight: .semibold))
+
+            Picker("", selection: Binding(
+                get: { appLanguageCode },
+                set: { newValue in
+                    let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if appLanguageCode != normalized {
+                        appLanguageCode = normalized
+                        settings.appLanguageCode = normalized
+                        AppLanguage.applyPreferredLanguagesIfNeeded(code: normalized)
+                        trySave()
+                        showRestartAlert = true
+                    }
+                }
+            )) {
+                Text(AppLanguage.localized("app.language.system")).tag("")
+                ForEach(supportedLanguageCodes, id: \.self) { code in
+                    Text(displayName(for: code)).tag(code)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(maxWidth: 240, alignment: .leading)
+
+            captionText(LocalizedStringKey("app.language.caption"))
+        }
+        .padding(.horizontal, UIConstants.horizontalMargin)
+        .padding(.top, UIConstants.smallSpacing)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .alert(AppLanguage.localized("app.language.restart.required"), isPresented: $showRestartAlert) {
+            Button(AppLanguage.localized("restart.now")) {
+                restartApp()
+            }
+            Button(AppLanguage.localized("restart.later"), role: .cancel) { }
+        } message: {
+            Text(AppLanguage.localized("app.language.restart.required.message"))
+        }
+    }
+
+    private func restartApp() {
+        let url = Bundle.main.bundleURL
+        NSWorkspace.shared.open(url)
+        NSApp.terminate(nil)
+    }
+
+    private func displayName(for languageCode: String) -> String {
+        let locale = Locale(identifier: languageCode)
+        return locale.localizedString(forLanguageCode: languageCode)?.capitalized(with: .autoupdatingCurrent) ?? languageCode
     }
     
     private func trySave() {
@@ -803,7 +887,7 @@ struct SettingsView: View {
         }
 
         guard APIURLBuilder.isValidBaseURL(baseURL) else {
-            modelService.whisperModelsError = "Invalid URL format"
+            modelService.whisperModelsError = AppLanguage.localized("invalid.url.format")
             return
         }
 
@@ -814,7 +898,7 @@ struct SettingsView: View {
         guard !settings.openAIBaseURL.isEmpty else { return }
         
         guard APIURLBuilder.isValidBaseURL(settings.openAIBaseURL) else {
-            modelService.openAIModelsError = "Invalid URL format"
+            modelService.openAIModelsError = AppLanguage.localized("invalid.url.format")
             return
         }
         
@@ -847,14 +931,14 @@ struct SettingsView: View {
                     self.speechAnalyzerLocales = sorted
                     self.isLoadingSpeechAnalyzerLocales = false
                     if sorted.isEmpty {
-                        self.speechAnalyzerLocalesError = "No speech languages available. Install Dictation assets in System Settings."
+                        self.speechAnalyzerLocalesError = AppLanguage.localized("no.speech.languages.available.install.dictation.assets.in.system.settings")
                     }
                 }
             } else {
                 await MainActor.run {
                     self.speechAnalyzerLocales = []
                     self.isLoadingSpeechAnalyzerLocales = false
-                    self.speechAnalyzerLocalesError = "Requires macOS 26 or newer."
+                    self.speechAnalyzerLocalesError = AppLanguage.localized("requires.macos.26.or.newer")
                 }
             }
         }

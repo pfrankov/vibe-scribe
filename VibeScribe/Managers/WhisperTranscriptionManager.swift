@@ -10,7 +10,7 @@ import Combine
 import AVFoundation
 
 // Error types for transcription process
-enum TranscriptionError: Error {
+enum TranscriptionError: LocalizedError {
     case invalidAudioFile
     case networkError(Error)
     case invalidResponse
@@ -23,35 +23,39 @@ enum TranscriptionError: Error {
     case engineUnavailable
     case processingFailed(String)
     case featureUnavailable
-    
-    var description: String {
+}
+
+extension TranscriptionError {
+    var errorDescription: String? {
         switch self {
         case .invalidAudioFile:
-            return "Audio file is invalid or corrupted"
+            return AppLanguage.localized("audio.file.is.invalid.or.corrupted")
         case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+            return String(format: AppLanguage.localized("network.error.arg1"), error.localizedDescription)
         case .invalidResponse:
-            return "Invalid response from server"
+            return AppLanguage.localized("invalid.response.from.server")
         case .serverError(let message):
-            return "Server error: \(message)"
+            return String(format: AppLanguage.localized("server.error.arg1"), message)
         case .unknownError:
-            return "An unknown error occurred"
+            return AppLanguage.localized("an.unknown.error.occurred")
         case .dataParsingError(let message):
-            return "Data parsing error: \(message)"
+            return String(format: AppLanguage.localized("data.parsing.error.arg1"), message)
         case .streamingNotSupported:
-            return "Server doesn't support SSE streaming"
+            return AppLanguage.localized("server.doesnt.support.sse.streaming")
         case .streamingError(let message):
-            return "Streaming error: \(message)"
+            return String(format: AppLanguage.localized("streaming.error.arg1"), message)
         case .permissionDenied:
-            return "Permission was denied"
+            return AppLanguage.localized("permission.was.denied")
         case .engineUnavailable:
-            return "Transcription engine is unavailable"
+            return AppLanguage.localized("transcription.engine.is.unavailable")
         case .processingFailed(let message):
-            return "Processing failed: \(message)"
+            return String(format: AppLanguage.localized("processing.failed.arg1"), message)
         case .featureUnavailable:
-            return "Transcription feature unavailable on this platform"
+            return AppLanguage.localized("transcription.feature.unavailable.on.this.platform")
         }
     }
+    
+    var description: String { localizedDescription }
 }
 
 // Structure for real-time transcription updates
@@ -514,4 +518,3 @@ extension WhisperTranscriptionManager: URLSessionDataDelegate {
         }
     }
 }
-

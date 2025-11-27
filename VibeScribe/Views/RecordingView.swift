@@ -26,6 +26,22 @@ struct RecordingView: View {
         recorderManager.isRecording
     }
 
+    private var statusText: LocalizedStringKey {
+        if recorderManager.isRecording {
+            return LocalizedStringKey("recording")
+        } else if displayError == nil {
+            return LocalizedStringKey("preparing.ellipsis")
+        } else {
+            return LocalizedStringKey("error")
+        }
+    }
+
+    private var sourceDescription: LocalizedStringKey {
+        recorderManager.isSystemAudioRecording
+            ? LocalizedStringKey("microphone.system.audio")
+            : LocalizedStringKey("microphone.only")
+    }
+
     private var canStopRecording: Bool {
         recorderManager.isRecording && recorderManager.recordingTime >= 0.5
     }
@@ -54,7 +70,7 @@ struct RecordingView: View {
                             .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: recorderManager.isRecording)
                     }
                     
-                    Text(recorderManager.isRecording ? "Recording" : displayError == nil ? "Preparing..." : "Error")
+                    Text(statusText)
                         .font(.headline)
                         .foregroundColor(recorderManager.isRecording ? Color(NSColor.systemRed) : Color(NSColor.labelColor))
                         .animation(.easeInOut(duration: 0.1), value: recorderManager.isRecording)
@@ -67,7 +83,7 @@ struct RecordingView: View {
                             .font(.caption)
                             .foregroundColor(recorderManager.isSystemAudioRecording ? Color(NSColor.systemBlue) : Color(NSColor.secondaryLabelColor))
                         
-                        Text(recorderManager.isSystemAudioRecording ? "Microphone + System Audio" : "Microphone Only")
+                        Text(sourceDescription)
                             .font(.caption)
                             .foregroundColor(Color(NSColor.secondaryLabelColor))
                     }
@@ -106,7 +122,7 @@ struct RecordingView: View {
 
             HStack(spacing: 20) {
                 // Stop button - always red
-                Button("Stop") {
+                Button(AppLanguage.localized("stop")) {
                     stopAndProcessRecording()
                 }
                 .buttonStyle(.borderedProminent)
@@ -116,7 +132,11 @@ struct RecordingView: View {
                 .disabled(!canStopRecording || displayError != nil)
 
                 // Cancel Button - always visible, but action changes
-                Button(recorderManager.isRecording ? "Cancel" : "Close") {
+                Button(
+                    recorderManager.isRecording
+                        ? AppLanguage.localized("cancel")
+                        : AppLanguage.localized("close")
+                ) {
                     if recorderManager.isRecording {
                         cancelActiveRecording()
                     }
@@ -174,7 +194,10 @@ struct RecordingView: View {
     
     // Helper to create and save the Record object
     private func createAndSaveRecord(url: URL, duration: TimeInterval, includesSystemAudio: Bool) {
-         let defaultName = "Recording \(recordingNameFormatter.string(from: Date()))"
+         let defaultName = String(
+            format: AppLanguage.localized("recording.arg1", comment: "Default recording name with timestamp"),
+            recordingNameFormatter.string(from: Date())
+         )
          let newRecord = Record(name: defaultName, fileURL: url, duration: duration, includesSystemAudio: includesSystemAudio)
          
          Logger.info("Creating record: \(newRecord.name) at \(url.path), includes system audio: \(includesSystemAudio)", category: .audio)

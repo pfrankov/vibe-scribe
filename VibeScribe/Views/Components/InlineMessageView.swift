@@ -32,11 +32,11 @@ struct InlineMessageView: View {
         var accessibilityPrefix: String {
             switch self {
             case .error:
-                return "Error"
+                return AppLanguage.localized("error")
             case .warning:
-                return "Warning"
+                return AppLanguage.localized("warning")
             case .info:
-                return "Info"
+                return AppLanguage.localized("info")
             }
         }
 

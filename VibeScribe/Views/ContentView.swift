@@ -19,10 +19,26 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var activeTagFilterName: String? = nil
 
-    @Query(sort: \Record.date, order: .reverse) private var records: [Record]
+@Query(sort: \Record.date, order: .reverse) private var records: [Record]
+@Query(filter: #Predicate<AppSettings> { $0.id == "app_settings" })
+private var appSettings: [AppSettings]
 #if DEBUG
-    @AppStorage("debug.simulateEmptyRecordings") private var simulateEmptyRecordings = false
+@AppStorage("debug.simulateEmptyRecordings") private var simulateEmptyRecordings = false
 #endif
+    @AppStorage("ui.language.code") private var appLanguageCode: String = ""
+
+    private var appLocale: Locale {
+        AppLanguage.locale(for: appLanguageCode)
+    }
+
+    private var settings: AppSettings {
+        if let existing = appSettings.first {
+            return existing
+        }
+        let newSettings = AppSettings()
+        modelContext.insert(newSettings)
+        return newSettings
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,7 +68,7 @@ struct ContentView: View {
             Button {
                 isShowingSettings = true
             } label: {
-                Label("Settings", systemImage: "gear")
+                Label(AppLanguage.localized("settings"), systemImage: "gear")
             }
             
             Divider()
@@ -60,12 +76,18 @@ struct ContentView: View {
             Button {
                 presentRecordingOverlay()
             } label: {
-                Label("New Recording", systemImage: "plus.circle.fill")
+                Label(AppLanguage.localized("new.recording"), systemImage: "plus.circle.fill")
             }
         }
         .onAppear {
             assignMainWindow()
             selectFirstRecordIfNeeded()
+            AppLanguage.applyPreferredLanguagesIfNeeded(code: appLanguageCode)
+            // Keep AppStorage and SwiftData in sync on launch
+            if settings.appLanguageCode != appLanguageCode {
+                settings.appLanguageCode = appLanguageCode
+                try? modelContext.save()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowSettings"))) { _ in
             isShowingSettings = true
@@ -123,6 +145,7 @@ struct ContentView: View {
             isDragOver || importManager.isImporting ? 
             dragOverlay : nil
         )
+        .environment(\.locale, appLocale)
     }
     
     private var effectiveRecords: [Record] {
@@ -148,7 +171,7 @@ struct ContentView: View {
 
     private var sidebarTitle: String {
         if let name = activeTagFilterName, !name.isEmpty { return name }
-        return NSLocalizedString("All Recordings", comment: "Sidebar header title for all recordings")
+        return AppLanguage.localized("all.recordings", comment: "Sidebar header title for all recordings")
     }
 
     // MARK: - Subviews
@@ -176,7 +199,7 @@ struct ContentView: View {
         } else {
             VStack {
                 Spacer()
-                Text("Select a recording from the list")
+                Text(AppLanguage.localized("select.a.recording.from.the.list"))
                     .font(.headline)
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
@@ -330,7 +353,11 @@ struct ContentView: View {
     private func presentRecordingOverlay() {
         // Present floating overlay window with recording controls
         OverlayWindowManager.shared.show(content: {
-            AnyView(RecordingOverlayView().environment(\.modelContext, modelContext))
+            AnyView(
+                RecordingOverlayView()
+                    .environment(\.modelContext, modelContext)
+                    .environment(\.locale, appLocale)
+            )
         })
     }
     
@@ -340,8 +367,8 @@ struct ContentView: View {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = AudioFileImportManager.supportedContentTypes
-        panel.prompt = "Import"
-        panel.message = "Select audio you'd like VibeScribe to transcribe and summarize."
+        panel.prompt = AppLanguage.localized("import")
+        panel.message = AppLanguage.localized("select.audio.youd.like.vibescribe.to.transcribe.and.summarize")
         
         panel.begin { response in
             guard response == .OK else { return }
@@ -449,12 +476,12 @@ private struct RecordsSidebarView: View {
                 .padding(.horizontal, 0)
             HStack {
                 Button(action: onCreateRecording) {
-                    Label("New Recording", systemImage: "plus.circle.fill")
+                    Label(AppLanguage.localized("new.recording"), systemImage: "plus.circle.fill")
                         .font(.body)
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.regular)
-                .accessibilityHint("Start a new recording")
+                .accessibilityHint(Text(AppLanguage.localized("start.a.new.recording")))
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -539,11 +566,11 @@ private struct RecordsSidebarView: View {
                 .weekOfYear ?? 0
 
             if weekDifference == 0 {
-                return NSLocalizedString("This Week", comment: "Section title for records created this week")
+                return AppLanguage.localized("this.week", comment: "Section title for records created this week")
             }
 
             if weekDifference == -1 {
-                return NSLocalizedString("Last Week", comment: "Section title for records created in the previous week")
+                return AppLanguage.localized("last.week", comment: "Section title for records created in the previous week")
             }
         }
 
@@ -570,8 +597,8 @@ private struct RecordsSidebarView: View {
 
         if calendar.isDate(date, equalTo: now, toGranularity: .year) {
             let monthName = Self.monthString(from: date, locale: locale)
-            let format = NSLocalizedString(
-                "In %@",
+            let format = AppLanguage.localized(
+                "in.arg1",
                 comment: "Section title for records created earlier this year"
             )
             return String(
@@ -582,8 +609,8 @@ private struct RecordsSidebarView: View {
         }
 
         let monthAndYear = Self.monthYearString(from: date, locale: locale)
-        let format = NSLocalizedString(
-            "In %@",
+        let format = AppLanguage.localized(
+            "in.arg1",
             comment: "Section title for records created in previous years"
         )
         return String(
@@ -671,8 +698,8 @@ private struct SidebarHeader: View {
                         .imageScale(.medium)
                 }
                 .buttonStyle(.borderless)
-                .help("Reset filter")
-                .accessibilityLabel(Text("Reset filter"))
+                .help(AppLanguage.localized("reset.filter"))
+                .accessibilityLabel(Text(AppLanguage.localized("reset.filter")))
             }
             Spacer()
         }
@@ -691,11 +718,11 @@ private struct RecordingsEmptyState: View {
                 .foregroundColor(.accentColor)
                 .symbolRenderingMode(.hierarchical)
             
-            Text("No recordings yet")
+            Text(AppLanguage.localized("no.recordings.yet"))
                 .font(.headline)
                 .multilineTextAlignment(.center)
             
-            Text("Start a capture or import a file from the panel on the right.")
+            Text(AppLanguage.localized("start.a.capture.or.import.a.file.from.the.panel.on.the.right"))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -749,11 +776,11 @@ struct DragOverlayContent: View {
             .foregroundColor(.orange)
             .symbolRenderingMode(.hierarchical)
         
-        Text("Import Error")
+        Text(AppLanguage.localized("import.error"))
             .font(.headline)
             .foregroundColor(.primary)
         
-        Text("Check file format and try again")
+        Text(AppLanguage.localized("check.file.format.and.try.again"))
             .font(.subheadline)
             .foregroundColor(.secondary)
     }
@@ -765,12 +792,12 @@ struct DragOverlayContent: View {
             .foregroundColor(.accentColor)
             .symbolRenderingMode(.hierarchical)
         
-        Text("Drop Audio Files Here")
+        Text(AppLanguage.localized("drop.audio.files.here"))
             .font(.title2)
             .fontWeight(.semibold)
             .foregroundColor(.primary)
         
-        Text("Supported formats: MP3, WAV, M4A, AAC, OGG, FLAC")
+        Text(AppLanguage.localized("supported.formats.mp3.wav.m4a.aac.ogg.flac"))
             .font(.subheadline)
             .foregroundColor(.secondary)
             .multilineTextAlignment(.center)
@@ -827,11 +854,11 @@ private struct WelcomeEmptyDetailView: View {
                     .foregroundStyle(Color.accentColor, Color.accentColor.opacity(0.22))
             }
 
-            Text("Welcome to VibeScribe")
+            Text(AppLanguage.localized("welcome.to.vibescribe"))
                 .font(.system(size: 26, weight: .bold))
                 .multilineTextAlignment(.center)
 
-            Text("Record or import conversations, keep processing on your own Whisper-compatible server, and read the AI summary right away.")
+            Text(AppLanguage.localized("record.or.import.conversations.keep.processing.on.your.own.whisper.compatible.server.and.read.the.ai.summary.right.away"))
                 .font(.title3.weight(.regular))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -852,7 +879,7 @@ private struct WelcomeEmptyDetailView: View {
     private var quickStartCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Pick your first step")
+                Text(AppLanguage.localized("pick.your.first.step"))
                     .font(.headline)
             }
 
@@ -868,8 +895,8 @@ private struct WelcomeEmptyDetailView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Link("Install WhisperServer", destination: whisperServerURL)
-                Text("Run WhisperServer locally or on your own host to keep conversations private.")
+                Link(AppLanguage.localized("install.whisperserver"), destination: whisperServerURL)
+                Text(AppLanguage.localized("run.whisperserver.locally.or.on.your.own.host.to.keep.conversations.private"))
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
@@ -879,12 +906,12 @@ private struct WelcomeEmptyDetailView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "gearshape")
                             .foregroundColor(.accentColor)
-                        Text("Connect your transcription and summary services")
+                        Text(AppLanguage.localized("connect.your.transcription.and.summary.services"))
                     }
                 }
                 .buttonStyle(.link)
 
-                Text("Add your Whisper-compatible audio endpoint and chat model so VibeScribe can process automatically.")
+                Text(AppLanguage.localized("add.your.whisper.compatible.audio.endpoint.and.chat.model.so.vibescribe.can.process.automatically"))
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
@@ -903,7 +930,7 @@ private struct WelcomeEmptyDetailView: View {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
                     .foregroundColor(.accentColor)
-                Text("The recordings, transcriptions, and summaries stay on your Mac and only you determine what to do with them.")
+                Text(AppLanguage.localized("the.recordings.transcriptions.and.summaries.stay.on.your.mac.and.only.you.determine.what.to.do.with.them"))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -914,17 +941,17 @@ private struct WelcomeEmptyDetailView: View {
 
     private var primaryRecordingButton: some View {
         Button(action: onCreateRecording) {
-            Label("Start recording", systemImage: "mic.circle.fill")
+            Label(AppLanguage.localized("start.recording.2"), systemImage: "mic.circle.fill")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .accessibilityHint("Opens the floating overlay to capture mic and system audio.")
+        .accessibilityHint(Text(AppLanguage.localized("opens.the.floating.overlay.to.capture.mic.and.system.audio")))
     }
 
     private var importButton: some View {
         Button(action: onImportAudio) {
-            Label("Import audio file", systemImage: "tray.and.arrow.down.fill")
+            Label(AppLanguage.localized("import.audio.file"), systemImage: "tray.and.arrow.down.fill")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)

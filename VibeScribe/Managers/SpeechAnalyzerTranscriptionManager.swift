@@ -318,7 +318,9 @@ final class SpeechAnalyzerTranscriptionManager {
         let trackOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: outputSettings)
         trackOutput.alwaysCopiesSampleData = false
         guard reader.canAdd(trackOutput) else {
-            throw TranscriptionError.processingFailed("Unable to configure audio reader.")
+            throw TranscriptionError.processingFailed(
+                AppLanguage.localized("unable.to.configure.audio.reader")
+            )
         }
         reader.add(trackOutput)
         
@@ -334,15 +336,21 @@ final class SpeechAnalyzerTranscriptionManager {
         let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
         writerInput.expectsMediaDataInRealTime = false
         guard writer.canAdd(writerInput) else {
-            throw TranscriptionError.processingFailed("Unable to configure audio writer.")
+            throw TranscriptionError.processingFailed(
+                AppLanguage.localized("unable.to.configure.audio.writer")
+            )
         }
         writer.add(writerInput)
         
         guard reader.startReading() else {
-            throw reader.error ?? TranscriptionError.processingFailed("Failed to start audio reader.")
+            throw reader.error ?? TranscriptionError.processingFailed(
+                AppLanguage.localized("failed.to.start.audio.reader")
+            )
         }
         guard writer.startWriting() else {
-            throw writer.error ?? TranscriptionError.processingFailed("Failed to start audio writer.")
+            throw writer.error ?? TranscriptionError.processingFailed(
+                AppLanguage.localized("failed.to.start.audio.writer")
+            )
         }
         writer.startSession(atSourceTime: .zero)
         
@@ -359,7 +367,11 @@ final class SpeechAnalyzerTranscriptionManager {
                         if !unsafeWriterInput.append(buffer) {
                             unsafeReader.cancelReading()
                             unsafeWriter.cancelWriting()
-                            continuation.resume(throwing: unsafeWriter.error ?? TranscriptionError.processingFailed("Failed to append audio sample buffer."))
+                            continuation.resume(
+                                throwing: unsafeWriter.error ?? TranscriptionError.processingFailed(
+                                    AppLanguage.localized("failed.to.append.audio.sample.buffer")
+                                )
+                            )
                             return
                         }
                     } else {
@@ -378,7 +390,9 @@ final class SpeechAnalyzerTranscriptionManager {
         }
         
         if reader.status != .completed {
-            throw reader.error ?? TranscriptionError.processingFailed("Audio conversion did not complete.")
+            throw reader.error ?? TranscriptionError.processingFailed(
+                AppLanguage.localized("audio.conversion.did.not.complete")
+            )
         }
         
         return outputURL

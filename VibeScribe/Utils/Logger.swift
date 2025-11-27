@@ -11,7 +11,7 @@ struct Logger {
     static let audio = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "VibeScribe", category: "Audio")
     
     /// Transcription operations
-    static let transcription = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "VibeScribe", category: "Transcription")
+    static let transcription = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "VibeScribe", category: "transcription")
     
     /// User interface operations
     static let ui = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "VibeScribe", category: "UI")

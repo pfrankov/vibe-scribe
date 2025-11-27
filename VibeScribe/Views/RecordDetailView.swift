@@ -108,7 +108,7 @@ struct RecordDetailView: View {
                 .disabled(!playerManager.isPlaying)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
-                .help("Skip back 10 seconds")
+                .help(AppLanguage.localized("skip.back.10.seconds"))
 
                 // Play/Pause Button
                 Button {
@@ -123,7 +123,11 @@ struct RecordDetailView: View {
                 .disabled(!playerManager.isReady)
                 .frame(width: 56, height: 56)
                 .contentShape(Rectangle())
-                .help(playerManager.isPlaying ? "Pause" : "Play")
+                .help(
+                    playerManager.isPlaying
+                        ? AppLanguage.localized("pause")
+                        : AppLanguage.localized("play")
+                )
 
                 // Forward Button (10 seconds forward)
                 Button {
@@ -138,7 +142,7 @@ struct RecordDetailView: View {
                 .disabled(!playerManager.isPlaying)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
-                .help("Skip forward 10 seconds")
+                .help(AppLanguage.localized("skip.forward.10.seconds"))
 
                 // Spacing between controls and time/slider
                 Spacer().frame(width: 12)
@@ -187,7 +191,7 @@ struct RecordDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!playerManager.isReady)
-                    .help("Playback Speed")
+                    .help(AppLanguage.localized("playback.speed"))
                 }
             }
             .padding(.horizontal, 12)
@@ -209,9 +213,9 @@ struct RecordDetailView: View {
         var logName: String {
             switch self {
             case .transcription:
-                return "Transcription"
+                return AppLanguage.localized("transcription")
             case .summary:
-                return "Summary"
+                return AppLanguage.localized("summary")
             }
         }
     }
@@ -235,7 +239,13 @@ struct RecordDetailView: View {
                     .frame(width: 20, height: 20)
             }
             .buttonStyle(.borderless)
-            .help(showCopied ? "Copied!" : "Copy to clipboard")
+            .help(
+                Text(
+                    showCopied
+                    ? AppLanguage.localized("copied")
+                    : AppLanguage.localized("copy.to.clipboard")
+                )
+            )
         }
     }
 
@@ -418,7 +428,7 @@ struct RecordDetailView: View {
             HStack {
                 ZStack(alignment: .leading) {
                     // --- TextField (Visible when editing title) ---
-                    TextField("Name", text: $editingTitle)
+                    TextField(AppLanguage.localized("name"), text: $editingTitle)
                         .textFieldStyle(.plain)
                         .focused($isTitleFieldFocused)
                         .onSubmit { saveTitle() }
@@ -441,14 +451,14 @@ struct RecordDetailView: View {
                     Button {
                         triggerDownload()
                     } label: {
-                        Label("Download Audio", systemImage: "arrow.down.to.line")
+                        Label(AppLanguage.localized("download.audio"), systemImage: "arrow.down.to.line")
                     }
                     .disabled(record.fileURL == nil || isDownloading)
 
                     Button {
                         startEditingTitle()
                     } label: {
-                        Label("Rename", systemImage: "pencil")
+                        Label(AppLanguage.localized("rename"), systemImage: "pencil")
                     }
                     .disabled(isEditingTitle)
 
@@ -457,7 +467,7 @@ struct RecordDetailView: View {
                     Button(role: .destructive) {
                         isShowingDeleteConfirmation = true
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label(AppLanguage.localized("delete"), systemImage: "trash")
                     }
                 } label: {
                     if isDownloading {
@@ -505,8 +515,22 @@ struct RecordDetailView: View {
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
-            .help("Filter by \(tag.name)")
-            .accessibilityLabel("Filter recordings by \(tag.name)")
+            .help(
+                Text(
+                    String(
+                        format: AppLanguage.localized("filter.by.arg1", comment: "Filter by tag tooltip"),
+                        tag.name
+                    )
+                )
+            )
+            .accessibilityLabel(
+                Text(
+                    String(
+                        format: AppLanguage.localized("filter.recordings.by.arg1", comment: "Accessibility label for tag filter"),
+                        tag.name
+                    )
+                )
+            )
 
             // Keep remove as a separate plain button to avoid nesting buttons.
             Button {
@@ -515,7 +539,7 @@ struct RecordDetailView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
                     .frame(width: 16, height: 16)
-                    .accessibilityLabel("Remove tag")
+                    .accessibilityLabel(Text(AppLanguage.localized("remove.tag")))
             }
             .buttonStyle(.plain)
             .contentShape(Circle())
@@ -534,7 +558,14 @@ struct RecordDetailView: View {
         .foregroundStyle(Color.primary)
         .shadow(color: tagChipShadowColor, radius: 6, x: 0, y: 2)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Tag: \(tag.name)")
+        .accessibilityLabel(
+            Text(
+                String(
+                    format: AppLanguage.localized("tag.arg1", comment: "Accessibility label for tag chip"),
+                    tag.name
+                )
+            )
+        )
     }
 
     private var tagInputField: some View {
@@ -545,7 +576,7 @@ struct RecordDetailView: View {
                 .foregroundStyle(tagInputIconColor)
 
             TagComboBoxView(
-                placeholder: "Add tag",
+                placeholder: AppLanguage.localized("add.tag"),
                 options: availableTagNamesExcludingAssigned,
                 usageCounts: tagUsageCounts,
                 initialMinWidth: 72,
@@ -590,7 +621,7 @@ struct RecordDetailView: View {
         }
         .zIndex(shouldShowTagSuggestions ? 1 : 0)
         .animation(.easeInOut(duration: 0.18), value: isTagFieldFocused)
-        .accessibilityLabel("Add a tag")
+        .accessibilityLabel(Text(AppLanguage.localized("add.a.tag")))
     }
 
     // Tag styling helpers
@@ -794,8 +825,8 @@ struct RecordDetailView: View {
         }
 
         let picker = Picker("", selection: $selectedTab) {
-            Text("Transcription").tag(Tab.transcription)
-            Text("Summary").tag(Tab.summary)
+            Text(AppLanguage.localized("transcription")).tag(Tab.transcription)
+            Text(AppLanguage.localized("summary")).tag(Tab.summary)
         }
         .pickerStyle(.segmented)
         .frame(maxWidth: 300)
@@ -828,7 +859,7 @@ struct RecordDetailView: View {
 
         InlineEditableTextArea(
             text: $transcriptionDraft,
-            placeholder: "Start typing transcription...",
+            placeholder: AppLanguage.localized("start.typing.transcription.ellipsis"),
             statusMessage: transcriptionStatusMessage,
             focusBinding: $focusedEditor,
             editor: .transcription,
@@ -840,23 +871,25 @@ struct RecordDetailView: View {
 
         HStack(spacing: 12) {
             if settings.whisperProvider == .speechAnalyzer {
-                let localeOptions = ["Automatic"] + speechAnalyzerLocales.map { localeDisplayName($0) }
+                let localeOptions = [AppLanguage.localized("automatic")] + speechAnalyzerLocales.map { localeDisplayName($0) }
                 
                 ComboBoxView(
-                    placeholder: speechAnalyzerLocales.isEmpty ? "Loading languages..." : "Choose language",
+                    placeholder: speechAnalyzerLocales.isEmpty
+                        ? AppLanguage.localized("loading.languages.ellipsis")
+                        : AppLanguage.localized("choose.language"),
                     options: localeOptions,
                     selectedOption: Binding(
                         get: {
                             if selectedSpeechAnalyzerLocale.isEmpty {
-                                return "Automatic"
+                                return AppLanguage.localized("automatic")
                             }
                             if let locale = speechAnalyzerLocales.first(where: { $0.identifier == selectedSpeechAnalyzerLocale }) {
                                 return localeDisplayName(locale)
                             }
-                            return "Automatic"
+                            return AppLanguage.localized("automatic")
                         },
                         set: { newValue in
-                            if newValue == "Automatic" {
+                            if newValue == AppLanguage.localized("automatic") {
                                 selectedSpeechAnalyzerLocale = ""
                             } else if let locale = speechAnalyzerLocales.first(where: { localeDisplayName($0) == newValue }) {
                                 selectedSpeechAnalyzerLocale = locale.identifier
@@ -868,7 +901,9 @@ struct RecordDetailView: View {
                 .frame(width: 220, height: 32)
             } else if settings.whisperProvider != .speechAnalyzer {
                 ComboBoxView(
-                    placeholder: whisperModelOptions.isEmpty ? "Select transcription model" : "Choose model",
+                    placeholder: whisperModelOptions.isEmpty
+                        ? AppLanguage.localized("select.transcription.model")
+                        : AppLanguage.localized("choose.model"),
                     options: whisperModelOptions,
                     selectedOption: $selectedWhisperModel
                 )
@@ -885,7 +920,7 @@ struct RecordDetailView: View {
                     } else {
                         Image(systemName: "waveform")
                     }
-                    Text("Transcribe")
+                    Text(AppLanguage.localized("transcribe"))
                 }
                 .frame(minWidth: 130)
             }
@@ -908,7 +943,7 @@ struct RecordDetailView: View {
             if isSummaryEditing {
                 InlineEditableTextArea(
                     text: $summaryDraft,
-                    placeholder: "No summary available yet.",
+                    placeholder: AppLanguage.localized("no.summary.available.yet"),
                     statusMessage: nil,
                     focusBinding: $focusedEditor,
                     editor: .summary,
@@ -922,7 +957,7 @@ struct RecordDetailView: View {
                 MarkdownSummaryPreview(
                     markdownContent: summaryMarkdownContent,
                     plainText: summaryDraft,
-                    placeholder: "No summary available yet.",
+                    placeholder: AppLanguage.localized("no.summary.available.yet"),
                     onActivateEditing: activateSummaryEditing,
                     onCopy: {
                         copySummary()
@@ -933,7 +968,9 @@ struct RecordDetailView: View {
 
             HStack(spacing: 12) {
                 ComboBoxView(
-                    placeholder: summaryModelOptions.isEmpty ? "Select summary model" : "Choose model",
+                    placeholder: summaryModelOptions.isEmpty
+                        ? AppLanguage.localized("select.summary.model")
+                        : AppLanguage.localized("choose.model"),
                     options: summaryModelOptions,
                     selectedOption: $selectedSummaryModel
                 )
@@ -949,7 +986,7 @@ struct RecordDetailView: View {
                         } else {
                             Image(systemName: "doc.text.magnifyingglass")
                         }
-                        Text("Summarize")
+                        Text(AppLanguage.localized("summarize"))
                     }
                     .frame(minWidth: 130)
                 }
@@ -991,14 +1028,14 @@ struct RecordDetailView: View {
         }
 
         if record.hasTranscription && record.transcriptionText != nil {
-            return "Transcription resulted in empty text. Try again with a different model or check audio quality."
+            return AppLanguage.localized("transcription.resulted.in.empty.text.try.again.with.a.different.model.or.check.audio.quality")
         }
 
         if record.hasTranscription {
-            return "Transcription processing... Check back later."
+            return AppLanguage.localized("transcription.processing.ellipsis.check.back.later")
         }
 
-        return "Transcription not available yet."
+        return AppLanguage.localized("transcription.not.available.yet")
     }
 
     private var trimmedTranscriptionDraft: String {
@@ -1354,14 +1391,19 @@ struct RecordDetailView: View {
             }
         })
 
-        view = AnyView(view.alert("Delete Recording?", isPresented: $isShowingDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                deleteCurrentRecord()
+        view = AnyView(
+            view.alert(
+                AppLanguage.localized("delete.recording"),
+                isPresented: $isShowingDeleteConfirmation
+            ) {
+                Button(AppLanguage.localized("delete"), role: .destructive) {
+                    deleteCurrentRecord()
+                }
+                Button(AppLanguage.localized("cancel"), role: .cancel) { }
+            } message: {
+                Text(AppLanguage.localized("this.will.permanently.remove.the.recording.transcription.and.summary.this.action.cannot.be.undone"))
             }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will permanently remove the recording, transcription, and summary. This action cannot be undone.")
-        })
+        )
 
         return view
     }
@@ -1594,7 +1636,11 @@ struct RecordDetailView: View {
         guard !isDownloading else { return }
         guard let sourceURL = record.fileURL else {
             Logger.warning("Attempted to export record without file URL", category: .audio)
-            presentAlert(title: "Export Unavailable", message: "The original audio file could not be located.", style: .warning)
+            presentAlert(
+                title: AppLanguage.localized("export.unavailable"),
+                message: AppLanguage.localized("the.original.audio.file.could.not.be.located"),
+                style: .warning
+            )
             return
         }
 
@@ -1616,14 +1662,14 @@ struct RecordDetailView: View {
             try persistConvertedFile(at: convertedURL, to: destinationURL)
 
             presentAlert(
-                title: "Audio Exported",
-                message: "Recording saved to \(destinationURL.path)",
+                title: AppLanguage.localized("audio.exported"),
+                message: String(format: AppLanguage.localized("recording.saved.to.arg1"), destinationURL.path),
                 style: .informational
             )
         } catch {
             Logger.error("Failed to export recording", error: error, category: .audio)
             presentAlert(
-                title: "Export Failed",
+                title: AppLanguage.localized("export.failed"),
                 message: error.localizedDescription,
                 style: .critical
             )
@@ -1651,7 +1697,7 @@ struct RecordDetailView: View {
     @MainActor
     private func presentSavePanel(suggestedName: String) async -> URL? {
         let panel = NSSavePanel()
-        panel.title = "Save Recording"
+        panel.title = AppLanguage.localized("save.recording")
         panel.canCreateDirectories = true
         panel.nameFieldStringValue = defaultFileName(for: suggestedName)
         panel.allowedContentTypes = [UTType.mpeg4Audio]
@@ -1696,7 +1742,7 @@ struct RecordDetailView: View {
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let fileName = sanitized.isEmpty ? "Recording" : sanitized
+        let fileName = sanitized.isEmpty ? AppLanguage.localized("recording") : sanitized
         return fileName.lowercased().hasSuffix(".m4a") ? fileName : "\(fileName).m4a"
     }
 
@@ -1706,7 +1752,7 @@ struct RecordDetailView: View {
         alert.alertStyle = style
         alert.messageText = title
         alert.informativeText = message
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: AppLanguage.localized("ok"))
 
         if let window = NSApplication.shared.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: nil)

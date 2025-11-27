@@ -22,15 +22,15 @@ enum AudioFileImportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .fileNotFound(let message):
-            return "File not found: \(message)"
+            return String(format: AppLanguage.localized("file.not.found.arg1", comment: "Import error when a file cannot be located"), message)
         case .unsupportedFormat(let message):
-            return "Unsupported format: \(message)"
+            return String(format: AppLanguage.localized("unsupported.format.arg1", comment: "Import error for unsupported audio format"), message)
         case .invalidAudioFile(let message):
-            return "Invalid audio file: \(message)"
+            return String(format: AppLanguage.localized("invalid.audio.file.arg1", comment: "Import error for invalid audio content"), message)
         case .conversionFailed(let message):
-            return "Conversion failed: \(message)"
+            return String(format: AppLanguage.localized("conversion.failed.arg1", comment: "Import error when conversion fails"), message)
         case .saveFailed(let message):
-            return "Save failed: \(message)"
+            return String(format: AppLanguage.localized("save.failed.arg1", comment: "Import error when saving fails"), message)
         }
     }
 }
@@ -146,24 +146,27 @@ class AudioFileImportManager: ObservableObject {
     
     private func importSingleFile(url: URL, index: Int, total: Int, modelContext: ModelContext) async throws {
         await MainActor.run {
-            importProgress = "Importing \(index)/\(total): \(url.lastPathComponent)"
+            importProgress = String(
+                format: AppLanguage.localized("importing.arg1.arg2.arg3", comment: "Drag and drop import progress"),
+                index, total, url.lastPathComponent
+            )
         }
         
         Logger.info("Importing file \(index)/\(total): \(url.lastPathComponent)", category: .audio)
         
         // Validate file exists and is accessible
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw AudioFileImportError.fileNotFound("File not found: \(url.lastPathComponent)")
+            throw AudioFileImportError.fileNotFound(url.lastPathComponent)
         }
         
         // Check if file is actually an audio file
         guard isAudioFile(url: url) else {
-            throw AudioFileImportError.unsupportedFormat("Unsupported file format: \(url.pathExtension)")
+            throw AudioFileImportError.unsupportedFormat(url.pathExtension)
         }
         
         // Validate it's actually a valid audio file
         guard await AudioUtils.isValidAudioFile(url: url) else {
-            throw AudioFileImportError.invalidAudioFile("File does not contain valid audio: \(url.lastPathComponent)")
+            throw AudioFileImportError.invalidAudioFile(url.lastPathComponent)
         }
         
         // Get original filename with extension
@@ -171,7 +174,10 @@ class AudioFileImportManager: ObservableObject {
         
         // Convert to standard format
         await MainActor.run {
-            importProgress = "Converting \(index)/\(total): \(originalName)"
+            importProgress = String(
+                format: AppLanguage.localized("converting.arg1.arg2.arg3", comment: "Conversion progress while importing audio"),
+                index, total, originalName
+            )
         }
         
         let convertedURL = try await convertToStandardFormat(url: url)
@@ -181,7 +187,7 @@ class AudioFileImportManager: ObservableObject {
         
         // Validate duration is reasonable
         guard duration > 0 else {
-            throw AudioFileImportError.invalidAudioFile("Audio file has invalid duration: \(originalName)")
+            throw AudioFileImportError.invalidAudioFile(originalName)
         }
         
         // Create record
@@ -193,7 +199,10 @@ class AudioFileImportManager: ObservableObject {
         )
         
         try await MainActor.run {
-            importProgress = "Saving \(index)/\(total): \(originalName)"
+            importProgress = String(
+                format: AppLanguage.localized("saving.arg1.arg2.arg3", comment: "Saving progress while importing audio"),
+                index, total, originalName
+            )
             
             modelContext.insert(record)
             

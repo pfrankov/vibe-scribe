@@ -24,7 +24,11 @@ struct ComboBoxView: NSViewRepresentable {
             // Add option for entering custom value
             popUpButton.menu?.addItem(NSMenuItem.separator())
             
-            let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
+            let customItem = NSMenuItem(
+                title: AppLanguage.localized("custom.ellipsis"),
+                action: nil,
+                keyEquivalent: ""
+            )
             customItem.tag = -1
             customItem.target = context.coordinator
             customItem.action = #selector(Coordinator.customOptionSelected(_:))
@@ -46,7 +50,11 @@ struct ComboBoxView: NSViewRepresentable {
             // Add option for entering custom value
             nsView.menu?.addItem(NSMenuItem.separator())
             
-            let customItem = NSMenuItem(title: "Custom...", action: nil, keyEquivalent: "")
+            let customItem = NSMenuItem(
+                title: AppLanguage.localized("custom.ellipsis"),
+                action: nil,
+                keyEquivalent: ""
+            )
             customItem.tag = -1
             customItem.target = context.coordinator
             customItem.action = #selector(Coordinator.customOptionSelected(_:))
@@ -93,13 +101,13 @@ struct ComboBoxView: NSViewRepresentable {
         @objc func customOptionSelected(_ sender: NSMenuItem) {
             // Create dialog window for value input
             let alert = NSAlert()
-            alert.messageText = "Enter custom value"
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Cancel")
+            alert.messageText = AppLanguage.localized("enter.custom.value")
+            alert.addButton(withTitle: AppLanguage.localized("ok"))
+            alert.addButton(withTitle: AppLanguage.localized("cancel"))
             
             let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
             textField.stringValue = parent.selectedOption
-            textField.placeholderString = "Enter value..."
+            textField.placeholderString = AppLanguage.localized("enter.value.ellipsis")
             
             alert.accessoryView = textField
             

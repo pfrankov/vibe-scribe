@@ -12,17 +12,17 @@ enum ProcessingState: Equatable {
     var displayText: String {
         switch self {
         case .idle:
-            return "Ready"
+            return AppLanguage.localized("ready")
         case .transcribing:
-            return "Transcribing..."
+            return AppLanguage.localized("transcribing.ellipsis")
         case .streamingTranscription:
-            return "Streaming transcription..."
+            return AppLanguage.localized("streaming.transcription.ellipsis")
         case .summarizing:
-            return "Summarizing..."
+            return AppLanguage.localized("summarizing.ellipsis")
         case .completed:
-            return "Completed"
+            return AppLanguage.localized("completed")
         case .error(let message):
-            return "Error: \(message)"
+            return String(format: AppLanguage.localized("error.arg1"), message)
         }
     }
     
@@ -134,7 +134,7 @@ struct ProcessingProgressView: View {
                             Image(systemName: "waveform")
                                 .foregroundStyle(primaryColor.opacity(0.7))
                                 .font(.system(size: 10))
-                            Text("Live")
+                            Text(AppLanguage.localized("live"))
                                 .font(.caption2)
                                 .fontWeight(.medium)
                                 .foregroundStyle(primaryColor.opacity(0.8))

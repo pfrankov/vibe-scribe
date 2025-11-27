@@ -128,21 +128,21 @@ final class RecordProcessingManager: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .recordNotFound:
-                return "Record not found. It may have been deleted."
+                return AppLanguage.localized("record.not.found.it.may.have.been.deleted")
             case .missingAudioFile:
-                return "Audio file not found on disk."
+                return AppLanguage.localized("audio.file.not.found.on.disk")
             case .emptyCleanText:
-                return "Transcription text is empty after processing."
+                return AppLanguage.localized("transcription.text.is.empty.after.processing")
             case .summaryEmpty:
-                return "Summary is empty."
+                return AppLanguage.localized("summary.is.empty")
             case .invalidURL:
-                return "Invalid API URL."
+                return AppLanguage.localized("invalid.api.url.2")
             case .invalidResponse:
-                return "Unexpected response format from LLM server."
+                return AppLanguage.localized("unexpected.response.format.from.llm.server")
             case .openAIHTTPError(let code):
-                return "HTTP error from LLM server: \(code)"
+                return String(format: AppLanguage.localized("http.error.from.llm.server.arg1"), code)
             case .chunkFailed(let index, let message):
-                return "Error summarizing chunk \(index + 1): \(message)"
+                return String(format: AppLanguage.localized("error.summarizing.chunk.arg1.arg2"), index + 1, message)
             }
         }
     }
@@ -319,7 +319,7 @@ final class RecordProcessingManager: ObservableObject {
                     let localeOverride = job.settings.selectedSpeechAnalyzerLocale
                     transcriptionText = try await performSpeechAnalyzerTranscription(fileURL: fileURL, locale: localeOverride)
                 } catch let error as TranscriptionError {
-                    Logger.warning("Native transcription failed: \(error.description). Falling back to configured service.", category: .transcription)
+                    Logger.warning("Native transcription failed: \(error.localizedDescription). Falling back to configured service.", category: .transcription)
                     transcriptionText = try await performRegularTranscription(job: job, fileURL: fileURL)
                 } catch {
                     Logger.warning("Native transcription failed with unexpected error: \(error.localizedDescription). Falling back to configured service.", category: .transcription)
@@ -346,7 +346,7 @@ final class RecordProcessingManager: ObservableObject {
                 record.hasTranscription = true
                 record.transcriptionText = ""
                 updateState(for: job.recordID) { state in
-                    state.transcriptionError = "Error: Empty transcription received. Please try again with a different model or check your audio quality."
+                    state.transcriptionError = AppLanguage.localized("error.empty.transcription.received.please.try.again.with.a.different.model.or.check.your.audio.quality")
                 }
             } else {
                 record.hasTranscription = true
@@ -363,11 +363,11 @@ final class RecordProcessingManager: ObservableObject {
             }
         } catch let error as TranscriptionError {
             updateState(for: job.recordID) { state in
-                state.transcriptionError = "Error: \(error.description)"
+                state.transcriptionError = String(format: AppLanguage.localized("error.arg1"), error.localizedDescription)
             }
         } catch {
             updateState(for: job.recordID) { state in
-                state.transcriptionError = "Error: \(error.localizedDescription)"
+                state.transcriptionError = String(format: AppLanguage.localized("error.arg1"), error.localizedDescription)
             }
         }
     }
@@ -427,11 +427,15 @@ final class RecordProcessingManager: ObservableObject {
     private func performRegularTranscription(job: ProcessingJob, fileURL: URL) async throws -> String {
         let fallbackBaseURL = job.settings.resolvedWhisperBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !fallbackBaseURL.isEmpty else {
-            throw TranscriptionError.processingFailed("Remote transcription fallback requires a configured Whisper endpoint.")
+            throw TranscriptionError.processingFailed(
+                AppLanguage.localized("remote.transcription.fallback.requires.a.configured.whisper.endpoint")
+            )
         }
 
         guard APIURLBuilder.isValidBaseURL(fallbackBaseURL) else {
-            throw TranscriptionError.processingFailed("Whisper endpoint \(fallbackBaseURL) is not a valid base URL.")
+            throw TranscriptionError.processingFailed(
+                String(format: AppLanguage.localized("whisper.endpoint.arg1.is.not.a.valid.base.url"), fallbackBaseURL)
+            )
         }
 
         let settingsModel = job.settings.makeWhisperSettings()
@@ -505,7 +509,7 @@ final class RecordProcessingManager: ObservableObject {
             !transcriptionText.isEmpty
         else {
             updateState(for: job.recordID) { state in
-                state.summaryError = "Transcription text is required before summarizing."
+                state.summaryError = AppLanguage.localized("transcription.text.is.required.before.summarizing")
             }
             return
         }
@@ -539,7 +543,8 @@ final class RecordProcessingManager: ObservableObject {
             }
         } catch {
             updateState(for: job.recordID) { state in
-                state.summaryError = "Error: \((error as? RecordProcessingError)?.localizedDescription ?? error.localizedDescription)"
+                let message = (error as? RecordProcessingError)?.localizedDescription ?? error.localizedDescription
+                state.summaryError = String(format: AppLanguage.localized("error.arg1"), message)
             }
         }
     }

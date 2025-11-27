@@ -28,11 +28,11 @@ enum WhisperProvider: String, CaseIterable, Identifiable, Codable {
     var displayName: String {
         switch self {
         case .speechAnalyzer:
-            return "Native"
+            return AppLanguage.localized("native")
         case .whisperServer:
-            return "WhisperServer"
+            return AppLanguage.localized("whisperserver")
         case .compatibleAPI:
-            return "Whisper compatible API"
+            return AppLanguage.localized("whisper.compatible.api")
         }
     }
     
@@ -111,6 +111,9 @@ final class AppSettings {
     var openAIBaseURL: String = "https://api.openai.com/v1/"
     var openAIAPIKey: String = ""
     var openAIModel: String = ""
+
+    // Interface language override (empty = system)
+    var appLanguageCode: String = ""
     
     // Prompts
     var chunkPrompt: String = """

@@ -265,15 +265,15 @@ enum AudioUtilsError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .fileNotFound(let message):
-            return "File not found: \(message)"
+            return String(format: AppLanguage.localized("file.not.found.arg1", comment: "Generic file missing error"), message)
         case .trackLoadingFailed(let message):
-            return "Track loading failed: \(message)"
+            return String(format: AppLanguage.localized("track.loading.failed.arg1", comment: "Audio merge error"), message)
         case .compositionFailed(let message):
-            return "Composition failed: \(message)"
+            return String(format: AppLanguage.localized("composition.failed.arg1", comment: "Audio merge composition error"), message)
         case .exportFailed(let message):
-            return "Export failed: \(message)"
+            return String(format: AppLanguage.localized("export.failed.arg1", comment: "Audio export error"), message)
         case .exportCancelled:
-            return "Export was cancelled"
+            return AppLanguage.localized("export.was.cancelled")
         }
     }
-} 
+}

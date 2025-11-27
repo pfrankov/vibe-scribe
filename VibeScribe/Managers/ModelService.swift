@@ -55,12 +55,12 @@ class ModelService: ObservableObject {
         errorKeyPath: ReferenceWritableKeyPath<ModelService, String?>
     ) {
         guard !baseURL.isEmpty else {
-            self[keyPath: errorKeyPath] = "Base URL is required"
+            self[keyPath: errorKeyPath] = AppLanguage.localized("base.url.is.required")
             return
         }
         
         guard APIURLBuilder.isValidBaseURL(baseURL) else {
-            self[keyPath: errorKeyPath] = "Invalid base URL format"
+            self[keyPath: errorKeyPath] = AppLanguage.localized("invalid.base.url.format")
             return
         }
         
@@ -154,15 +154,15 @@ enum ModelServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "Invalid API URL"
+            return AppLanguage.localized("invalid.api.url")
         case .invalidResponse:
-            return "Invalid server response"
+            return AppLanguage.localized("invalid.server.response")
         case .httpError(let code):
-            return "HTTP error: \(code)"
+            return String(format: AppLanguage.localized("http.error.arg1"), code)
         case .noData:
-            return "No data received from server"
+            return AppLanguage.localized("no.data.received.from.server")
         case .invalidResponseFormat:
-            return "Unexpected response format"
+            return AppLanguage.localized("unexpected.response.format")
         }
     }
-} 
+}

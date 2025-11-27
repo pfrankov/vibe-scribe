@@ -97,11 +97,11 @@ final class OverlayWindowManager: ObservableObject {
         guard let base = panel else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Discard recording?"
-        alert.informativeText = "This will stop and delete the current recording."
+        alert.messageText = AppLanguage.localized("discard.recording")
+        alert.informativeText = AppLanguage.localized("this.will.stop.and.delete.the.current.recording")
         // Standard button order (right-to-left): default on right, Cancel on left
-        alert.addButton(withTitle: "Discard") // first button = rightmost
-        alert.addButton(withTitle: "Cancel")  // second button = leftmost
+        alert.addButton(withTitle: AppLanguage.localized("discard")) // first button = rightmost
+        alert.addButton(withTitle: AppLanguage.localized("cancel"))  // second button = leftmost
         alert.buttons.first?.hasDestructiveAction = true
         // Show as app-modal (not a sheet) to avoid dimming the overlay window
         // and ensure it floats above our non-activating panel.

@@ -22,7 +22,7 @@ struct RecordRow: View {
             // ZStack to overlay TextField on Text for editing
             ZStack(alignment: .leading) {
                 // --- TextField (Visible when editing) ---
-                TextField("Name", text: $editingName)
+                TextField(AppLanguage.localized("name"), text: $editingName)
                     .textFieldStyle(.plain) // Standard plain style
                     .focused($isNameFieldFocused)
                     .onSubmit { // Handle Enter key press
@@ -74,7 +74,12 @@ struct RecordRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .accessibilityLabel(
-                        "Tags: \(record.sortedTags.map { "#\($0.name)" }.joined(separator: "  "))"
+                        Text(
+                            String(
+                                format: AppLanguage.localized("tags.arg1", comment: "Accessibility label listing tags"),
+                                record.sortedTags.map { "#\($0.name)" }.joined(separator: "  ")
+                            )
+                        )
                     )
             }
         }
@@ -101,13 +106,13 @@ struct RecordRow: View {
 
         HStack(spacing: 6) {
             if record.hasSystemAudio {
-                icon(systemName: "speaker.wave.2", helpText: "Includes system audio")
+                icon(systemName: "speaker.wave.2", helpText: AppLanguage.localized("includes.system.audio"))
             }
 
             if showsSummary {
-                icon(systemName: "sparkles", helpText: "Summary available")
+                icon(systemName: "sparkles", helpText: AppLanguage.localized("summary.available"))
             } else if showsTranscription {
-                icon(systemName: "text.alignleft", helpText: "Transcription available")
+                icon(systemName: "text.alignleft", helpText: AppLanguage.localized("transcription.available"))
             }
         }
         .font(.system(size: 11, weight: .semibold))

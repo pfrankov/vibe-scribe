@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "VibeScribe";
+"NSMicrophoneUsageDescription" = "VibeScribe нужен доступ к микрофону для записи аудио для транскрипции.";
+"NSScreenCaptureDescription" = "VibeScribe нужен доступ к записи экрана, чтобы сохранять системный звук для транскрипции.";
+"NSSpeechRecognitionUsageDescription" = "VibeScribe использует распознавание речи для преобразования записей в текст на этом Mac.";
