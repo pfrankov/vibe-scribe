@@ -16,11 +16,11 @@ import Speech
 // MARK: - UI Constants
 private struct UIConstants {
     static let spacing: CGFloat = 16
-    static let smallSpacing: CGFloat = 6
-    static let tinySpacing: CGFloat = 4
+    static let smallSpacing: CGFloat = 8
+    static let tinySpacing: CGFloat = 6
     
-    static let horizontalMargin: CGFloat = 24
-    static let verticalMargin: CGFloat = 16
+    static let horizontalMargin: CGFloat = 28
+    static let verticalMargin: CGFloat = 18
     
     static let cornerRadius: CGFloat = 6
     static let textEditorHeight: CGFloat = 100
@@ -170,8 +170,6 @@ struct SettingsView: View {
             if !appLanguageCode.isEmpty, existingSettings.appLanguageCode != appLanguageCode {
                 existingSettings.appLanguageCode = appLanguageCode
                 try? modelContext.save()
-            } else if appLanguageCode.isEmpty, !existingSettings.appLanguageCode.isEmpty {
-                appLanguageCode = existingSettings.appLanguageCode
             }
             return existingSettings
         } else {
@@ -203,14 +201,14 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 20)
+            .padding(.horizontal, UIConstants.horizontalMargin)
             .padding(.top, UIConstants.smallSpacing)
-            .padding(.bottom, UIConstants.spacing)
+            .padding(.bottom, UIConstants.smallSpacing)
             .frame(maxWidth: UIConstants.tabPickerMaxWidth)
             
             // Content
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: UIConstants.spacing * 1.5) {
+                VStack(alignment: .leading, spacing: UIConstants.spacing) {
                     if selectedTab == .speechToText {
                         speechToTextContent
                     } else {
@@ -224,7 +222,8 @@ struct SettingsView: View {
                     Spacer(minLength: UIConstants.spacing)
                 }
                 .padding(.horizontal, UIConstants.horizontalMargin)
-                .padding(.vertical, UIConstants.verticalMargin)
+                .padding(.top, UIConstants.smallSpacing)
+                .padding(.bottom, UIConstants.verticalMargin)
                 .contentShape(Rectangle()) // Make the content area tappable
                 .onTapGesture {
                     // Dismiss focus when tapping on empty space in content area
@@ -335,8 +334,8 @@ struct SettingsView: View {
             .foregroundStyle(Color(NSColor.secondaryLabelColor))
             .help("Close settings")
         }
-        .padding(.horizontal, 20)
-        .padding(.top, UIConstants.spacing)
+        .padding(.horizontal, UIConstants.horizontalMargin)
+        .padding(.top, UIConstants.verticalMargin)
         .padding(.bottom, UIConstants.smallSpacing)
     }
     
@@ -726,7 +725,7 @@ struct SettingsView: View {
         value: Binding<String>,
         caption: LocalizedStringKey
     ) -> some View {
-        VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+        VStack(alignment: .leading, spacing: UIConstants.smallSpacing) {
             Text(title)
                 .font(.system(size: UIConstants.fontSize))
             
@@ -824,6 +823,7 @@ struct SettingsView: View {
         }
         .padding(.horizontal, UIConstants.horizontalMargin)
         .padding(.top, UIConstants.smallSpacing)
+        .padding(.bottom, UIConstants.smallSpacing)
         .frame(maxWidth: .infinity, alignment: .leading)
         .alert(AppLanguage.localized("app.language.restart.required"), isPresented: $showRestartAlert) {
             Button(AppLanguage.localized("restart.now")) {
