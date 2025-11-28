@@ -831,10 +831,27 @@ struct SettingsView: View {
         }
     }
 
+    @MainActor
     private func restartApp() {
-        let url = Bundle.main.bundleURL
-        NSWorkspace.shared.open(url)
-        NSApp.terminate(nil)
+        let bundleURL = Bundle.main.bundleURL
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.createsNewApplicationInstance = true
+
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, error in
+            if let error = error {
+                Logger.error("Failed to relaunch app", error: error, category: .ui)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                NSApp.terminate(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    if NSApp.isRunning {
+                        Logger.warning("Exiting current instance after restart request", category: .ui)
+                        exit(EXIT_SUCCESS)
+                    }
+                }
+            }
+        }
     }
 
     private func displayName(for languageCode: String) -> String {
