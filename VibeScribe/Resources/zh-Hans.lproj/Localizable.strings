@@ -122,6 +122,8 @@
 "sk.ellipsis" = "sk-...";
 "your.whisper.api.key.leave.empty.for.local.servers.that.dont.require.authentication" = "您的 Whisper API 密钥。对于不需要身份验证的本地服务器，请留空。";
 "whisper.compatible.api" = "Whisper 兼容 API";
+"default.provider" = "默认（FluidAudio）";
+"default.provider.caption" = "基于 FluidAudio 的本地转录。模型会在首次使用时下载并在设备上运行。";
 "native" = "原生";
 "whisperserver" = "WhisperServer";
 "openai.compatible.api.base.url" = "OpenAI 兼容 API 基础 URL";

@@ -899,7 +899,7 @@ struct RecordDetailView: View {
                     allowsCustomInput: false
                 )
                 .frame(width: 220, height: 32)
-            } else if settings.whisperProvider != .speechAnalyzer {
+            } else if settings.whisperProvider.requiresModelSelection {
                 ComboBoxView(
                     placeholder: whisperModelOptions.isEmpty
                         ? AppLanguage.localized("select.transcription.model")

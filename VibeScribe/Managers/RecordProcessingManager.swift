@@ -62,7 +62,7 @@ final class RecordProcessingManager: ObservableObject {
         }
         
         var whisperProvider: WhisperProvider {
-            WhisperProvider(rawValue: whisperProviderRawValue) ?? .compatibleAPI
+            WhisperProvider(rawValue: whisperProviderRawValue) ?? .defaultProvider
         }
         
         var resolvedWhisperBaseURL: String {
@@ -75,6 +75,14 @@ final class RecordProcessingManager: ObservableObject {
         
         var usesSpeechAnalyzer: Bool {
             whisperProvider == .speechAnalyzer
+        }
+        
+        var usesDefaultProvider: Bool {
+            whisperProvider == .defaultProvider
+        }
+        
+        var supportsStreaming: Bool {
+            whisperProvider.supportsStreaming
         }
         
         var selectedSpeechAnalyzerLocale: Locale? {
@@ -178,7 +186,7 @@ final class RecordProcessingManager: ObservableObject {
         preferStreaming: Bool = true
     ) {
         let snapshot = SettingsSnapshot(settings: settings)
-        let resolvedPreferStreaming = preferStreaming && snapshot.whisperProvider != .speechAnalyzer
+        let resolvedPreferStreaming = preferStreaming && snapshot.supportsStreaming
         let job = ProcessingJob(
             recordID: record.id,
             modelContext: context,
@@ -314,7 +322,9 @@ final class RecordProcessingManager: ObservableObject {
         
         do {
             let transcriptionText: String
-            if job.settings.usesSpeechAnalyzer {
+            if job.settings.usesDefaultProvider {
+                transcriptionText = try await performDefaultTranscription(fileURL: fileURL)
+            } else if job.settings.usesSpeechAnalyzer {
                 do {
                     let localeOverride = job.settings.selectedSpeechAnalyzerLocale
                     transcriptionText = try await performSpeechAnalyzerTranscription(fileURL: fileURL, locale: localeOverride)
@@ -371,6 +381,17 @@ final class RecordProcessingManager: ObservableObject {
             }
         }
     }
+
+    private func performDefaultTranscription(fileURL: URL) async throws -> String {
+        do {
+            return try await DefaultTranscriptionManager.shared.transcribeAudio(at: fileURL)
+        } catch let error as TranscriptionError {
+            throw error
+        } catch {
+            throw TranscriptionError.processingFailed(error.localizedDescription)
+        }
+    }
+
     private func attemptStreamingTranscription(job: ProcessingJob, fileURL: URL) async throws -> String {
         var accumulatedText = ""
         let settingsModel = job.settings.makeWhisperSettings()

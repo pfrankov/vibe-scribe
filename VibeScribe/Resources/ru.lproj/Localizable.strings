@@ -122,6 +122,8 @@
 "sk.ellipsis" = "sk-...";
 "your.whisper.api.key.leave.empty.for.local.servers.that.dont.require.authentication" = "Ваш API ключ Whisper. Оставьте пустым для локальных серверов без аутентификации.";
 "whisper.compatible.api" = "Whisper-совместимый API";
+"default.provider" = "По умолчанию (FluidAudio)";
+"default.provider.caption" = "Локальная транскрибация на базе FluidAudio. Модели скачиваются при первом запуске и работают на устройстве.";
 "native" = "Нативный";
 "whisperserver" = "WhisperServer";
 "openai.compatible.api.base.url" = "Базовый URL OpenAI-совместимого API";

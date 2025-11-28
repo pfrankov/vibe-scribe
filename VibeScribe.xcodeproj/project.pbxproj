@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		E6ADCD5E2DBF2F5A00E8B7C3 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E6ADCD5C2DBF2F5A00E8B7C3 /* MarkdownUI */; };
+		E6F1F0002E0B6A0B00D1AA01 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = E6F1F0012E0B6A0B00D1AA01 /* FluidAudio */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E6F1F0002E0B6A0B00D1AA01 /* FluidAudio in Frameworks */,
 				E6ADCD5E2DBF2F5A00E8B7C3 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -83,6 +85,7 @@
 			);
 			name = VibeScribe;
 			packageProductDependencies = (
+				E6F1F0012E0B6A0B00D1AA01 /* FluidAudio */,
 				E6ADCD5C2DBF2F5A00E8B7C3 /* MarkdownUI */,
 			);
 			productName = VibeScribe;
@@ -117,6 +120,7 @@
 			mainGroup = 8DC1583B2DAC281A00BECEAC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				E6F1F0022E0B6A0B00D1AA01 /* XCRemoteSwiftPackageReference "fluidaudio" */,
 				E6ADCD5D2DBF2F5A00E8B7C3 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -384,6 +388,14 @@
 				minimumVersion = 2.0.2;
 			};
 		};
+		E6F1F0022E0B6A0B00D1AA01 /* XCRemoteSwiftPackageReference "fluidaudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/fluidinference/fluidaudio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.7.9;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -391,6 +403,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E6ADCD5D2DBF2F5A00E8B7C3 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
+		};
+		E6F1F0012E0B6A0B00D1AA01 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E6F1F0022E0B6A0B00D1AA01 /* XCRemoteSwiftPackageReference "fluidaudio" */;
+			productName = FluidAudio;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

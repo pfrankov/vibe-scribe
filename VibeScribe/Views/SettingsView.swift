@@ -359,6 +359,10 @@ struct SettingsView: View {
             .labelsHidden()
         }
 
+        if settings.whisperProvider == .defaultProvider {
+            InlineMessageView(AppLanguage.localized("default.provider.caption"), style: .info)
+        }
+
         if settings.whisperProvider == .speechAnalyzer {
             speechAnalyzerLanguageSection
         }
