@@ -45,6 +45,7 @@ struct RecordDetailView: View {
     @StateObject private var playerManager = AudioPlayerManager()
     @ObservedObject private var modelService = ModelService.shared
     @ObservedObject private var processingManager = RecordProcessingManager.shared
+    @ObservedObject private var diarizationManager = SpeakerDiarizationManager.shared
     @State private var selectedTab: Tab = .summary // Default to summary tab
     @State private var isAutomaticMode = false // Track if this is a new record that should auto-process
 
@@ -60,6 +61,8 @@ struct RecordDetailView: View {
     @State private var isSummaryEditing: Bool = false
     @State private var transcriptionSaveWorkItem: DispatchWorkItem?
     @State private var summarySaveWorkItem: DispatchWorkItem?
+    @State private var annotationWorkItem: DispatchWorkItem?
+    @State private var annotatedTranscription: String = ""
 
     // State for inline title editing - Renamed for clarity
     @State private var isEditingTitle: Bool = false
@@ -86,6 +89,9 @@ struct RecordDetailView: View {
     private let inlineSaveDebounceInterval: TimeInterval = 0.75
     private let copiedIndicationDuration: TimeInterval = 2.0
     @State private var spaceKeyMonitor: Any?
+    @State private var isSpeakerModalPresented = false
+    @State private var mergeTargetID: UUID?
+    @State private var mergeSelection: Set<UUID> = []
 
     // Removed tuning controls (auto-optimized waveform)
 
@@ -224,6 +230,14 @@ struct RecordDetailView: View {
     private enum ActiveEditor: Hashable {
         case transcription
         case summary
+    }
+
+    // Aggregated speaker info for the current record
+    private struct SpeakerSummary: Identifiable {
+        var id: UUID { speaker.id }
+        let speaker: SpeakerProfile
+        let duration: TimeInterval
+        let share: Double
     }
     
     // Reusable copy button component
@@ -789,9 +803,10 @@ struct RecordDetailView: View {
     }
 
     private func removeTag(_ tag: Tag) {
-        if withAnimation(.easeInOut(duration: 0.2)) { tagManager.detach(tag, from: record, in: modelContext) } {
-            persistTagChanges(reason: "remove tag \(tag.name)")
+        let didRemove = withAnimation(.easeInOut(duration: 0.2)) {
+            tagManager.detach(tag, from: record, in: modelContext)
         }
+        if didRemove { persistTagChanges(reason: "remove tag \(tag.name)") }
     }
 
     /// Commits a tag by name, either attaching existing or creating new
@@ -858,7 +873,13 @@ struct RecordDetailView: View {
             }
 
         InlineEditableTextArea(
-            text: $transcriptionDraft,
+            text: Binding(
+                get: { annotatedTranscription },
+                set: { newValue in
+                    transcriptionDraft = stripSpeakerLabels(from: newValue)
+                    scheduleAnnotationRefresh()
+                }
+            ),
             placeholder: AppLanguage.localized("start.typing.transcription.ellipsis"),
             statusMessage: transcriptionStatusMessage,
             focusBinding: $focusedEditor,
@@ -1009,6 +1030,177 @@ struct RecordDetailView: View {
         }
     }
 
+    private var speakersSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label(AppLanguage.localized("speakers"), systemImage: "person.2.wave.2.fill")
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    isSpeakerModalPresented = true
+                    primeMergeDefaults()
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .help(AppLanguage.localized("rename.speakers"))
+
+                if isDiarizing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 4)
+                }
+            }
+
+            if let error = diarizationError {
+                InlineMessageView(error)
+            }
+
+            if !timelineSegments.isEmpty {
+                SpeakerTimelineView(
+                    duration: record.duration,
+                    playbackTime: playerManager.currentTime,
+                    segments: timelineSegments,
+                    onSeek: handleSpeakerSeek
+                )
+            } else if !isDiarizing {
+                InlineMessageView(AppLanguage.localized("no.speakers.yet"), style: .info)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var speakerMergeSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.75))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "person.3.sequence")
+                        .font(.system(size: 18, weight: .semibold))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AppLanguage.localized("merge.speakers"))
+                        .font(.title3.weight(.semibold))
+                    Text(AppLanguage.localized("speaker.merge.instructions"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    isSpeakerModalPresented = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.secondary)
+                        .font(.system(size: 18, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if speakerSummaries.isEmpty {
+                InlineMessageView(AppLanguage.localized("no.speakers.yet"), style: .info)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(speakerSummaries) { summary in
+                            speakerMergeCard(for: summary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: 340)
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    performMerge()
+                } label: {
+                    Label(AppLanguage.localized("merge.selected"), systemImage: "arrow.triangle.merge")
+                }
+                .disabled(!canMerge)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+    }
+
+    private func speakerMergeCard(for summary: SpeakerSummary) -> some View {
+        let tint = Color(hue: summary.speaker.accentHue, saturation: 0.65, brightness: 0.95)
+        let isTarget = mergeTargetID == summary.speaker.id
+
+        return HStack(alignment: .top, spacing: 12) {
+            Button {
+                mergeTargetID = summary.speaker.id
+                mergeSelection.insert(summary.speaker.id)
+            } label: {
+                Image(systemName: isTarget ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            .buttonStyle(.plain)
+            .help(AppLanguage.localized("merge.target"))
+
+            VStack(alignment: .leading, spacing: 8) {
+                TextField(
+                    AppLanguage.localized("rename.speaker.placeholder"),
+                    text: Binding(
+                        get: { summary.speaker.displayName },
+                        set: { newValue in
+                            summary.speaker.displayName = newValue
+                            summary.speaker.isUserRenamed = true
+                        }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.headline)
+                .onSubmit {
+                    persistSpeakerChanges()
+                }
+
+                HStack(spacing: 10) {
+                    Label("\(AppLanguage.localized("speaker.record.time")) \(summary.duration.clockString)", systemImage: "waveform")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Label("\(AppLanguage.localized("speaker.library.time")) \(summary.speaker.totalDuration.clockString)", systemImage: "clock")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Toggle(isOn: Binding(
+                    get: { mergeSelection.contains(summary.speaker.id) },
+                    set: { isOn in
+                        if isOn {
+                            mergeSelection.insert(summary.speaker.id)
+                        } else if summary.speaker.id != mergeTargetID {
+                            mergeSelection.remove(summary.speaker.id)
+                        }
+                    }
+                )) {
+                    Text(AppLanguage.localized("merge.include"))
+                        .font(.subheadline)
+                }
+                .toggleStyle(.checkbox)
+                .tint(tint)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.9))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isTarget ? tint : Color(NSColor.separatorColor).opacity(0.35), lineWidth: 1)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+    }
+
     private var processingSection: some View {
         Group {
             switch currentProcessingState {
@@ -1052,6 +1244,12 @@ struct RecordDetailView: View {
 
     private var hasSummaryContent: Bool {
         !trimmedSummaryDraft.isEmpty
+    }
+
+    private var canMerge: Bool {
+        guard let targetID = mergeTargetID else { return false }
+        let selectedOthers = mergeSelection.filter { $0 != targetID }
+        return !selectedOthers.isEmpty
     }
     
     // Get current settings
@@ -1100,6 +1298,66 @@ struct RecordDetailView: View {
 
     private var streamingChunks: [String] {
         processingStatus.streamingChunks
+    }
+
+    private var diarizationState: SpeakerDiarizationManager.State {
+        diarizationManager.state(for: record.id)
+    }
+
+    private var diarizationError: String? {
+        diarizationState.error
+    }
+
+    private var isDiarizing: Bool {
+        diarizationState.isProcessing
+    }
+
+    private var timelineSegments: [SpeakerTimelineSegment] {
+        speakerSegments.compactMap { segment in
+            guard segment.endTime > segment.startTime else { return nil }
+            let speakerName = segment.speaker?.displayName ?? AppLanguage.localized("speaker")
+            let hue = segment.speaker?.accentHue ?? 0.08
+            return SpeakerTimelineSegment(
+                id: segment.id,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                hue: hue,
+                label: speakerName
+            )
+        }
+    }
+
+    private var speakerSegments: [RecordSpeakerSegment] {
+        record.speakerSegments.sorted { lhs, rhs in
+            lhs.startTime < rhs.startTime
+        }
+    }
+
+    private var speakerChangeSignature: String {
+        speakerSegments.map { segment in
+            let name = segment.speaker?.displayName ?? ""
+            return "\(segment.id.uuidString)|\(segment.startTime)|\(segment.endTime)|\(name)"
+        }
+        .joined(separator: ";")
+    }
+
+    private var speakerSummaries: [SpeakerSummary] {
+        var totals: [UUID: TimeInterval] = [:]
+        for segment in speakerSegments {
+            guard let speaker = segment.speaker else { continue }
+            totals[speaker.id, default: 0] += segment.duration
+        }
+
+        return totals.compactMap { id, duration in
+            guard let speaker = speakerSegments.first(where: { $0.speaker?.id == id })?.speaker else {
+                return nil
+            }
+            let share = record.duration > 0 ? duration / record.duration : 0
+            return SpeakerSummary(speaker: speaker, duration: duration, share: share)
+        }
+        .sorted { lhs, rhs in
+            lhs.duration > rhs.duration
+        }
     }
 
     private var currentProcessingState: ProcessingState {
@@ -1195,6 +1453,7 @@ struct RecordDetailView: View {
                 headerSection
                 playerControls
             }
+            speakersSection
             Divider()
             processingSection
             tabsSection
@@ -1216,8 +1475,11 @@ struct RecordDetailView: View {
             selectedWhisperModel = settings.whisperModel
             selectedSummaryModel = settings.openAIModel
             selectedSpeechAnalyzerLocale = settings.speechAnalyzerLocaleIdentifier
+            transcriptionDraft = stripSpeakerLabels(from: record.transcriptionText ?? "")
+            scheduleAnnotationRefresh(force: true)
             
             loadSpeechAnalyzerLocales()
+            primeMergeDefaults()
 
             // Initialize processing state based on current record state
             // --- Refined File Loading Logic ---
@@ -1359,10 +1621,19 @@ struct RecordDetailView: View {
             handleProcessingStateChange()
         })
 
+        view = AnyView(view.onChange(of: speakerChangeSignature) { _, _ in
+            scheduleAnnotationRefresh(force: true, persist: true)
+        })
+
+        view = AnyView(view.onChange(of: record.lastDiarizationAt) { _, _ in
+            scheduleAnnotationRefresh(force: true, persist: true)
+        })
+
         view = AnyView(view.onChange(of: record.transcriptionText ?? "") { _, newValue in
             guard focusedEditor != .transcription else { return }
             if newValue != transcriptionDraft {
                 transcriptionDraft = newValue
+                scheduleAnnotationRefresh()
             }
         })
 
@@ -1402,6 +1673,13 @@ struct RecordDetailView: View {
                 Button(AppLanguage.localized("cancel"), role: .cancel) { }
             } message: {
                 Text(AppLanguage.localized("this.will.permanently.remove.the.recording.transcription.and.summary.this.action.cannot.be.undone"))
+            }
+        )
+
+        view = AnyView(
+            view.sheet(isPresented: $isSpeakerModalPresented) {
+                speakerMergeSheet
+                    .frame(minWidth: 420, minHeight: 320)
             }
         )
 
@@ -1494,9 +1772,169 @@ struct RecordDetailView: View {
         isTitleFieldFocused = false
     }
 
+    // MARK: - Speaker Diarization
+
+    private func persistSpeakerChanges() {
+        do {
+            try modelContext.save()
+            Logger.debug("Speaker updates saved", category: .ui)
+            scheduleAnnotationRefresh(force: true, persist: true)
+        } catch {
+            Logger.error("Failed to save speaker updates", error: error, category: .ui)
+        }
+    }
+
+    private func annotateTranscription(baseText: String) -> String {
+        guard !baseText.isEmpty else {
+            return speakerSegments.map { segment in
+                let time = clockString(from: segment.startTime)
+                let name = segment.speaker?.displayName ?? AppLanguage.localized("speaker")
+                return "[\(time)] \(name):"
+            }.joined(separator: "\n")
+        }
+
+        let lines = baseText.components(separatedBy: .newlines)
+        let segments = speakerSegments
+
+        func speakerName(for time: TimeInterval) -> String {
+            if let segment = segments.first(where: { time >= $0.startTime && time < $0.endTime }) {
+                return segment.speaker?.displayName ?? AppLanguage.localized("speaker")
+            }
+            return AppLanguage.localized("speaker")
+        }
+
+        var annotated: [String] = []
+        var matchedTimestamp = false
+
+        for line in lines {
+            guard let (ts, remainder) = extractTimestamp(from: line) else {
+                annotated.append(line)
+                continue
+            }
+            matchedTimestamp = true
+            let name = speakerName(for: ts)
+            let cleanRemainder = stripLeadingSpeakerPrefix(from: remainder)
+            if cleanRemainder.isEmpty {
+                annotated.append("[\(clockString(from: ts))] \(name):")
+            } else {
+                annotated.append("[\(clockString(from: ts))] \(name): \(cleanRemainder)")
+            }
+        }
+
+        if matchedTimestamp {
+            return annotated.joined(separator: "\n")
+        }
+
+        // Fallback: split text into chunks and map to segments in order
+        guard !segments.isEmpty else { return baseText }
+        let words = baseText.split(whereSeparator: \.isNewline).joined(separator: " ").split(separator: " ")
+        let chunkSize = max(1, Int(ceil(Double(words.count) / Double(segments.count))))
+        var chunks: [String] = []
+        var start = 0
+        while start < words.count {
+            let end = min(start + chunkSize, words.count)
+            let slice = words[start..<end].joined(separator: " ")
+            chunks.append(slice)
+            start = end
+        }
+
+        var output: [String] = []
+        for (idx, segment) in segments.enumerated() {
+            let textChunk = idx < chunks.count ? chunks[idx] : ""
+            let name = segment.speaker?.displayName ?? AppLanguage.localized("speaker")
+            output.append("[\(clockString(from: segment.startTime))] \(name): \(textChunk)")
+        }
+        return output.joined(separator: "\n")
+    }
+
+    private func stripSpeakerLabels(from text: String) -> String {
+        guard !text.isEmpty else { return text }
+        let lines = text.components(separatedBy: .newlines)
+        let cleaned = lines.map { line in
+            guard let (_, remainder) = extractTimestamp(from: line) else { return line }
+            return stripLeadingSpeakerPrefix(from: remainder)
+        }
+        return cleaned.joined(separator: "\n")
+    }
+
+    private func stripLeadingSpeakerPrefix(from text: String) -> String {
+        var result = text
+        let pattern = #"^\s*[^:]{1,80}:\s*"#
+        while let range = result.range(of: pattern, options: .regularExpression) {
+            result = String(result[range.upperBound...])
+        }
+        return result.trimmingCharacters(in: .whitespaces)
+    }
+
+    private func extractTimestamp(from line: String) -> (TimeInterval, String)? {
+        let pattern = #"^\[(\d{2}):(\d{2}):(\d{2})\]\s*(.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(location: 0, length: line.utf16.count)
+        guard let match = regex.firstMatch(in: line, range: range),
+              match.numberOfRanges == 5,
+              let hRange = Range(match.range(at: 1), in: line),
+              let mRange = Range(match.range(at: 2), in: line),
+              let sRange = Range(match.range(at: 3), in: line),
+              let textRange = Range(match.range(at: 4), in: line) else { return nil }
+
+        let hours = Int(line[hRange]) ?? 0
+        let minutes = Int(line[mRange]) ?? 0
+        let seconds = Int(line[sRange]) ?? 0
+        let ts = TimeInterval(hours * 3600 + minutes * 60 + seconds)
+        let remainder = String(line[textRange])
+        return (ts, remainder)
+    }
+
+    private func clockString(from time: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(time.rounded(.down)))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    private func handleSpeakerSeek(_ target: TimeInterval) {
+        guard playerManager.isReady else { return }
+        playerManager.seek(to: target)
+    }
+
+    private func primeMergeDefaults() {
+        guard let first = speakerSummaries.first else {
+            mergeTargetID = nil
+            mergeSelection = []
+            return
+        }
+        if mergeTargetID == nil {
+            mergeTargetID = first.speaker.id
+        }
+        if mergeSelection.isEmpty {
+            mergeSelection = Set(speakerSummaries.map { $0.speaker.id })
+        }
+    }
+
+    private func performMerge() {
+        guard let targetID = mergeTargetID,
+              let target = speakerSummaries.first(where: { $0.speaker.id == targetID })?.speaker else { return }
+
+        let merging = speakerSummaries
+            .filter { mergeSelection.contains($0.speaker.id) && $0.speaker.id != targetID }
+            .map(\.speaker)
+
+        guard !merging.isEmpty else { return }
+        diarizationManager.mergeSpeakers(
+            target: target,
+            merging: merging,
+            for: record,
+            in: modelContext
+        )
+        scheduleAnnotationRefresh(force: true, persist: true)
+        isSpeakerModalPresented = false
+        primeMergeDefaults()
+    }
+
     private func copyTranscription() {
         copyToClipboard(
-            text: trimmedTranscriptionDraft,
+            text: annotatedTranscription.trimmingCharacters(in: .whitespacesAndNewlines),
             showCopiedBinding: { showTranscriptionCopied = $0 },
             logMessage: "Transcription copied to clipboard."
         )
@@ -1545,7 +1983,7 @@ struct RecordDetailView: View {
         transcriptionSaveWorkItem?.cancel()
         transcriptionSaveWorkItem = nil
 
-        let newStoredValue: String? = hasTranscriptionContent ? transcriptionDraft : nil
+        let newStoredValue: String? = hasTranscriptionContent ? annotatedTranscription : nil
 
         let shouldUpdateText = record.transcriptionText != newStoredValue
         let shouldUpdateFlag = record.hasTranscription != hasTranscriptionContent
@@ -1575,6 +2013,26 @@ struct RecordDetailView: View {
         summarySaveWorkItem = workItem
         DispatchQueue.main.asyncAfter(
             deadline: .now() + inlineSaveDebounceInterval,
+            execute: workItem
+        )
+    }
+
+    private func scheduleAnnotationRefresh(force: Bool = false, persist: Bool = false) {
+        annotationWorkItem?.cancel()
+        let workItem = DispatchWorkItem {
+            let annotated = annotateTranscription(baseText: transcriptionDraft)
+            if force || annotated != annotatedTranscription {
+                annotatedTranscription = annotated
+                if persist, focusedEditor != .transcription {
+                    saveTranscriptionIfNeeded()
+                }
+            } else if persist, focusedEditor != .transcription {
+                saveTranscriptionIfNeeded()
+            }
+        }
+        annotationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + (force ? 0 : inlineSaveDebounceInterval),
             execute: workItem
         )
     }

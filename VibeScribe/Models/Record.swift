@@ -21,6 +21,8 @@ final class Record: Identifiable {
     var summaryText: String?
     var includesSystemAudio: Bool?
     @Relationship(deleteRule: .nullify, inverse: \Tag.records) var tags: [Tag]
+    @Relationship(deleteRule: .cascade, inverse: \RecordSpeakerSegment.record) var speakerSegments: [RecordSpeakerSegment]
+    var lastDiarizationAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -32,7 +34,9 @@ final class Record: Identifiable {
         transcriptionText: String? = nil,
         summaryText: String? = nil,
         includesSystemAudio: Bool = false,
-        tags: [Tag] = []
+        tags: [Tag] = [],
+        speakerSegments: [RecordSpeakerSegment] = [],
+        lastDiarizationAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -44,6 +48,8 @@ final class Record: Identifiable {
         self.summaryText = summaryText
         self.includesSystemAudio = includesSystemAudio
         self.tags = tags
+        self.speakerSegments = speakerSegments
+        self.lastDiarizationAt = lastDiarizationAt
     }
 }
 
@@ -61,6 +67,11 @@ extension Record {
             return false
         }
         return true
+    }
+
+    /// Indicates whether diarization has been performed for this record
+    var hasDiarization: Bool {
+        !speakerSegments.isEmpty
     }
     
     /// Formatted duration string for display purposes

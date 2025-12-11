@@ -367,6 +367,9 @@ final class RecordProcessingManager: ObservableObject {
             }
             
             try job.modelContext.save()
+
+            // Kick off diarization immediately after transcription so it stays in the same pipeline step.
+            SpeakerDiarizationManager.shared.diarize(record: record, in: job.modelContext, force: true)
             
             if automatic, !trimmed.isEmpty {
                 enqueueSummarization(recordID: job.recordID, context: job.modelContext, settings: job.settings, automatic: true)
