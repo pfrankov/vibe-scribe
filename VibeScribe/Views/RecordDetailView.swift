@@ -263,6 +263,13 @@ struct RecordDetailView: View {
         }
     }
 
+    private struct TextEditorHeightKey: PreferenceKey {
+        static var defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
+    }
+
     // Reusable inline editor to keep body lightweight for type-checker
     private struct InlineEditableTextArea: View {
         @Binding var text: String
@@ -273,6 +280,22 @@ struct RecordDetailView: View {
         var onExit: (() -> Void)? = nil
         var onCopy: (() -> Void)? = nil
         var showCopied: Bool = false
+        @State private var measuredContentHeight: CGFloat = 0
+
+        private let editorPadding: CGFloat = 8
+        private let minimumLineCount: Int = 16
+
+        private var editorFont: NSFont {
+            NSFont.preferredFont(forTextStyle: .body)
+        }
+
+        private var minimumContentHeight: CGFloat {
+            TextEditorSizing.minimumContentHeight(for: editorFont, minimumLines: minimumLineCount)
+        }
+
+        private var editorHeight: CGFloat {
+            max(minimumContentHeight, measuredContentHeight)
+        }
 
         var body: some View {
             ZStack(alignment: .topLeading) {
@@ -283,8 +306,9 @@ struct RecordDetailView: View {
                     .font(.body)
                     .focused(focusBinding, equals: editor)
                     .disableAutocorrection(true)
-                    .background(Color.clear)
-                    .padding(8)
+                    .frame(height: editorHeight)
+                    .padding(editorPadding)
+                    .background(heightMeasurer)
                     .onExitCommand {
                         onExit?()
                     }
@@ -314,7 +338,26 @@ struct RecordDetailView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 1)
             )
-            .frame(maxHeight: .infinity)
+            .onPreferenceChange(TextEditorHeightKey.self) { newHeight in
+                let clamped = max(minimumContentHeight, newHeight)
+                if abs(clamped - measuredContentHeight) > 0.5 {
+                    measuredContentHeight = clamped
+                }
+            }
+        }
+
+        private var heightMeasurer: some View {
+            GeometryReader { proxy in
+                let availableWidth = proxy.size.width
+                Color.clear.preference(
+                    key: TextEditorHeightKey.self,
+                    value: TextEditorSizing.contentHeight(
+                        for: text,
+                        font: editorFont,
+                        width: max(availableWidth - editorPadding * 2, 0)
+                    )
+                )
+            }
         }
     }
 
@@ -865,31 +908,41 @@ struct RecordDetailView: View {
         )
     }
 
-    private var transcriptionTab: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let error = transcriptionError {
-                InlineMessageView(error)
-                    .padding(.bottom, 4)
-            }
-
-        InlineEditableTextArea(
-            text: Binding(
-                get: { annotatedTranscription },
-                set: { newValue in
-                    transcriptionDraft = stripSpeakerLabels(from: newValue)
-                    scheduleAnnotationRefresh()
+    @ViewBuilder
+    private var actionBar: some View {
+        if shouldShowContent {
+            VStack(spacing: 0) {
+                Divider()
+                HStack {
+                    Spacer()
+                    actionContent
                 }
-            ),
-            placeholder: AppLanguage.localized("start.typing.transcription.ellipsis"),
-            statusMessage: transcriptionStatusMessage,
-            focusBinding: $focusedEditor,
-            editor: .transcription,
-            onCopy: {
-                copyTranscription()
-            },
-            showCopied: showTranscriptionCopied
-        )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(
+                    Color(NSColor.windowBackgroundColor)
+                        .opacity(colorScheme == .dark ? 0.75 : 0.9)
+                )
+            }
+            .background(
+                Color(NSColor.windowBackgroundColor)
+                    .opacity(colorScheme == .dark ? 0.75 : 0.9)
+            )
+        }
+    }
 
+    @ViewBuilder
+    private var actionContent: some View {
+        switch selectedTab {
+        case .transcription:
+            transcriptionActions
+        case .summary:
+            summaryActions
+        }
+    }
+
+    private var transcriptionActions: some View {
         HStack(spacing: 12) {
             if settings.whisperProvider == .speechAnalyzer {
                 let localeOptions = [AppLanguage.localized("automatic")] + speechAnalyzerLocales.map { localeDisplayName($0) }
@@ -949,8 +1002,63 @@ struct RecordDetailView: View {
             .controlSize(.large)
             .disabled(isTranscribing || record.fileURL == nil)
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.top, 4)
+    }
+
+    private var summaryActions: some View {
+        HStack(spacing: 12) {
+            ComboBoxView(
+                placeholder: summaryModelOptions.isEmpty
+                    ? AppLanguage.localized("select.summary.model")
+                    : AppLanguage.localized("choose.model"),
+                options: summaryModelOptions,
+                selectedOption: $selectedSummaryModel
+            )
+            .frame(width: 220, height: 32)
+
+            Button {
+                requestSummarization(from: .summary)
+            } label: {
+                HStack {
+                    if isSummarizing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "doc.text.magnifyingglass")
+                    }
+                    Text(AppLanguage.localized("summarize"))
+                }
+                .frame(minWidth: 130)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(isSummarizing || !hasTranscriptionContent)
+        }
+    }
+
+    private var transcriptionTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let error = transcriptionError {
+                InlineMessageView(error)
+                    .padding(.bottom, 4)
+            }
+
+        InlineEditableTextArea(
+            text: Binding(
+                get: { annotatedTranscription },
+                set: { newValue in
+                    transcriptionDraft = stripSpeakerLabels(from: newValue)
+                    scheduleAnnotationRefresh()
+                }
+            ),
+            placeholder: AppLanguage.localized("start.typing.transcription.ellipsis"),
+            statusMessage: transcriptionStatusMessage,
+            focusBinding: $focusedEditor,
+            editor: .transcription,
+            onCopy: {
+                copyTranscription()
+            },
+            showCopied: showTranscriptionCopied
+        )
     }
     }
 
@@ -986,37 +1094,6 @@ struct RecordDetailView: View {
                     showCopied: showSummaryCopied
                 )
             }
-
-            HStack(spacing: 12) {
-                ComboBoxView(
-                    placeholder: summaryModelOptions.isEmpty
-                        ? AppLanguage.localized("select.summary.model")
-                        : AppLanguage.localized("choose.model"),
-                    options: summaryModelOptions,
-                    selectedOption: $selectedSummaryModel
-                )
-                .frame(width: 220, height: 32)
-
-                Button {
-                    requestSummarization(from: .summary)
-                } label: {
-                    HStack {
-                        if isSummarizing {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "doc.text.magnifyingglass")
-                        }
-                        Text(AppLanguage.localized("summarize"))
-                    }
-                    .frame(minWidth: 130)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(isSummarizing || !hasTranscriptionContent)
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.top, 4)
         }
         .onAppear { updateSummaryMarkdownContentIfNeeded(force: true) }
         .onChange(of: summaryDraft) { _, _ in
@@ -1463,10 +1540,16 @@ struct RecordDetailView: View {
 
     var body: some View {
         var view = AnyView(
-            mainStack
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.horizontal, 16)
-                .padding(.top, isSidebarCollapsed ? 16 : 0)
+            ScrollView {
+                mainStack
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, isSidebarCollapsed ? 16 : 0)
+                    .padding(.bottom, 24)
+            }
+            .safeAreaInset(edge: .bottom) {
+                actionBar
+            }
         )
 
         view = AnyView(view.animation(.easeInOut(duration: 0.25), value: isSidebarCollapsed))
