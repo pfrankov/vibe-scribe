@@ -15,21 +15,41 @@ actor DefaultTranscriptionManager {
     private var initializationTask: Task<Void, Error>?
 
     func transcribeAudio(at fileURL: URL) async throws -> String {
+        let fileName = fileURL.lastPathComponent
+        let fileSize = formattedFileSize(for: fileURL)
+        let startTime = Date()
+        if let fileSize {
+            Logger.info("Starting FluidAudio transcription for \(fileName) [\(fileSize)]", category: .transcription)
+        } else {
+            Logger.info("Starting FluidAudio transcription for \(fileName)", category: .transcription)
+        }
+
         do {
             try await prepareIfNeeded()
             let result = try await asrManager.transcribe(fileURL, source: .system)
             let trimmed = formatTranscript(result)
 
             guard !trimmed.isEmpty else {
+                Logger.warning("FluidAudio transcription returned empty text for \(fileName)", category: .transcription)
                 throw TranscriptionError.processingFailed(
                     AppLanguage.localized("error.empty.transcription.received.please.try.again.with.a.different.model.or.check.your.audio.quality")
                 )
             }
 
+            let tokenCount = result.tokenTimings?.count ?? 0
+            let elapsed = Date().timeIntervalSince(startTime)
+            Logger.info(
+                "Finished FluidAudio transcription for \(fileName) in \(formatElapsed(elapsed)); tokens: \(tokenCount); characters: \(trimmed.count)",
+                category: .transcription
+            )
+            Logger.info("FluidAudio transcript for \(fileName): \(trimmed)", category: .transcription)
+
             return trimmed
         } catch let error as TranscriptionError {
+            Logger.error("FluidAudio transcription failed for \(fileName)", error: error, category: .transcription)
             throw error
         } catch {
+            Logger.error("FluidAudio transcription failed for \(fileName)", error: error, category: .transcription)
             throw TranscriptionError.processingFailed(error.localizedDescription)
         }
     }
@@ -44,9 +64,23 @@ actor DefaultTranscriptionManager {
         let segments = buildSegments(from: tokenTimings)
         guard !segments.isEmpty else { return fallback }
 
-        return segments
+        let formatted = segments
             .map { "[\(clockString(from: $0.startTime))] \($0.text)" }
             .joined(separator: "\n")
+
+        // If FluidAudio returns timing metadata but the formatted text is implausibly short,
+        // fall back to the raw text to avoid silently truncating the transcript.
+        let tokenCount = tokenTimings.count
+        let expectedFloor = max(fallback.count / 2, tokenCount / 4)
+        if formatted.count < expectedFloor, !fallback.isEmpty {
+            Logger.warning(
+                "Formatted transcript shorter than expected; using raw text instead (formatted=\(formatted.count), raw=\(fallback.count), tokens=\(tokenCount))",
+                category: .transcription
+            )
+            return fallback
+        }
+
+        return formatted
     }
 
     private func buildSegments(from tokenTimings: [TokenTiming]) -> [TranscriptSegment] {
@@ -177,6 +211,17 @@ actor DefaultTranscriptionManager {
             initializationTask = nil
             throw error
         }
+    }
+
+    private func formattedFileSize(for url: URL) -> String? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            return nil
+        }
+        return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+    }
+
+    private func formatElapsed(_ interval: TimeInterval) -> String {
+        String(format: "%.2fs", interval)
     }
 }
 
