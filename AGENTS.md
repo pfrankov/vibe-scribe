@@ -46,3 +46,4 @@
 - `AudioUtils` centralizes recording directory management, conversions, and merging.  
 - `TextChunker` and `ModelService` encapsulate summarization chunking and model discovery—reuse them when extending LLM features.  
 - `WaveformCache` stores per-file waveform samples; clear cache via the provided API if audio files change.
+- If using XcodeBuildMCP, use the installed XcodeBuildMCP skill before calling XcodeBuildMCP tools.
