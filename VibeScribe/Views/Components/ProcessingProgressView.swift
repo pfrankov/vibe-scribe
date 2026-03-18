@@ -214,6 +214,7 @@ struct ProcessingProgressView: View {
                 animatedProgress = state.progress
             }
         }
+        .accessibilityIdentifier(AccessibilityID.processingProgress)
     }
     
     // SSE Streaming text preview with precise, animated scrolling

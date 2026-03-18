@@ -83,6 +83,7 @@ struct SpeakerTimelineView: View {
         .frame(height: 38)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(AppLanguage.localized("speaker.timeline")))
+        .accessibilityIdentifier(AccessibilityID.speakerTimeline)
     }
 
     private func width(for segment: SpeakerTimelineSegment, totalWidth: CGFloat) -> CGFloat {

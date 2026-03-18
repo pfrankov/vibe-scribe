@@ -190,6 +190,11 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Color.clear
+                .frame(height: 0)
+                .accessibilityElement()
+                .accessibilityIdentifier(AccessibilityID.settingsView)
+
             header
             appLanguageSection
 
@@ -205,7 +210,8 @@ struct SettingsView: View {
             .padding(.top, UIConstants.smallSpacing)
             .padding(.bottom, UIConstants.smallSpacing)
             .frame(maxWidth: UIConstants.tabPickerMaxWidth)
-            
+            .accessibilityIdentifier(AccessibilityID.settingsTabPicker)
+
             // Content
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: UIConstants.spacing) {
@@ -333,6 +339,7 @@ struct SettingsView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(Color(NSColor.secondaryLabelColor))
             .help("Close settings")
+            .accessibilityIdentifier(AccessibilityID.settingsCloseButton)
         }
         .padding(.horizontal, UIConstants.horizontalMargin)
         .padding(.top, UIConstants.verticalMargin)
@@ -356,6 +363,7 @@ struct SettingsView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+            .accessibilityIdentifier(AccessibilityID.settingsProviderPicker)
         }
 
         if settings.whisperProvider == .defaultProvider {
@@ -609,7 +617,8 @@ struct SettingsView: View {
                 }
             ))
             .toggleStyle(.checkbox)
-            
+            .accessibilityIdentifier(AccessibilityID.settingsTitleToggle)
+
             captionText(LocalizedStringKey("when.enabled.the.app.asks.the.language.model.for.a.concise.title.based.on.the.final.summary"))
         }
         
@@ -642,7 +651,8 @@ struct SettingsView: View {
                     }
                 ))
                 .toggleStyle(.checkbox)
-                
+                .accessibilityIdentifier(AccessibilityID.settingsChunkToggle)
+
                 Spacer()
             }
             
@@ -818,6 +828,7 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .frame(maxWidth: 240, alignment: .leading)
+            .accessibilityIdentifier(AccessibilityID.settingsLanguagePicker)
 
             captionText(LocalizedStringKey("app.language.caption"))
         }
@@ -841,6 +852,13 @@ struct SettingsView: View {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         configuration.createsNewApplicationInstance = true
+        if VibeScribeApp.isUITesting {
+            var arguments = ProcessInfo.processInfo.arguments
+            if !arguments.contains("--uitesting") {
+                arguments.append("--uitesting")
+            }
+            configuration.arguments = arguments
+        }
 
         NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, error in
             if let error = error {

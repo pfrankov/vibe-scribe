@@ -1,0 +1,27 @@
+{
+  "configurations" : [
+    {
+      "id" : "9A8B7C6D-5E4F-3A2B-1C0D-E9F8A7B6C5D4",
+      "name" : "Default",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "maximumTestExecutionTimeAllowance" : 240,
+    "testExecutionOrdering" : "lexical",
+    "testTimeoutsEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:VibeScribe.xcodeproj",
+        "identifier" : "E6A101062E80000100000006",
+        "name" : "VibeScribeUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

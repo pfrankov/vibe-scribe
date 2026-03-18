@@ -4,3 +4,19 @@
 .DS_Store
 .claude
 skills-lock.json
+
+# Xcode build output
+build/
+DerivedData/
+*.xcuserstate
+
+# Xcode user-specific data (per-machine, not shared)
+xcuserdata/
+
+# Compiled/generated artifacts
+*.o
+*.d
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip

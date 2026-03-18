@@ -24,7 +24,10 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     private var systemRecorderManager = SystemAudioRecorderManager()
     private var systemAudioOutputURL: URL?
     private var cancellables = Set<AnyCancellable>()
-    
+    private var mockTimer: Timer?
+    private var mockSessionStartAt: Date?
+    private var mockAccumulatedDuration: TimeInterval = 0
+
     // Display smoothing (fast attack, slower release). No auto-gain — full scale preserved.
     private let smoothAttack: Float = 0.55
     private let smoothRelease: Float = 0.20
@@ -105,6 +108,11 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     }
     
     func startRecording() {
+        if UITestMockPipeline.isEnabled {
+            startMockRecording()
+            return
+        }
+
         Logger.info("Starting combined audio recording", category: .audio)
         error = nil
         isPaused = false
@@ -123,9 +131,14 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
                     recordingsDir = dir
                 } else {
                     let fm = FileManager.default
-                    let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
                     let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-                    recordingsDir = docs.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
+                    let tempDir = fm.temporaryDirectory
+                        .appendingPathComponent(bundleID, isDirectory: true)
+                        .appendingPathComponent("Recordings", isDirectory: true)
+                    if !fm.fileExists(atPath: tempDir.path) {
+                        try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
+                    }
+                    recordingsDir = tempDir
                 }
                 let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp).caf")
                 await MainActor.run {
@@ -141,6 +154,10 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     }
     
     func stopRecording() -> (url: URL, duration: TimeInterval, includesSystemAudio: Bool)? {
+        if UITestMockPipeline.isEnabled {
+            return stopMockRecording()
+        }
+
         Logger.info("Stopping combined audio recording", category: .audio)
         
         // Stop microphone recording (works from active or paused states)
@@ -209,6 +226,11 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     }
     
     func cancelRecording() {
+        if UITestMockPipeline.isEnabled {
+            cancelMockRecording()
+            return
+        }
+
         Logger.info("Cancelling combined audio recording", category: .audio)
         
         micRecorderManager.cancelRecording()
@@ -226,6 +248,11 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     }
 
     func pauseRecording() {
+        if UITestMockPipeline.isEnabled {
+            pauseMockRecording()
+            return
+        }
+
         guard isRecording, !isPaused else { return }
         micRecorderManager.pauseRecording()
         systemRecorderManager.pauseRecording()
@@ -233,6 +260,11 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
     }
 
     func resumeRecording() {
+        if UITestMockPipeline.isEnabled {
+            resumeMockRecording()
+            return
+        }
+
         guard isRecording, isPaused else { return }
         micRecorderManager.resumeRecording()
         systemRecorderManager.resumeRecording()
@@ -249,4 +281,122 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
             }
         }
     }
-} 
+
+    // MARK: - UI Test Mock Recording
+
+    private func startMockRecording() {
+        error = nil
+        isRecording = true
+        isPaused = false
+        isSystemAudioRecording = false
+        isSystemAudioEnabled = false
+        recordingTime = 0
+        mockAccumulatedDuration = 0
+        mockSessionStartAt = Date()
+        startMockTimerIfNeeded()
+        Logger.info("Started mock recording session for UI tests", category: .audio)
+    }
+
+    private func stopMockRecording() -> (url: URL, duration: TimeInterval, includesSystemAudio: Bool)? {
+        guard isRecording else { return nil }
+
+        commitActiveMockSegmentIfNeeded()
+        recordingTime = mockAccumulatedDuration
+        stopMockTimer()
+
+        do {
+            let mockURL = try UITestMockPipeline.makeMockRecordingCopyURL()
+            let duration = max(recordingTime, UITestMockPipeline.minimumRecordingDuration)
+            isRecording = false
+            isPaused = false
+            mockSessionStartAt = nil
+            mockAccumulatedDuration = 0
+            Logger.info("Saved mock recording file for UI tests: \(mockURL.lastPathComponent)", category: .audio)
+            return (mockURL, duration, false)
+        } catch {
+            self.error = error
+            Logger.error("Failed to create mock recording file", error: error, category: .audio)
+            isRecording = false
+            isPaused = false
+            mockSessionStartAt = nil
+            mockAccumulatedDuration = 0
+            return nil
+        }
+    }
+
+    private func cancelMockRecording() {
+        stopMockTimer()
+        mockSessionStartAt = nil
+        mockAccumulatedDuration = 0
+        recordingTime = 0
+        isPaused = false
+        isRecording = false
+        audioLevels = Array(repeating: 0, count: 10)
+        Logger.info("Cancelled mock recording session for UI tests", category: .audio)
+    }
+
+    private func pauseMockRecording() {
+        guard isRecording, !isPaused else { return }
+        commitActiveMockSegmentIfNeeded()
+        recordingTime = mockAccumulatedDuration
+        isPaused = true
+    }
+
+    private func resumeMockRecording() {
+        guard isRecording, isPaused else { return }
+        isPaused = false
+        mockSessionStartAt = Date()
+    }
+
+    private func startMockTimerIfNeeded() {
+        stopMockTimer()
+        mockTimer = Timer.scheduledTimer(
+            timeInterval: 0.1,
+            target: self,
+            selector: #selector(handleMockTimerTick),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    private func stopMockTimer() {
+        mockTimer?.invalidate()
+        mockTimer = nil
+    }
+
+    private func syncMockDuration() {
+        guard isRecording else { return }
+        if let startedAt = mockSessionStartAt, !isPaused {
+            recordingTime = mockAccumulatedDuration + Date().timeIntervalSince(startedAt)
+        } else {
+            recordingTime = mockAccumulatedDuration
+        }
+    }
+
+    private func updateMockRecordingTime() {
+        syncMockDuration()
+    }
+
+    private func commitActiveMockSegmentIfNeeded() {
+        guard let startedAt = mockSessionStartAt else { return }
+        mockAccumulatedDuration += Date().timeIntervalSince(startedAt)
+        mockSessionStartAt = nil
+    }
+
+    @objc
+    private func handleMockTimerTick() {
+        guard isRecording else { return }
+        updateMockRecordingTime()
+
+        // Keep waveform slightly animated for the overlay during tests.
+        if isPaused {
+            audioLevels = Array(repeating: 0.05, count: 10)
+        } else {
+            let wave = (0..<10).map { index -> Float in
+                let phase = Float(recordingTime * 2.5 + Double(index) * 0.6)
+                return max(0.06, min(0.95, (sin(phase) + 1.15) / 2.3))
+            }
+            audioLevels = wave
+        }
+    }
+}

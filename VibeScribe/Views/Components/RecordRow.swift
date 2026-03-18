@@ -42,6 +42,7 @@ struct RecordRow: View {
                     .lineLimit(1) // Limit to one line
                     // Make Text visible only when *not* editing
                     .opacity(isEditing ? 0 : 1)
+                    .accessibilityIdentifier(AccessibilityID.recordRowName)
             }
 
             HStack(alignment: .center, spacing: 8) {
@@ -58,6 +59,7 @@ struct RecordRow: View {
                         Text(record.duration.clockString)
                             .monospacedDigit()
                     }
+                    .accessibilityIdentifier(AccessibilityID.recordRowDuration)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

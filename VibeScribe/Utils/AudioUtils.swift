@@ -10,6 +10,26 @@ import AVFoundation
 import UniformTypeIdentifiers
 
 struct AudioUtils {
+    private static var shouldAvoidDocumentsDirectory: Bool {
+        let env = ProcessInfo.processInfo.environment
+        let hasXCTestConfig = env["XCTestConfigurationFilePath"] != nil
+        let uiTestingEnabled = env["VIBESCRIBE_UI_TESTING"] == "1"
+        let mockPipelineEnabled = env["VIBESCRIBE_UI_USE_MOCK_PIPELINE"] == "1"
+        let hasUITestingArg = ProcessInfo.processInfo.arguments.contains("--uitesting")
+        return hasXCTestConfig || uiTestingEnabled || mockPipelineEnabled || hasUITestingArg
+    }
+
+    private static func temporaryRecordingsDirectory(bundleID: String) throws -> URL {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("Recordings", isDirectory: true)
+        if !fm.fileExists(atPath: tempDir.path) {
+            try fm.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
+            Logger.info("Created temporary recordings directory: \(tempDir.path)", category: .audio)
+        }
+        return tempDir
+    }
     
     // MARK: - Audio Merging
     
@@ -187,8 +207,8 @@ struct AudioUtils {
     static func getRecordingsDirectory() throws -> URL {
         // Prefer Application Support/<bundleID>/Recordings to avoid iCloud/backups and be consistent across app
         let fm = FileManager.default
+        let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
         if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
             let base = appSupport.appendingPathComponent(bundleID, isDirectory: true)
             let dir = base.appendingPathComponent("Recordings", isDirectory: true)
             if !fm.fileExists(atPath: dir.path) {
@@ -197,19 +217,24 @@ struct AudioUtils {
                     Logger.info("Created recordings directory: \(dir.path)", category: .audio)
                 } catch {
                     Logger.error("Failed to create recordings directory", error: error, category: .audio)
-                    // fall back to Documents below
+                    if shouldAvoidDocumentsDirectory {
+                        return try temporaryRecordingsDirectory(bundleID: bundleID)
+                    }
                 }
             }
             if fm.fileExists(atPath: dir.path) {
                 return dir
             }
         }
+
+        if shouldAvoidDocumentsDirectory {
+            return try temporaryRecordingsDirectory(bundleID: bundleID)
+        }
         
         // Fallback: Documents/<bundleID>/Recordings
         guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             throw AudioUtilsError.exportFailed("Unable to access documents directory")
         }
-        let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
         let recordingsDirectory = documentsDirectory
             .appendingPathComponent(bundleID, isDirectory: true)
             .appendingPathComponent("Recordings", isDirectory: true)

@@ -51,12 +51,14 @@ private var appSettings: [AppSettings]
                     records: filteredRecords,
                     selectedRecord: $selectedRecord,
                     shouldScrollToSelectedRecord: $shouldScrollToSelectedRecord,
-                    onCreateRecording: presentRecordingOverlay
+                    onCreateRecording: presentRecordingOverlay,
+                    onOpenSettings: { isShowingSettings = true }
                 )
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 700)
             } detail: {
                 recordDetail
             }
+            .accessibilityIdentifier(AccessibilityID.mainSplitView)
             .navigationSplitViewStyle(.balanced)
             .background(Color(NSColor.windowBackgroundColor))
             
@@ -70,6 +72,7 @@ private var appSettings: [AppSettings]
             } label: {
                 Label(AppLanguage.localized("settings"), systemImage: "gear")
             }
+            .accessibilityIdentifier(AccessibilityID.openSettingsContextButton)
             
             Divider()
             
@@ -204,6 +207,7 @@ private var appSettings: [AppSettings]
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
+            .accessibilityIdentifier(AccessibilityID.selectRecordPlaceholder)
         }
     }
 
@@ -414,6 +418,7 @@ private struct RecordsSidebarView: View {
     @Binding var selectedRecord: Record?
     @Binding var shouldScrollToSelectedRecord: Bool
     let onCreateRecording: () -> Void
+    let onOpenSettings: () -> Void
 
     var body: some View {
         ZStack {
@@ -426,6 +431,7 @@ private struct RecordsSidebarView: View {
                     isFiltering: isFiltering,
                     onClearFilter: onClearFilter
                 )
+                .accessibilityIdentifier(AccessibilityID.sidebarHeader)
                 content
             }
         }
@@ -459,6 +465,7 @@ private struct RecordsSidebarView: View {
                 .scrollContentBackground(.hidden)
                 .background(Color.clear)
                 .scrollDismissesKeyboard(.immediately)
+                .accessibilityIdentifier(AccessibilityID.sidebarRecordsList)
                 .onChange(of: selectedRecord) { _, newValue in
                     guard shouldScrollToSelectedRecord, let recordToScroll = newValue else { return }
                     withAnimation {
@@ -482,7 +489,16 @@ private struct RecordsSidebarView: View {
                 .buttonStyle(.borderless)
                 .controlSize(.regular)
                 .accessibilityHint(Text(AppLanguage.localized("start.a.new.recording")))
+                .accessibilityIdentifier(AccessibilityID.newRecordingButton)
                 Spacer(minLength: 0)
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gear")
+                        .font(.body)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.regular)
+                .accessibilityLabel(Text(AppLanguage.localized("settings")))
+                .accessibilityIdentifier(AccessibilityID.openSettingsContextButton)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -700,6 +716,7 @@ private struct SidebarHeader: View {
                 .buttonStyle(.borderless)
                 .help(AppLanguage.localized("reset.filter"))
                 .accessibilityLabel(Text(AppLanguage.localized("reset.filter")))
+                .accessibilityIdentifier(AccessibilityID.clearFilterButton)
             }
             Spacer()
         }
@@ -732,6 +749,7 @@ private struct RecordingsEmptyState: View {
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier(AccessibilityID.emptyStateView)
     }
 }
 
@@ -756,6 +774,7 @@ struct DragOverlayContent: View {
                 .fill(.ultraThinMaterial)
                 .stroke(strokeColor, lineWidth: 2)
         )
+        .accessibilityIdentifier(AccessibilityID.dragOverlay)
     }
     
     @ViewBuilder
@@ -834,6 +853,7 @@ private struct WelcomeEmptyDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
+        .accessibilityIdentifier(AccessibilityID.welcomeView)
     }
 
     @ViewBuilder
@@ -910,6 +930,7 @@ private struct WelcomeEmptyDetailView: View {
                     }
                 }
                 .buttonStyle(.link)
+                .accessibilityIdentifier(AccessibilityID.welcomeSettingsLink)
 
                 Text(AppLanguage.localized("add.your.whisper.compatible.audio.endpoint.and.chat.model.so.vibescribe.can.process.automatically"))
                     .font(.footnote)
@@ -947,6 +968,7 @@ private struct WelcomeEmptyDetailView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .accessibilityHint(Text(AppLanguage.localized("opens.the.floating.overlay.to.capture.mic.and.system.audio")))
+        .accessibilityIdentifier(AccessibilityID.welcomeStartRecordingButton)
     }
 
     private var importButton: some View {
@@ -956,6 +978,7 @@ private struct WelcomeEmptyDetailView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
+        .accessibilityIdentifier(AccessibilityID.welcomeImportAudioButton)
     }
 }
 

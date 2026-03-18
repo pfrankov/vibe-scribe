@@ -30,11 +30,16 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
     // Get the directory to save recordings (centralized in AudioUtils)
     private func getRecordingsDirectory() -> URL {
         if let dir = try? AudioUtils.getRecordingsDirectory() { return dir }
-        // Fallback to Documents if creation failed
+        // Last-resort fallback that avoids protected folders to prevent OS permission prompts.
         let fm = FileManager.default
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
         let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-        return docs.appendingPathComponent(bundleID).appendingPathComponent("Recordings")
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("Recordings", isDirectory: true)
+        if !fm.fileExists(atPath: tempDir.path) {
+            try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
+        }
+        return tempDir
     }
 
     // Setup the audio recorder

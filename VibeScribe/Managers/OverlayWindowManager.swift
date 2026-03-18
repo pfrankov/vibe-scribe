@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+private final class UITestAccessiblePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class OverlayWindowManager: ObservableObject {
     static let shared = OverlayWindowManager()
@@ -10,17 +15,27 @@ final class OverlayWindowManager: ObservableObject {
     func show(@ViewBuilder content: () -> AnyView,
               size: NSSize? = nil,
               at position: NSPoint? = nil) {
+        let useUITestAccessiblePanel = UITestMockPipeline.isEnabled
+
         if panel == nil {
-            let style: NSWindow.StyleMask = [.nonactivatingPanel, .fullSizeContentView]
+            let style: NSWindow.StyleMask = useUITestAccessiblePanel
+                ? [.titled, .fullSizeContentView]
+                : [.nonactivatingPanel, .fullSizeContentView]
             let initialSize = size ?? NSSize(width: 100, height: 100)
-            let p = NSPanel(contentRect: NSRect(origin: .zero, size: initialSize),
-                            styleMask: style,
-                            backing: .buffered,
-                            defer: false)
-            p.isFloatingPanel = true
+            let p: NSPanel = useUITestAccessiblePanel
+                ? UITestAccessiblePanel(contentRect: NSRect(origin: .zero, size: initialSize),
+                                        styleMask: style,
+                                        backing: .buffered,
+                                        defer: false)
+                : NSPanel(contentRect: NSRect(origin: .zero, size: initialSize),
+                          styleMask: style,
+                          backing: .buffered,
+                          defer: false)
+            p.isFloatingPanel = !useUITestAccessiblePanel
             p.hidesOnDeactivate = false
-            p.level = .statusBar
-            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            p.becomesKeyOnlyIfNeeded = false
+            p.level = useUITestAccessiblePanel ? .normal : .statusBar
+            p.collectionBehavior = useUITestAccessiblePanel ? [] : [.canJoinAllSpaces, .fullScreenAuxiliary]
             p.backgroundColor = .clear
             p.isOpaque = false
             // Use system window shadow (follows non-opaque window shape)
@@ -73,8 +88,12 @@ final class OverlayWindowManager: ObservableObject {
             }
         }
 
-        panel.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: false)
+        if useUITestAccessiblePanel {
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
+        NSApp.activate(ignoringOtherApps: useUITestAccessiblePanel)
     }
 
     func hide() {

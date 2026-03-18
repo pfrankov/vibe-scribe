@@ -46,6 +46,11 @@ final class SpeakerDiarizationManager: ObservableObject {
             return
         }
 
+        if UITestMockPipeline.isEnabled {
+            runMockDiarization(record: record, in: context, recordID: recordID)
+            return
+        }
+
         updateState(for: recordID) { state in
             state.isProcessing = true
             state.error = nil
@@ -142,6 +147,66 @@ final class SpeakerDiarizationManager: ObservableObject {
     }
 
     // MARK: - Private
+
+    private func runMockDiarization(record: Record, in context: ModelContext, recordID: UUID) {
+        updateState(for: recordID) { state in
+            state.isProcessing = true
+            state.error = nil
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                try await UITestMockPipeline.sleepForProcessingStep()
+                let mockResult = UITestMockPipeline.diarizationResult()
+
+                try await MainActor.run {
+                    switch mockResult {
+                    case .none:
+                        try self.applyMockSpeakerSegments([], to: record, in: context)
+                        self.updateState(for: recordID) { state in
+                            state.isProcessing = false
+                            state.error = nil
+                            state.lastRunAt = record.lastDiarizationAt
+                        }
+                    case .speakers(let segments):
+                        try self.applyMockSpeakerSegments(segments, to: record, in: context)
+                        self.updateState(for: recordID) { state in
+                            state.isProcessing = false
+                            state.error = nil
+                            state.lastRunAt = record.lastDiarizationAt
+                        }
+                    case .failure(let token):
+                        try self.applyMockSpeakerSegments([], to: record, in: context)
+                        self.updateState(for: recordID) { state in
+                            state.isProcessing = false
+                            state.error = token
+                        }
+                    }
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.updateState(for: recordID) { state in
+                        state.isProcessing = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.updateState(for: recordID) { state in
+                        state.isProcessing = false
+                        state.error = error.localizedDescription
+                    }
+                }
+            }
+
+            await MainActor.run {
+                self.activeTasks[recordID] = nil
+            }
+        }
+
+        activeTasks[recordID] = task
+    }
 
     private func fetchKnownSpeakers(in context: ModelContext) -> [SpeakerSnapshot] {
         let descriptor = FetchDescriptor<SpeakerProfile>()
@@ -244,6 +309,86 @@ final class SpeakerDiarizationManager: ObservableObject {
         record.lastDiarizationAt = now
 
         try context.save()
+    }
+
+    private func applyMockSpeakerSegments(
+        _ mockSegments: [UITestMockPipeline.SpeakerSegment],
+        to record: Record,
+        in context: ModelContext
+    ) throws {
+        for segment in record.speakerSegments {
+            context.delete(segment)
+        }
+        record.speakerSegments.removeAll()
+
+        let descriptor = FetchDescriptor<SpeakerProfile>()
+        let existingProfiles = (try? context.fetch(descriptor)) ?? []
+        var profilesByID: [String: SpeakerProfile] = Dictionary(
+            uniqueKeysWithValues: existingProfiles.map { ($0.speakerId, $0) }
+        )
+
+        var durationsBySpeakerID: [String: TimeInterval] = [:]
+        let now = Date()
+
+        for mock in mockSegments {
+            let profile: SpeakerProfile
+            if let existing = profilesByID[mock.speakerID] {
+                profile = existing
+            } else {
+                profile = SpeakerProfile(
+                    speakerId: mock.speakerID,
+                    displayName: mock.speakerName,
+                    colorHue: mock.hue,
+                    embedding: mockEmbedding(for: mock.speakerID),
+                    totalDuration: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                    lastSeenAt: now,
+                    updateCount: 1,
+                    isPermanent: false,
+                    isUserRenamed: false
+                )
+                context.insert(profile)
+                profilesByID[mock.speakerID] = profile
+            }
+
+            if !profile.isUserRenamed {
+                profile.displayName = mock.speakerName
+            }
+            profile.colorHue = mock.hue
+            profile.updatedAt = now
+            profile.lastSeenAt = now
+            profile.updateCount += 1
+
+            let clampedStart = max(0, min(mock.startTime, record.duration))
+            let rawEnd = max(mock.endTime, clampedStart + 0.05)
+            let maxEnd = record.duration > 0 ? record.duration : rawEnd
+            let clampedEnd = max(clampedStart + 0.05, min(rawEnd, maxEnd))
+
+            let segment = RecordSpeakerSegment(
+                startTime: clampedStart,
+                endTime: clampedEnd,
+                qualityScore: 0.95,
+                record: record,
+                speaker: profile
+            )
+            context.insert(segment)
+            record.speakerSegments.append(segment)
+            durationsBySpeakerID[mock.speakerID, default: 0] += max(0, clampedEnd - clampedStart)
+        }
+
+        for (speakerID, duration) in durationsBySpeakerID {
+            guard let profile = profilesByID[speakerID] else { continue }
+            profile.totalDuration = max(profile.totalDuration, duration)
+        }
+
+        record.lastDiarizationAt = now
+        try context.save()
+    }
+
+    private func mockEmbedding(for speakerID: String) -> [Float] {
+        let normalized = Float(abs(speakerID.hashValue % 1000)) / 1000.0
+        return Array(repeating: normalized, count: SpeakerManager.embeddingSize)
     }
 
     private func updateState(for recordID: UUID, mutate: (inout State) -> Void) {

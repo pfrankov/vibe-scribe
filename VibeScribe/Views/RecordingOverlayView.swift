@@ -48,6 +48,7 @@ struct RecordingOverlayView: View {
             Text(manager.recordingTime.clockString)
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .foregroundColor(.primary)
+                .accessibilityIdentifier(AccessibilityID.recordingTimer)
 
             // Leading/Trailing controls
             HStack(spacing: 8) {
@@ -63,6 +64,7 @@ struct RecordingOverlayView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(AppLanguage.localized("close")))
+                .accessibilityIdentifier(AccessibilityID.recordingCloseButton)
 
                 Spacer(minLength: 8)
 
@@ -114,6 +116,7 @@ struct RecordingOverlayView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PillFilledButtonStyle(color: Color(NSColor.systemGray), height: controlHeight, textColor: .white))
+                .accessibilityIdentifier(AccessibilityID.recordingResumeButton)
 
                 Button {
                     sendAndFinish()
@@ -128,6 +131,7 @@ struct RecordingOverlayView: View {
                 }
                 .buttonStyle(PillFilledButtonStyle(color: Color.accentColor, height: controlHeight, textColor: .white))
                 .disabled(isSending)
+                .accessibilityIdentifier(AccessibilityID.recordingSaveButton)
             } else {
                 Button {
                     manager.pauseRecording()
@@ -147,6 +151,7 @@ struct RecordingOverlayView: View {
                     )
                 )
                 .keyboardShortcut(.escape)
+                .accessibilityIdentifier(AccessibilityID.recordingStopButton)
             }
         }
     }
@@ -155,6 +160,25 @@ struct RecordingOverlayView: View {
     private func sendAndFinish() {
         guard !isSending else { return }
         isSending = true
+
+        if UITestMockPipeline.isEnabled {
+            // In UI tests, close the overlay first so the click action returns immediately.
+            // The actual mock save runs on the next main-actor turn to avoid idle-wait hangs.
+            OverlayWindowManager.shared.close()
+            Task { @MainActor in
+                let mockDuration = max(manager.recordingTime, UITestMockPipeline.minimumRecordingDuration)
+                manager.cancelRecording()
+                do {
+                    let mockURL = try UITestMockPipeline.makeMockRecordingCopyURL()
+                    createAndSaveRecord(url: mockURL, duration: mockDuration, includesSystemAudio: false)
+                } catch {
+                    Logger.error("Failed to create mock recording from overlay save", error: error, category: .audio)
+                }
+                isSending = false
+            }
+            return
+        }
+
         if let result = manager.stopRecording() {
             createAndSaveRecord(url: result.url, duration: result.duration, includesSystemAudio: result.includesSystemAudio)
         }

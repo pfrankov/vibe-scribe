@@ -15,9 +15,21 @@ import ScreenCaptureKit
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBarItem: NSStatusItem?
     var mainWindow: NSWindow?
+
+    private var isUITestingProcess: Bool {
+        let env = ProcessInfo.processInfo.environment
+        return ProcessInfo.processInfo.arguments.contains("--uitesting")
+            || env["VIBESCRIBE_UI_TESTING"] == "1"
+            || env["VIBESCRIBE_UI_USE_MOCK_PIPELINE"] == "1"
+            || env["XCTestConfigurationFilePath"] != nil
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBarItem()
+
+        // Skip permission requests during UI testing to avoid system dialogs
+        guard !isUITestingProcess else { return }
+
         requestPermissions { granted in
             if granted {
                 Logger.info("All permissions granted", category: .general)
@@ -119,6 +131,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func requestPermissions(completion: @escaping (Bool) -> Void) {
+        guard !isUITestingProcess else {
+            completion(true)
+            return
+        }
         // Request Microphone access
         AVCaptureDevice.requestAccess(for: .audio) { micGranted in
             Task { @MainActor in
@@ -139,6 +155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func showPermissionAlert() {
+        guard !isUITestingProcess else { return }
         let alert = NSAlert()
         alert.messageText = AppLanguage.localized("microphone.permission.required")
         alert.informativeText = AppLanguage.localized("vibescribe.needs.microphone.access.to.record.audio.please.grant.permission.in.system.preferences.security.privacy.microphone")
@@ -161,15 +178,96 @@ struct VibeScribeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @AppStorage("ui.language.code") private var appLanguageCode: String = ""
 
+    private static let hasXCTestConfiguration = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    private static let uiTestingEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_TESTING"] == "1"
+    private static let emptyStateEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_EMPTY_STATE"] == "1"
+
+    static let isUITesting =
+        ProcessInfo.processInfo.arguments.contains("--uitesting")
+        || uiTestingEnvEnabled
+        || hasXCTestConfiguration
+    static let isEmptyState =
+        ProcessInfo.processInfo.arguments.contains("--empty-state")
+        || emptyStateEnvEnabled
+
     private var appLocale: Locale {
         AppLanguage.applyPreferredLanguagesIfNeeded(code: appLanguageCode)
         return AppLanguage.locale(for: appLanguageCode)
     }
-    
+
+    init() {
+        // Keep UI-test startup deterministic even if a previous manual/dev session toggled
+        // the debug empty-state switch persisted in UserDefaults.
+        if Self.isUITesting {
+            UserDefaults.standard.set(false, forKey: "debug.simulateEmptyRecordings")
+        }
+    }
+
+    private static let uiTestingContainer: ModelContainer = {
+        do {
+            let schema = Schema([Record.self, Tag.self, AppSettings.self, RecordSpeakerSegment.self, SpeakerProfile.self])
+            let config = ModelConfiguration(isStoredInMemoryOnly: true)
+            let container = try ModelContainer(for: schema, configurations: [config])
+
+            if !isEmptyState {
+                seedTestData(in: container.mainContext)
+            }
+            return container
+        } catch {
+            fatalError("Failed to create UI testing container: \(error)")
+        }
+    }()
+
+    @MainActor
+    private static func seedTestData(in context: ModelContext) {
+        let settings = AppSettings()
+        context.insert(settings)
+
+        let tag1 = Tag(name: "meeting")
+        let tag2 = Tag(name: "important")
+        let tag3 = Tag(name: "personal")
+        context.insert(tag1)
+        context.insert(tag2)
+        context.insert(tag3)
+
+        let record1 = Record(
+            name: "Team Standup March 15",
+            fileURL: nil,
+            duration: 1845
+        )
+        record1.transcriptionText = "This is a sample transcription of the team standup meeting. We discussed the progress on the new feature and identified some blockers."
+        record1.summaryText = "## Team Standup Summary\n\n- Feature development on track\n- Two blockers identified\n- Next review scheduled for Friday"
+        record1.tags = [tag1, tag2]
+        context.insert(record1)
+
+        let record2 = Record(
+            name: "Client Call",
+            fileURL: nil,
+            duration: 3600
+        )
+        record2.transcriptionText = "Discussion with client about project requirements and timeline adjustments."
+        record2.tags = [tag1]
+        context.insert(record2)
+
+        let record3 = Record(
+            name: "Voice Note",
+            fileURL: nil,
+            duration: 120
+        )
+        record3.tags = [tag3]
+        context.insert(record3)
+
+        try? context.save()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .modelContainer(for: [Record.self, Tag.self, AppSettings.self])
+                .modelContainer(
+                    Self.isUITesting
+                        ? Self.uiTestingContainer
+                        : try! ModelContainer(for: Record.self, Tag.self, AppSettings.self)
+                )
                 .environment(\.locale, appLocale)
         }
         .windowStyle(.hiddenTitleBar)
@@ -177,7 +275,7 @@ struct VibeScribeApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) { }
-            
+
             CommandGroup(after: .appInfo) {
                 Button(AppLanguage.localized("settings.ellipsis")) {
                     appDelegate.openSettings()

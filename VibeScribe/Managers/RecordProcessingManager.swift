@@ -319,7 +319,12 @@ final class RecordProcessingManager: ObservableObject {
             }
             return
         }
-        
+
+        if UITestMockPipeline.isEnabled {
+            await executeMockTranscription(job, record: record, automatic: automatic)
+            return
+        }
+
         do {
             let transcriptionText: String
             if job.settings.usesDefaultProvider {
@@ -377,6 +382,49 @@ final class RecordProcessingManager: ObservableObject {
         } catch let error as TranscriptionError {
             updateState(for: job.recordID) { state in
                 state.transcriptionError = String(format: AppLanguage.localized("error.arg1"), error.localizedDescription)
+            }
+        } catch {
+            updateState(for: job.recordID) { state in
+                state.transcriptionError = String(format: AppLanguage.localized("error.arg1"), error.localizedDescription)
+            }
+        }
+    }
+
+    private func executeMockTranscription(
+        _ job: ProcessingJob,
+        record: Record,
+        automatic: Bool
+    ) async {
+        do {
+            try await UITestMockPipeline.sleepForProcessingStep()
+            let transcriptionText = try UITestMockPipeline.transcriptionText(
+                providerRawValue: job.settings.whisperProviderRawValue,
+                model: job.settings.whisperModel
+            )
+            let trimmed = transcriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if trimmed.isEmpty {
+                record.hasTranscription = true
+                record.transcriptionText = ""
+                updateState(for: job.recordID) { state in
+                    state.transcriptionError = AppLanguage.localized(
+                        "error.empty.transcription.received.please.try.again.with.a.different.model.or.check.your.audio.quality"
+                    )
+                }
+            } else {
+                record.hasTranscription = true
+                record.transcriptionText = trimmed
+                updateState(for: job.recordID) { state in
+                    state.transcriptionError = nil
+                }
+            }
+
+            try job.modelContext.save()
+
+            SpeakerDiarizationManager.shared.diarize(record: record, in: job.modelContext, force: true)
+
+            if automatic, !trimmed.isEmpty {
+                enqueueSummarization(recordID: job.recordID, context: job.modelContext, settings: job.settings, automatic: true)
             }
         } catch {
             updateState(for: job.recordID) { state in
@@ -574,6 +622,11 @@ final class RecordProcessingManager: ObservableObject {
     }
     
     private func generateSummary(for text: String, job: ProcessingJob) async throws -> String {
+        if UITestMockPipeline.isEnabled {
+            try await UITestMockPipeline.sleepForProcessingStep()
+            return try UITestMockPipeline.summaryText(model: job.settings.openAIModel, transcription: text)
+        }
+
         guard job.settings.useChunking else {
             let prompt = job.settings.chunkPrompt.replacingOccurrences(of: "{transcription}", with: text)
             return try await callOpenAIAPI(prompt: prompt, settings: job.settings)

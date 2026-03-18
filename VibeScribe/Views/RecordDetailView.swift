@@ -53,6 +53,7 @@ struct RecordDetailView: View {
     @State private var selectedSummaryModel: String = ""
     @State private var selectedSpeechAnalyzerLocale: String = ""
     @State private var speechAnalyzerLocales: [Locale] = []
+    @State private var automaticPipelineScheduled = false
 
     @State private var transcriptionDraft: String
     @State private var summaryDraft: String
@@ -115,6 +116,7 @@ struct RecordDetailView: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
                 .help(AppLanguage.localized("skip.back.10.seconds"))
+                .accessibilityIdentifier(AccessibilityID.skipBackwardButton)
 
                 // Play/Pause Button
                 Button {
@@ -134,6 +136,7 @@ struct RecordDetailView: View {
                         ? AppLanguage.localized("pause")
                         : AppLanguage.localized("play")
                 )
+                .accessibilityIdentifier(AccessibilityID.playPauseButton)
 
                 // Forward Button (10 seconds forward)
                 Button {
@@ -149,6 +152,7 @@ struct RecordDetailView: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
                 .help(AppLanguage.localized("skip.forward.10.seconds"))
+                .accessibilityIdentifier(AccessibilityID.skipForwardButton)
 
                 // Spacing between controls and time/slider
                 Spacer().frame(width: 12)
@@ -172,6 +176,7 @@ struct RecordDetailView: View {
                             }
                         )
                         .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier(AccessibilityID.waveformScrubber)
 
                         Color.clear.frame(width: speedControlColumnWidth, height: controlRowHeight)
                     }
@@ -181,11 +186,13 @@ struct RecordDetailView: View {
                             .font(.caption)
                             .foregroundStyle(Color(NSColor.secondaryLabelColor))
                             .monospacedDigit()
+                            .accessibilityIdentifier(AccessibilityID.currentTimeLabel)
                         Spacer()
                         Text(playerManager.duration.clockString)
                             .font(.caption)
                             .foregroundStyle(Color(NSColor.secondaryLabelColor))
                             .monospacedDigit()
+                            .accessibilityIdentifier(AccessibilityID.durationLabel)
                     }
                     .padding(.trailing, speedControlColumnWidth + speedControlColumnSpacing)
                 }
@@ -198,6 +205,7 @@ struct RecordDetailView: View {
                     .buttonStyle(.plain)
                     .disabled(!playerManager.isReady)
                     .help(AppLanguage.localized("playback.speed"))
+                    .accessibilityIdentifier(AccessibilityID.playbackSpeedButton)
                 }
             }
             .padding(.horizontal, 12)
@@ -302,16 +310,31 @@ struct RecordDetailView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color(NSColor.textBackgroundColor))
 
-                TextEditor(text: $text)
-                    .font(.body)
-                    .focused(focusBinding, equals: editor)
-                    .disableAutocorrection(true)
-                    .frame(height: editorHeight)
-                    .padding(editorPadding)
-                    .background(heightMeasurer)
-                    .onExitCommand {
-                        onExit?()
-                    }
+                if editor == .transcription {
+                    TextEditor(text: $text)
+                        .font(.body)
+                        .focused(focusBinding, equals: editor)
+                        .disableAutocorrection(true)
+                        .frame(height: editorHeight)
+                        .padding(editorPadding)
+                        .background(heightMeasurer)
+                        .accessibilityIdentifier(AccessibilityID.transcriptionEditor)
+                        .onExitCommand {
+                            onExit?()
+                        }
+                } else {
+                    TextEditor(text: $text)
+                        .font(.body)
+                        .focused(focusBinding, equals: editor)
+                        .disableAutocorrection(true)
+                        .frame(height: editorHeight)
+                        .padding(editorPadding)
+                        .background(heightMeasurer)
+                        .accessibilityIdentifier(AccessibilityID.summaryEditor)
+                        .onExitCommand {
+                            onExit?()
+                        }
+                }
 
                 if text.isEmpty {
                     Text(statusMessage ?? placeholder)
@@ -492,12 +515,15 @@ struct RecordDetailView: View {
                         .font(.title2.bold())
                         .opacity(isEditingTitle ? 1 : 0)
                         .disabled(!isEditingTitle)
+                        .allowsHitTesting(isEditingTitle)
                         .onTapGesture {}
+                        .accessibilityIdentifier(AccessibilityID.recordTitleEditField)
 
                     // --- Text (Visible when not editing title) ---
                     Text(record.name)
                         .font(.title2.bold())
                         .opacity(isEditingTitle ? 0 : 1)
+                        .accessibilityIdentifier(AccessibilityID.recordTitle)
                         .onTapGesture(count: 2) {
                             startEditingTitle()
                         }
@@ -510,6 +536,7 @@ struct RecordDetailView: View {
                     } label: {
                         Label(AppLanguage.localized("download.audio"), systemImage: "arrow.down.to.line")
                     }
+                    .accessibilityIdentifier(AccessibilityID.moreActionsDownloadItem)
                     .disabled(record.fileURL == nil || isDownloading)
 
                     Button {
@@ -517,6 +544,7 @@ struct RecordDetailView: View {
                     } label: {
                         Label(AppLanguage.localized("rename"), systemImage: "pencil")
                     }
+                    .accessibilityIdentifier(AccessibilityID.moreActionsRenameItem)
                     .disabled(isEditingTitle)
 
                     Divider()
@@ -526,6 +554,7 @@ struct RecordDetailView: View {
                     } label: {
                         Label(AppLanguage.localized("delete"), systemImage: "trash")
                     }
+                    .accessibilityIdentifier(AccessibilityID.moreActionsDeleteItem)
                 } label: {
                     if isDownloading {
                         ProgressView()
@@ -541,6 +570,7 @@ struct RecordDetailView: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .frame(width: 28, height: 28)
+                .accessibilityIdentifier(AccessibilityID.moreActionsMenu)
             }
 
             tagsSection
@@ -560,6 +590,7 @@ struct RecordDetailView: View {
         }
         .padding(.bottom, tagSuggestionBottomPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier(AccessibilityID.tagsSection)
     }
 
     private func tagChip(for tag: Tag) -> some View {
@@ -572,6 +603,7 @@ struct RecordDetailView: View {
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
+            .accessibilityIdentifier(AccessibilityID.tagChip)
             .help(
                 Text(
                     String(
@@ -890,6 +922,7 @@ struct RecordDetailView: View {
         .frame(maxWidth: 300)
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 8)
+        .accessibilityIdentifier(AccessibilityID.tabPicker)
 
         let content: AnyView = {
             switch selectedTab {
@@ -973,6 +1006,7 @@ struct RecordDetailView: View {
                     allowsCustomInput: false
                 )
                 .frame(width: 220, height: 32)
+                .accessibilityIdentifier(AccessibilityID.transcriptionModelPicker)
             } else if settings.whisperProvider.requiresModelSelection {
                 ComboBoxView(
                     placeholder: whisperModelOptions.isEmpty
@@ -982,6 +1016,7 @@ struct RecordDetailView: View {
                     selectedOption: $selectedWhisperModel
                 )
                 .frame(width: 220, height: 32)
+                .accessibilityIdentifier(AccessibilityID.transcriptionModelPicker)
             }
 
             Button {
@@ -1001,6 +1036,7 @@ struct RecordDetailView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(isTranscribing || record.fileURL == nil)
+            .accessibilityIdentifier(AccessibilityID.transcribeButton)
         }
     }
 
@@ -1014,6 +1050,7 @@ struct RecordDetailView: View {
                 selectedOption: $selectedSummaryModel
             )
             .frame(width: 220, height: 32)
+            .accessibilityIdentifier(AccessibilityID.summaryModelPicker)
 
             Button {
                 requestSummarization(from: .summary)
@@ -1032,6 +1069,7 @@ struct RecordDetailView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(isSummarizing || !hasTranscriptionContent)
+            .accessibilityIdentifier(AccessibilityID.summarizeButton)
         }
     }
 
@@ -1069,7 +1107,9 @@ struct RecordDetailView: View {
                     .padding(.bottom, 4)
             }
 
-            if isSummaryEditing {
+            let useEditorMode = isSummaryEditing || UITestMockPipeline.isEnabled
+
+            if useEditorMode {
                 InlineEditableTextArea(
                     text: $summaryDraft,
                     placeholder: AppLanguage.localized("no.summary.available.yet"),
@@ -1112,18 +1152,26 @@ struct RecordDetailView: View {
             HStack(spacing: 8) {
                 Label(AppLanguage.localized("speakers"), systemImage: "person.2.wave.2.fill")
                     .font(.headline)
+                    .accessibilityIdentifier(AccessibilityID.speakersSection)
 
                 Spacer()
 
                 Button {
-                    isSpeakerModalPresented = true
+                    if UITestMockPipeline.isEnabled {
+                        isSpeakerModalPresented = true
+                    } else {
+                        isSpeakerModalPresented = true
+                    }
                     primeMergeDefaults()
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(AppLanguage.localized("rename.speakers"))
+                .accessibilityIdentifier(AccessibilityID.speakerManageButton)
 
                 if isDiarizing {
                     ProgressView()
@@ -1134,6 +1182,24 @@ struct RecordDetailView: View {
 
             if let error = diarizationError {
                 InlineMessageView(error)
+            }
+
+            if UITestMockPipeline.isEnabled && isSpeakerModalPresented {
+                Color.clear
+                    .frame(width: 2, height: 2)
+                    .accessibilityElement()
+                    .accessibilityIdentifier(AccessibilityID.speakerMergeSheet)
+
+                speakerMergeSheet
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(NSColor.windowBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(NSColor.separatorColor).opacity(0.45), lineWidth: 1)
+                    )
+                    .padding(.top, 6)
             }
 
             if !timelineSegments.isEmpty {
@@ -1202,9 +1268,12 @@ struct RecordDetailView: View {
                 .disabled(!canMerge)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier(AccessibilityID.speakerMergeConfirmButton)
             }
         }
         .padding(18)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AccessibilityID.speakerMergeSheet)
     }
 
     private func speakerMergeCard(for summary: SpeakerSummary) -> some View {
@@ -1236,6 +1305,7 @@ struct RecordDetailView: View {
                 )
                 .textFieldStyle(.roundedBorder)
                 .font(.headline)
+                .accessibilityIdentifier("\(AccessibilityID.speakerRenameFieldPrefix)\(summary.speaker.id.uuidString)")
                 .onSubmit {
                     persistSpeakerChanges()
                 }
@@ -1276,6 +1346,8 @@ struct RecordDetailView: View {
                 )
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("\(AccessibilityID.speakerChip)_\(summary.speaker.id.uuidString)")
     }
 
     private var processingSection: some View {
@@ -1341,12 +1413,23 @@ struct RecordDetailView: View {
     }
 
     private var whisperModelOptions: [String] {
-        if modelService.whisperModels.isEmpty,
-           !settings.whisperModel.isEmpty,
-           !modelService.whisperModels.contains(settings.whisperModel) {
+        if !modelService.whisperModels.isEmpty {
+            return modelService.whisperModels
+        }
+
+        let mockModels = UITestMockPipeline.mockWhisperModels
+        if !mockModels.isEmpty {
+            if !settings.whisperModel.isEmpty, !mockModels.contains(settings.whisperModel) {
+                return [settings.whisperModel] + mockModels
+            }
+            return mockModels
+        }
+
+        if !settings.whisperModel.isEmpty {
             return [settings.whisperModel]
         }
-        return modelService.whisperModels
+
+        return []
     }
 
     private var processingStatus: RecordProcessingManager.RecordProcessingState {
@@ -1480,12 +1563,23 @@ struct RecordDetailView: View {
     }
     
     private var summaryModelOptions: [String] {
-        if modelService.openAIModels.isEmpty,
-           !settings.openAIModel.isEmpty,
-           !modelService.openAIModels.contains(settings.openAIModel) {
+        if !modelService.openAIModels.isEmpty {
+            return modelService.openAIModels
+        }
+
+        let mockModels = UITestMockPipeline.mockSummaryModels
+        if !mockModels.isEmpty {
+            if !settings.openAIModel.isEmpty, !mockModels.contains(settings.openAIModel) {
+                return [settings.openAIModel] + mockModels
+            }
+            return mockModels
+        }
+
+        if !settings.openAIModel.isEmpty {
             return [settings.openAIModel]
         }
-        return modelService.openAIModels
+
+        return []
     }
 
     private func updateSettings(
@@ -1508,8 +1602,39 @@ struct RecordDetailView: View {
         }
     }
 
+    private func applyMockModelDefaultsIfNeeded() {
+        guard UITestMockPipeline.isEnabled else { return }
+        let currentSettings = settings
+        var didChange = false
+
+        if currentSettings.whisperModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let defaultWhisper = UITestMockPipeline.defaultWhisperModel,
+           !defaultWhisper.isEmpty {
+            currentSettings.whisperModel = defaultWhisper
+            didChange = true
+        }
+
+        if currentSettings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let defaultSummary = UITestMockPipeline.defaultSummaryModel,
+           !defaultSummary.isEmpty {
+            currentSettings.openAIModel = defaultSummary
+            didChange = true
+        }
+
+        guard didChange else { return }
+        do {
+            try modelContext.save()
+        } catch {
+            Logger.error("Failed to save mock model defaults for UI tests", error: error, category: .ui)
+        }
+    }
+
     // Check if we should show content or the processing view
     private var shouldShowContent: Bool {
+        if UITestMockPipeline.isEnabled {
+            return true
+        }
+
         switch currentProcessingState {
         case .completed:
             return true
@@ -1526,6 +1651,10 @@ struct RecordDetailView: View {
 
     private var mainStack: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Color.clear
+                .frame(height: 0)
+                .accessibilityElement()
+                .accessibilityIdentifier(AccessibilityID.recordDetailView)
             VStack(alignment: .leading, spacing: 4) {
                 headerSection
                 playerControls
@@ -1555,6 +1684,7 @@ struct RecordDetailView: View {
         view = AnyView(view.animation(.easeInOut(duration: 0.25), value: isSidebarCollapsed))
         view = AnyView(view.animation(.easeInOut(duration: 0.4), value: shouldShowContent))
         view = AnyView(view.onAppear {
+            applyMockModelDefaultsIfNeeded()
             selectedWhisperModel = settings.whisperModel
             selectedSummaryModel = settings.openAIModel
             selectedSpeechAnalyzerLocale = settings.speechAnalyzerLocaleIdentifier
@@ -1563,6 +1693,9 @@ struct RecordDetailView: View {
             
             loadSpeechAnalyzerLocales()
             primeMergeDefaults()
+            if UITestMockPipeline.isEnabled {
+                isSpeakerModalPresented = true
+            }
 
             // Initialize processing state based on current record state
             // --- Refined File Loading Logic ---
@@ -1759,12 +1892,14 @@ struct RecordDetailView: View {
             }
         )
 
-        view = AnyView(
-            view.sheet(isPresented: $isSpeakerModalPresented) {
-                speakerMergeSheet
-                    .frame(minWidth: 420, minHeight: 320)
-            }
-        )
+        if !UITestMockPipeline.isEnabled {
+            view = AnyView(
+                view.sheet(isPresented: $isSpeakerModalPresented) {
+                    speakerMergeSheet
+                        .frame(minWidth: 420, minHeight: 320)
+                }
+            )
+        }
 
         return view
     }
@@ -2342,15 +2477,30 @@ struct RecordDetailView: View {
     // Function to start automatic pipeline
     private func startAutomaticPipeline() {
         guard isAutomaticMode else { return }
+        guard !automaticPipelineScheduled else { return }
+        automaticPipelineScheduled = true
         
         Logger.debug("Starting automatic pipeline for record: \(record.name)", category: .transcription)
-        processingManager.enqueueTranscription(
-            for: record,
-            in: modelContext,
-            settings: settings,
-            automatic: true,
-            preferStreaming: true
-        )
+        let enqueue = { [record, modelContext, settings] in
+            processingManager.enqueueTranscription(
+                for: record,
+                in: modelContext,
+                settings: settings,
+                automatic: true,
+                preferStreaming: true
+            )
+        }
+
+        if UITestMockPipeline.isEnabled {
+            Task { @MainActor in
+                // Let overlay save interaction settle before processing starts in UI tests.
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard isAutomaticMode else { return }
+                enqueue()
+            }
+        } else {
+            enqueue()
+        }
     }
     
     private func handleProcessingStateChange() {
