@@ -1,6 +1,6 @@
 # VibeScribe UI Test Cases
 
-> **23 automated UI tests** across 7 test classes.
+> **24 automated UI tests** across 7 test classes.
 > Platform: macOS (XCUITest).
 > Modes: seeded library (`--uitesting`) + empty onboarding + mock end-to-end pipeline (`--uitesting --empty-state` + mock env).
 >
@@ -8,14 +8,14 @@
 > If it diverges from UI test sources or attached `AccessibilityID` controls, fix both in the same commit.
 >
 > **Sync rule**: every `func test*` in `VibeScribeUITests/*.swift` must have a case below.
-> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **23**.
+> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **24**.
 > Validation command: `./scripts/validate_ui_test_cases.sh`.
 
 ## Test Class Matrix
 
 | Class | Launch mode | State | Tests |
 |---|---|---|---:|
-| `PopulatedStateTests` | Shared launch | Seeded data | 7 |
+| `PopulatedStateTests` | Shared launch | Seeded data | 8 |
 | `EmptyStateTests` | Shared launch | Empty state (`--empty-state`) | 2 |
 | `LanguageRestartTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `AppLaunchPerformanceTests` | Per-test launch | Seeded data | 1 |
@@ -26,7 +26,7 @@
 ## Optimized Run Profiles (Coverage per Launch)
 
 1. `ui-smoke` (high-coverage smoke, low relaunch budget)
-- Scope: `PopulatedStateTests` (all 7), `EmptyStateTests` (all 2), `VS-MOCK-001`.
+- Scope: `PopulatedStateTests` (all 8), `EmptyStateTests` (all 2), `VS-MOCK-001`.
 - Relaunch budget: 3 app launches total (2 shared classes + 1 mock flow).
 - Goal: maximize baseline coverage without destructive transitions.
 
@@ -60,11 +60,16 @@
 | Restart confirmation alert (`Restart Now`) and relaunch behavior | `VS-LANG-001` |
 | `welcomeView`, `welcomeStartRecordingButton`, `welcomeImportAudioButton`, `welcomeSettingsLink`, `emptyStateView` | `VS-EMP-001`, `VS-EMP-002`, `VS-STATE-001`, `VS-MOCK-001` |
 
+Deterministic test probes:
+| Probe | Covered in flow(s) |
+|---|---|
+| `uiTestAppRootRefreshStatus` | `VS-POP-008` |
+
 Elements intentionally out of fast UI automation scope:
 1. `dragOverlay` — requires real drag-and-drop interactions from Finder / external files.
 2. `mainSplitView`, `selectRecordPlaceholder` — structural anchors (non-interactive containers/placeholders), not action controls.
 
-## 1. PopulatedStateTests — 7 cases
+## 1. PopulatedStateTests — 8 cases
 
 ### VS-POP-001 — Workspace Launch and Core Layout
 - Method: `testWorkspaceFlow_ShowsSidebarSeededRecordsAndActiveDetail`
@@ -123,11 +128,12 @@ Elements intentionally out of fast UI automation scope:
 1. Open `More actions` menu and verify `Rename`, `Download audio`, and `Delete` are present.
 2. Close menu with Escape.
 3. Trigger `Rename`, update title to temporary value, and submit.
+   The inline title editor should select the current name so replacement input overwrites it deterministically.
 4. Verify new title in detail and sidebar.
 5. Trigger `Rename` again and restore original title.
 6. Verify original title is restored.
 - Expected result:
-1. Menu actions are discoverable and rename flow works end-to-end with rollback.
+1. Menu actions are discoverable and rename flow fully replaces the title end-to-end with rollback, without leaving a partial truncated name.
 
 ### VS-POP-006 — Settings Flow from Main Workspace
 - Method: `testSettingsFlow_OpenSwitchAllTabsToggleOptionsAndClose`
@@ -155,6 +161,19 @@ Elements intentionally out of fast UI automation scope:
 4. Ensure at least one model picker was validated in the non-mock session.
 - Expected result:
 1. Non-mock sessions never leak mock model entries into model pickers.
+
+### VS-POP-008 — Forced App Root Refresh Keeps Selected Detail Stable
+- Method: `testLaunchStabilityFlow_ForcedAppRootRefreshKeepsSelectedRecordUsable`
+- Preconditions:
+1. App launched with seeded records.
+2. Populated UI-test launch enables one forced root `App` body refresh after initial detail render.
+- Steps:
+1. Verify detail panel is visible and capture the selected record title.
+2. Wait for deterministic root-refresh probe to report completion.
+3. Verify detail panel is still visible and selected title is unchanged.
+4. Switch detail tabs once to confirm the selected record remains fully usable after refresh.
+- Expected result:
+1. Recomputing the root app scene does not invalidate the selected SwiftData model or crash the app.
 
 ## 2. EmptyStateTests — 2 cases
 

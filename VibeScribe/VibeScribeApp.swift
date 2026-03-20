@@ -177,10 +177,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 struct VibeScribeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @AppStorage("ui.language.code") private var appLanguageCode: String = ""
+    @State private var uiTestAppRootRefreshGeneration = 0
+    @State private var uiTestAppRootRefreshStatus = "idle"
+    @State private var didScheduleUITestAppRootRefresh = false
 
     private static let hasXCTestConfiguration = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     private static let uiTestingEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_TESTING"] == "1"
     private static let emptyStateEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_EMPTY_STATE"] == "1"
+    private static let forceAppBodyRefreshEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_FORCE_APP_BODY_REFRESH"] == "1"
 
     static let isUITesting =
         ProcessInfo.processInfo.arguments.contains("--uitesting")
@@ -190,9 +194,27 @@ struct VibeScribeApp: App {
         ProcessInfo.processInfo.arguments.contains("--empty-state")
         || emptyStateEnvEnabled
 
+    private static let sharedModelContainer: ModelContainer = {
+        do {
+            return try ModelContainer(
+                for: Record.self,
+                Tag.self,
+                AppSettings.self,
+                RecordSpeakerSegment.self,
+                SpeakerProfile.self
+            )
+        } catch {
+            fatalError("Failed to create shared model container: \(error)")
+        }
+    }()
+
     private var appLocale: Locale {
         AppLanguage.applyPreferredLanguagesIfNeeded(code: appLanguageCode)
         return AppLanguage.locale(for: appLanguageCode)
+    }
+
+    private var activeModelContainer: ModelContainer {
+        Self.isUITesting ? Self.uiTestingContainer : Self.sharedModelContainer
     }
 
     init() {
@@ -260,14 +282,46 @@ struct VibeScribeApp: App {
         try? context.save()
     }
 
+    private var shouldExposeUITestRootRefreshProbe: Bool {
+        Self.isUITesting && Self.forceAppBodyRefreshEnvEnabled
+    }
+
+    @ViewBuilder
+    private var uiTestRootRefreshProbe: some View {
+        if shouldExposeUITestRootRefreshProbe {
+            Text(uiTestAppRootRefreshStatus)
+                .font(.caption2)
+                .foregroundStyle(.clear)
+                .frame(width: 1, height: 1)
+                .clipped()
+                .allowsHitTesting(false)
+                .accessibilityIdentifier(AccessibilityID.uiTestAppRootRefreshStatus)
+        }
+    }
+
+    private func scheduleUITestAppRootRefreshIfNeeded() {
+        guard shouldExposeUITestRootRefreshProbe, !didScheduleUITestAppRootRefresh else { return }
+
+        didScheduleUITestAppRootRefresh = true
+        uiTestAppRootRefreshStatus = "pending"
+
+        // Force a deterministic App.body recomputation after the initial detail selection path runs.
+        DispatchQueue.main.async {
+            uiTestAppRootRefreshGeneration += 1
+            uiTestAppRootRefreshStatus = "completed"
+        }
+    }
+
     var body: some Scene {
+        let _ = uiTestAppRootRefreshGeneration
+
         WindowGroup {
             ContentView()
-                .modelContainer(
-                    Self.isUITesting
-                        ? Self.uiTestingContainer
-                        : try! ModelContainer(for: Record.self, Tag.self, AppSettings.self)
-                )
+                .background(uiTestRootRefreshProbe)
+                .onAppear {
+                    scheduleUITestAppRootRefreshIfNeeded()
+                }
+                .modelContainer(activeModelContainer)
                 .environment(\.locale, appLocale)
         }
         .windowStyle(.hiddenTitleBar)

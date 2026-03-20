@@ -1743,6 +1743,9 @@ struct RecordDetailView: View {
         })
         // Detect focus changes for the title TextField
         view = AnyView(view.onChange(of: isTitleFieldFocused) { oldValue, newValue in
+            if newValue && isEditingTitle {
+                scheduleTitleTextSelection()
+            }
             if !newValue && isEditingTitle { // If focus is lost AND we were editing
                 cancelEditingTitle()
             }
@@ -1988,6 +1991,35 @@ struct RecordDetailView: View {
         Logger.debug("Cancelled editing title for record: \(record.name)", category: .ui)
         isEditingTitle = false
         isTitleFieldFocused = false
+    }
+
+    private func scheduleTitleTextSelection(attemptsRemaining: Int = 4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            guard isEditingTitle, isTitleFieldFocused else { return }
+
+            let candidateWindows = [
+                NSApp.keyWindow,
+                NSApp.mainWindow,
+                (NSApplication.shared.delegate as? AppDelegate)?.mainWindow
+            ].compactMap { $0 }
+
+            for window in candidateWindows {
+                if let textView = window.firstResponder as? NSTextView,
+                   textView.isEditable || textView.isFieldEditor {
+                    textView.selectAll(nil)
+                    return
+                }
+
+                if let fieldEditor = window.fieldEditor(false, for: nil) as? NSTextView {
+                    fieldEditor.selectAll(nil)
+                    return
+                }
+            }
+
+            if attemptsRemaining > 0 {
+                scheduleTitleTextSelection(attemptsRemaining: attemptsRemaining - 1)
+            }
+        }
     }
 
     // MARK: - Speaker Diarization

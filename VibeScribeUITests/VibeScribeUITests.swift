@@ -58,6 +58,7 @@ private enum AID {
     static let settingsLanguagePicker = "settingsLanguagePicker"
     static let settingsTitleToggle = "settingsTitleToggle"
     static let settingsChunkToggle = "settingsChunkToggle"
+    static let uiTestAppRootRefreshStatus = "uiTestAppRootRefreshStatus"
 
     // Context Menu (UI-testing accessible)
     static let openSettingsContextButton = "openSettingsContextButton"
@@ -286,9 +287,9 @@ class VibeScribeUITestCase: XCTestCase {
     }
 
     func textValue(of element: XCUIElement) -> String {
+        if let value = element.value as? String { return value }
         let label = element.label
         if !label.isEmpty { return label }
-        if let value = element.value as? String { return value }
         return ""
     }
 
@@ -896,7 +897,8 @@ class VibeScribeUITestCase: XCTestCase {
             replaceFocusedFieldText(
                 titleField,
                 with: newName,
-                preserveInitialSelection: true
+                preserveInitialSelection: true,
+                allowTypeTextFallback: true
             ),
             "Rename field should contain replacement text before submit"
         )
@@ -905,12 +907,12 @@ class VibeScribeUITestCase: XCTestCase {
         let titleLabel = waitFor(AID.recordTitle, timeout: 2.0)
         let deadline = Date().addingTimeInterval(4.0)
         var resolvedTitle = textValue(of: titleLabel)
-        while Date() < deadline && !resolvedTitle.contains(newName) {
+        while Date() < deadline && resolvedTitle != newName {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             resolvedTitle = textValue(of: titleLabel)
         }
         XCTAssertTrue(
-            resolvedTitle.contains(newName),
+            resolvedTitle == newName,
             "Record title should include updated name after rename. Actual: \(resolvedTitle)"
         )
     }
@@ -946,7 +948,7 @@ class VibeScribeUITestCase: XCTestCase {
             let deadline = Date().addingTimeInterval(timeout)
             while Date() < deadline {
                 let current = textValue(of: field)
-                if current.contains(text) {
+                if current == text {
                     return true
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.15))
@@ -963,14 +965,14 @@ class VibeScribeUITestCase: XCTestCase {
                 let typeDeadline = Date().addingTimeInterval(timeout)
                 while Date() < typeDeadline {
                     let current = textValue(of: field)
-                    if current.contains(text) {
+                    if current == text {
                         return true
                     }
                     RunLoop.current.run(until: Date().addingTimeInterval(0.15))
                 }
             }
         }
-        return textValue(of: field).contains(text)
+        return textValue(of: field) == text
     }
 
     func pasteIntoFocusedField(_ text: String) {
@@ -1079,6 +1081,7 @@ final class PopulatedStateTests: VibeScribeUITestCase {
         _app.launchArguments = ["--uitesting"]
         _app.launchEnvironment["VIBESCRIBE_UI_TESTING"] = "1"
         _app.launchEnvironment["VIBESCRIBE_UI_EMPTY_STATE"] = "0"
+        _app.launchEnvironment["VIBESCRIBE_UI_FORCE_APP_BODY_REFRESH"] = "1"
         if _app.state != .notRunning {
             _app.terminate()
         }
@@ -1130,6 +1133,31 @@ final class PopulatedStateTests: VibeScribeUITestCase {
         assertHittable(AID.newRecordingButton)
         assertHittable(AID.moreActionsMenu)
         assertHittable(AID.tabPicker)
+    }
+
+    func testLaunchStabilityFlow_ForcedAppRootRefreshKeepsSelectedRecordUsable() {
+        let titleBeforeRefresh = textValue(of: waitFor(AID.recordTitle, timeout: 0.6))
+        XCTAssertFalse(titleBeforeRefresh.isEmpty, "Selected record should expose a title before forced app refresh")
+
+        let refreshProbe = waitFor(AID.uiTestAppRootRefreshStatus, timeout: 1.0)
+        let refreshExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == 'completed' OR value == 'completed'"),
+            object: refreshProbe
+        )
+        wait(for: [refreshExpectation], timeout: 2.0)
+
+        assertImmediateExists(AID.recordDetailView)
+        let titleAfterRefresh = textValue(of: waitFor(AID.recordTitle, timeout: 0.6))
+        XCTAssertEqual(
+            titleAfterRefresh,
+            titleBeforeRefresh,
+            "Forced root refresh should not invalidate or replace the selected record"
+        )
+
+        switchDetailTab(to: 1)
+        assertImmediateExists(AID.summarizeButton)
+        switchDetailTab(to: 0)
+        assertImmediateExists(AID.transcribeButton)
     }
 
     func testRecordExplorationFlow_SwitchAcrossAllRecordsAndVerifyCoreSections() {
