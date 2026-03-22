@@ -1,4 +1,4 @@
 "CFBundleDisplayName" = "VibeScribe";
+"NSAudioCaptureUsageDescription" = "VibeScribe needs system audio recording access to capture app and speaker output for transcription.";
 "NSMicrophoneUsageDescription" = "VibeScribe needs microphone access to record audio for transcription.";
-"NSScreenCaptureDescription" = "VibeScribe needs screen capture permission to record system audio output for transcription.";
 "NSSpeechRecognitionUsageDescription" = "VibeScribe uses speech recognition to convert recordings into text on this Mac.";

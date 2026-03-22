@@ -9,7 +9,10 @@ import SwiftUI
 import SwiftData
 import AppKit
 import AVFoundation
-import ScreenCaptureKit
+
+private enum UITestDefaultsKey {
+    static let launchPermissionStatus = "ui.test.launch.permission.status"
+}
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -26,16 +29,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBarItem()
+        updateLaunchPermissionProbe(status: "microphone_only")
 
         // Skip permission requests during UI testing to avoid system dialogs
         guard !isUITestingProcess else { return }
 
         requestPermissions { granted in
             if granted {
-                Logger.info("All permissions granted", category: .general)
+                Logger.info("Launch-time microphone permission granted", category: .general)
             } else {
-                Logger.warning("Some permissions were denied", category: .general)
-                // Show user notification about permissions
+                Logger.warning("Launch-time microphone permission was denied", category: .general)
                 DispatchQueue.main.async {
                     self.showPermissionAlert()
                 }
@@ -131,27 +134,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func requestPermissions(completion: @escaping (Bool) -> Void) {
+        updateLaunchPermissionProbe(status: "microphone_only")
         guard !isUITestingProcess else {
             completion(true)
             return
         }
+
         // Request Microphone access
         AVCaptureDevice.requestAccess(for: .audio) { micGranted in
-            Task { @MainActor in
-                await self.requestSystemAudioPermissionIfNeeded()
-                completion(micGranted)
-            }
+            completion(micGranted)
         }
     }
 
-    @MainActor
-    private func requestSystemAudioPermissionIfNeeded() async {
-        do {
-            _ = try await SCShareableContent.current
-            Logger.info("System audio permission available", category: .audio)
-        } catch {
-            Logger.info("System audio permission not yet available; will request when needed", category: .audio)
-        }
+    private func updateLaunchPermissionProbe(status: String) {
+        guard isUITestingProcess else { return }
+        UserDefaults.standard.set(status, forKey: UITestDefaultsKey.launchPermissionStatus)
     }
     
     private func showPermissionAlert() {
@@ -177,6 +174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 struct VibeScribeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @AppStorage("ui.language.code") private var appLanguageCode: String = ""
+    @AppStorage(UITestDefaultsKey.launchPermissionStatus) private var uiTestLaunchPermissionStatus = "idle"
     @State private var uiTestAppRootRefreshGeneration = 0
     @State private var uiTestAppRootRefreshStatus = "idle"
     @State private var didScheduleUITestAppRootRefresh = false
@@ -185,6 +183,7 @@ struct VibeScribeApp: App {
     private static let uiTestingEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_TESTING"] == "1"
     private static let emptyStateEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_EMPTY_STATE"] == "1"
     private static let forceAppBodyRefreshEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_FORCE_APP_BODY_REFRESH"] == "1"
+    private static let launchPermissionProbeEnvEnabled = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_EXPOSE_LAUNCH_PERMISSION_PROBE"] == "1"
 
     static let isUITesting =
         ProcessInfo.processInfo.arguments.contains("--uitesting")
@@ -222,6 +221,7 @@ struct VibeScribeApp: App {
         // the debug empty-state switch persisted in UserDefaults.
         if Self.isUITesting {
             UserDefaults.standard.set(false, forKey: "debug.simulateEmptyRecordings")
+            UserDefaults.standard.set("idle", forKey: UITestDefaultsKey.launchPermissionStatus)
         }
     }
 
@@ -286,6 +286,23 @@ struct VibeScribeApp: App {
         Self.isUITesting && Self.forceAppBodyRefreshEnvEnabled
     }
 
+    private var shouldExposeUITestLaunchPermissionProbe: Bool {
+        Self.isUITesting && Self.launchPermissionProbeEnvEnabled
+    }
+
+    @ViewBuilder
+    private var uiTestLaunchPermissionProbe: some View {
+        if shouldExposeUITestLaunchPermissionProbe {
+            Text(uiTestLaunchPermissionStatus)
+                .font(.caption2)
+                .foregroundStyle(.clear)
+                .frame(width: 1, height: 1)
+                .clipped()
+                .allowsHitTesting(false)
+                .accessibilityIdentifier(AccessibilityID.uiTestLaunchPermissionStatus)
+        }
+    }
+
     @ViewBuilder
     private var uiTestRootRefreshProbe: some View {
         if shouldExposeUITestRootRefreshProbe {
@@ -317,7 +334,12 @@ struct VibeScribeApp: App {
 
         WindowGroup {
             ContentView()
-                .background(uiTestRootRefreshProbe)
+                .background {
+                    ZStack {
+                        uiTestLaunchPermissionProbe
+                        uiTestRootRefreshProbe
+                    }
+                }
                 .onAppear {
                     scheduleUITestAppRootRefreshIfNeeded()
                 }

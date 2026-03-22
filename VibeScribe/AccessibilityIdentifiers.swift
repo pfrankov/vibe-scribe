@@ -117,4 +117,5 @@ enum AccessibilityID {
     // MARK: - Context Menu Actions (UI-testing accessible)
     static let openSettingsContextButton = "openSettingsContextButton"
     static let uiTestAppRootRefreshStatus = "uiTestAppRootRefreshStatus"
+    static let uiTestLaunchPermissionStatus = "uiTestLaunchPermissionStatus"
 }

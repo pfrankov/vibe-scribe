@@ -1,6 +1,6 @@
 # VibeScribe UI Test Cases
 
-> **24 automated UI tests** across 7 test classes.
+> **25 automated UI tests** across 7 test classes.
 > Platform: macOS (XCUITest).
 > Modes: seeded library (`--uitesting`) + empty onboarding + mock end-to-end pipeline (`--uitesting --empty-state` + mock env).
 >
@@ -8,14 +8,14 @@
 > If it diverges from UI test sources or attached `AccessibilityID` controls, fix both in the same commit.
 >
 > **Sync rule**: every `func test*` in `VibeScribeUITests/*.swift` must have a case below.
-> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **24**.
+> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **25**.
 > Validation command: `./scripts/validate_ui_test_cases.sh`.
 
 ## Test Class Matrix
 
 | Class | Launch mode | State | Tests |
 |---|---|---|---:|
-| `PopulatedStateTests` | Shared launch | Seeded data | 8 |
+| `PopulatedStateTests` | Shared launch | Seeded data | 9 |
 | `EmptyStateTests` | Shared launch | Empty state (`--empty-state`) | 2 |
 | `LanguageRestartTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `AppLaunchPerformanceTests` | Per-test launch | Seeded data | 1 |
@@ -26,7 +26,7 @@
 ## Optimized Run Profiles (Coverage per Launch)
 
 1. `ui-smoke` (high-coverage smoke, low relaunch budget)
-- Scope: `PopulatedStateTests` (all 8), `EmptyStateTests` (all 2), `VS-MOCK-001`.
+- Scope: `PopulatedStateTests` (all 9), `EmptyStateTests` (all 2), `VS-MOCK-001`.
 - Relaunch budget: 3 app launches total (2 shared classes + 1 mock flow).
 - Goal: maximize baseline coverage without destructive transitions.
 
@@ -64,12 +64,13 @@ Deterministic test probes:
 | Probe | Covered in flow(s) |
 |---|---|
 | `uiTestAppRootRefreshStatus` | `VS-POP-008` |
+| `uiTestLaunchPermissionStatus` | `VS-POP-009` |
 
 Elements intentionally out of fast UI automation scope:
 1. `dragOverlay` — requires real drag-and-drop interactions from Finder / external files.
 2. `mainSplitView`, `selectRecordPlaceholder` — structural anchors (non-interactive containers/placeholders), not action controls.
 
-## 1. PopulatedStateTests — 8 cases
+## 1. PopulatedStateTests — 9 cases
 
 ### VS-POP-001 — Workspace Launch and Core Layout
 - Method: `testWorkspaceFlow_ShowsSidebarSeededRecordsAndActiveDetail`
@@ -174,6 +175,18 @@ Elements intentionally out of fast UI automation scope:
 4. Switch detail tabs once to confirm the selected record remains fully usable after refresh.
 - Expected result:
 1. Recomputing the root app scene does not invalidate the selected SwiftData model or crash the app.
+
+### VS-POP-009 — Launch Permission Policy Defers System Audio Prompt
+- Method: `testLaunchPermissionFlow_StartUpDefersSystemAudioPreflight`
+- Preconditions:
+1. App launched with `--uitesting`.
+2. Shared populated-state launch exposes a deterministic launch-permission probe.
+- Steps:
+1. Wait for the launch-permission probe to appear after startup.
+2. Verify the probe reports `microphone_only`.
+3. Verify populated workspace remains visible after reading the probe.
+- Expected result:
+1. App startup keeps microphone preflight as the only launch permission action and defers system-audio permission until an explicit recording start.
 
 ## 2. EmptyStateTests — 2 cases
 

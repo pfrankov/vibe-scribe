@@ -139,8 +139,7 @@ final class SpeechAnalyzerTranscriptionManager {
     
     @available(macOS 26, *)
     private func resolveSupportedLocale(_ locale: Locale) async -> Locale {
-        // supportedLocale may or may not throw depending on implementation
-        if let equivalent = try? await Speech.SpeechTranscriber.supportedLocale(equivalentTo: locale) {
+        if let equivalent = await Speech.SpeechTranscriber.supportedLocale(equivalentTo: locale) {
             return equivalent
         }
         

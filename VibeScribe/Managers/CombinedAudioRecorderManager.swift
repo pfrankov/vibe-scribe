@@ -61,6 +61,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isRecording in
                 self?.isSystemAudioRecording = isRecording
+                self?.isSystemAudioEnabled = isRecording
             }
             .store(in: &cancellables)
         
@@ -116,40 +117,30 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         Logger.info("Starting combined audio recording", category: .audio)
         error = nil
         isPaused = false
+        isSystemAudioEnabled = false
 
         // Always start microphone recording first
         micRecorderManager.startRecording()
-        
-        Task {
-            let hasPermission = await systemRecorderManager.hasScreenCapturePermission()
-            if hasPermission {
-                Logger.info("System audio permission available - starting system audio recording", category: .audio)
-                self.isSystemAudioEnabled = true
-                let timestamp = Int(Date().timeIntervalSince1970)
-                let recordingsDir: URL
-                if let dir = try? AudioUtils.getRecordingsDirectory() {
-                    recordingsDir = dir
-                } else {
-                    let fm = FileManager.default
-                    let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
-                    let tempDir = fm.temporaryDirectory
-                        .appendingPathComponent(bundleID, isDirectory: true)
-                        .appendingPathComponent("Recordings", isDirectory: true)
-                    if !fm.fileExists(atPath: tempDir.path) {
-                        try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
-                    }
-                    recordingsDir = tempDir
-                }
-                let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp).caf")
-                await MainActor.run {
-                    self.systemAudioOutputURL = sysURL
-                    self.systemRecorderManager.startRecording(outputURL: sysURL)
-                }
-            } else {
-                Logger.info("System audio permission not available - recording microphone only", category: .audio)
-                self.isSystemAudioEnabled = false
+
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let recordingsDir: URL
+        if let dir = try? AudioUtils.getRecordingsDirectory() {
+            recordingsDir = dir
+        } else {
+            let fm = FileManager.default
+            let bundleID = Bundle.main.bundleIdentifier ?? "VibeScribeApp"
+            let tempDir = fm.temporaryDirectory
+                .appendingPathComponent(bundleID, isDirectory: true)
+                .appendingPathComponent("Recordings", isDirectory: true)
+            if !fm.fileExists(atPath: tempDir.path) {
+                try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
             }
+            recordingsDir = tempDir
         }
+        let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp).caf")
+        systemAudioOutputURL = sysURL
+        systemRecorderManager.startRecording(outputURL: sysURL)
+
         isRecording = true
     }
     
@@ -159,6 +150,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         }
 
         Logger.info("Stopping combined audio recording", category: .audio)
+        defer { systemAudioOutputURL = nil }
         
         // Stop microphone recording (works from active or paused states)
         guard let micResult = micRecorderManager.stopRecording() else {
@@ -170,10 +162,12 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         let wasSystemAudioRecording = isSystemAudioRecording
         
         // Stop system audio recording if it was active
-        if isSystemAudioRecording {
+        if systemAudioOutputURL != nil {
             systemRecorderManager.stopRecording()
-            systemAudioURL = systemAudioOutputURL
-            Logger.info("Stopped system audio recording", category: .audio)
+            if isSystemAudioRecording {
+                systemAudioURL = systemAudioOutputURL
+                Logger.info("Stopped system audio recording", category: .audio)
+            }
         }
         
         // If we have both microphone and system audio, merge them
@@ -235,7 +229,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
         
         micRecorderManager.cancelRecording()
         
-        if isSystemAudioRecording {
+        if systemAudioOutputURL != nil {
             systemRecorderManager.stopRecording()
             if let sysURL = systemAudioOutputURL {
                 cleanupTemporaryFiles(urls: [sysURL])

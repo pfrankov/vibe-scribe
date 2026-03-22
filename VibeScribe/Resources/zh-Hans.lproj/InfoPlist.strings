@@ -1,4 +1,4 @@
 "CFBundleDisplayName" = "VibeScribe";
+"NSAudioCaptureUsageDescription" = "VibeScribe 需要系统音频录制权限，才能捕获应用和扬声器输出用于转录。";
 "NSMicrophoneUsageDescription" = "VibeScribe 需要麦克风权限才能录制音频用于转录。";
-"NSScreenCaptureDescription" = "VibeScribe 需要屏幕录制权限才能捕获系统音频进行转录。";
 "NSSpeechRecognitionUsageDescription" = "VibeScribe 使用语音识别在此 Mac 上将录音转换为文本。";

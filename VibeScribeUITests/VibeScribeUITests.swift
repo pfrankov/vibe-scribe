@@ -59,6 +59,7 @@ private enum AID {
     static let settingsTitleToggle = "settingsTitleToggle"
     static let settingsChunkToggle = "settingsChunkToggle"
     static let uiTestAppRootRefreshStatus = "uiTestAppRootRefreshStatus"
+    static let uiTestLaunchPermissionStatus = "uiTestLaunchPermissionStatus"
 
     // Context Menu (UI-testing accessible)
     static let openSettingsContextButton = "openSettingsContextButton"
@@ -1082,6 +1083,7 @@ final class PopulatedStateTests: VibeScribeUITestCase {
         _app.launchEnvironment["VIBESCRIBE_UI_TESTING"] = "1"
         _app.launchEnvironment["VIBESCRIBE_UI_EMPTY_STATE"] = "0"
         _app.launchEnvironment["VIBESCRIBE_UI_FORCE_APP_BODY_REFRESH"] = "1"
+        _app.launchEnvironment["VIBESCRIBE_UI_EXPOSE_LAUNCH_PERMISSION_PROBE"] = "1"
         if _app.state != .notRunning {
             _app.terminate()
         }
@@ -1133,6 +1135,20 @@ final class PopulatedStateTests: VibeScribeUITestCase {
         assertHittable(AID.newRecordingButton)
         assertHittable(AID.moreActionsMenu)
         assertHittable(AID.tabPicker)
+    }
+
+    func testLaunchPermissionFlow_StartUpDefersSystemAudioPreflight() {
+        let permissionProbe = waitFor(AID.uiTestLaunchPermissionStatus, timeout: 1.0)
+        let status = textValue(of: permissionProbe)
+
+        XCTAssertEqual(
+            status,
+            "microphone_only",
+            "Launch permission policy should defer system-audio permission until recording starts"
+        )
+
+        assertImmediateExists(AID.sidebarHeader)
+        assertImmediateExists(AID.recordDetailView)
     }
 
     func testLaunchStabilityFlow_ForcedAppRootRefreshKeepsSelectedRecordUsable() {
