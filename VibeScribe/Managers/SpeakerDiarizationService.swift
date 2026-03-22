@@ -20,7 +20,18 @@ struct SpeakerSnapshot: Sendable {
 
 struct SpeakerDiarizationOutput: Sendable {
     let segments: [TimedSpeakerSegment]
-    let speakers: [String: Speaker]
+    let speakers: [String: DiarizedSpeakerSnapshot]
+}
+
+struct DiarizedSpeakerSnapshot: Sendable {
+    let id: String
+    let name: String
+    let embedding: [Float]
+    let duration: Float
+    let createdAt: Date
+    let updatedAt: Date
+    let updateCount: Int
+    let isPermanent: Bool
 }
 
 /// Off-main-actor worker that owns FluidAudio diarization state and executes heavy work.
@@ -57,7 +68,18 @@ actor SpeakerDiarizationService {
 
         let samples = try audioConverter.resampleAudioFile(audioURL)
         let result = try diarizer.performCompleteDiarization(samples)
-        let speakers = diarizer.speakerManager.getAllSpeakers()
+        let speakers = diarizer.speakerManager.getAllSpeakers().mapValues { speaker in
+            DiarizedSpeakerSnapshot(
+                id: speaker.id,
+                name: speaker.name,
+                embedding: speaker.currentEmbedding,
+                duration: speaker.duration,
+                createdAt: speaker.createdAt,
+                updatedAt: speaker.updatedAt,
+                updateCount: Int(speaker.updateCount),
+                isPermanent: speaker.isPermanent
+            )
+        }
 
         return SpeakerDiarizationOutput(
             segments: result.segments,
@@ -77,10 +99,12 @@ actor SpeakerDiarizationService {
         }
 
         let task = Task {
+            Logger.debug("Preparing FluidAudio diarization models...", category: .transcription)
             let models = try await DiarizerModels.downloadIfNeeded()
             let diarizer = DiarizerManager()
             diarizer.initialize(models: models)
             self.diarizer = diarizer
+            Logger.info("FluidAudio diarization models ready", category: .transcription)
         }
 
         initializationTask = task

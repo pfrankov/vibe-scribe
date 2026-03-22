@@ -247,12 +247,12 @@ final class SpeakerDiarizationManager: ObservableObject {
                     speakerId: speaker.id,
                     displayName: speaker.name,
                     colorHue: hue,
-                    embedding: speaker.currentEmbedding,
+                    embedding: speaker.embedding,
                     totalDuration: TimeInterval(speaker.duration),
                     createdAt: speaker.createdAt,
                     updatedAt: speaker.updatedAt,
                     lastSeenAt: now,
-                    updateCount: Int(speaker.updateCount),
+                    updateCount: speaker.updateCount,
                     isPermanent: speaker.isPermanent,
                     isUserRenamed: false
                 )
@@ -264,11 +264,11 @@ final class SpeakerDiarizationManager: ObservableObject {
                 profile.displayName = speaker.name
             }
 
-            profile.embedding = speaker.currentEmbedding
+            profile.embedding = speaker.embedding
             profile.totalDuration = TimeInterval(speaker.duration)
             profile.updatedAt = speaker.updatedAt
             profile.lastSeenAt = now
-            profile.updateCount = Int(speaker.updateCount)
+            profile.updateCount = speaker.updateCount
             profile.isPermanent = speaker.isPermanent
             if profile.colorHue <= 0 || profile.colorHue > 1 {
                 profile.colorHue = SpeakerProfile.defaultHue(for: profile.speakerId)

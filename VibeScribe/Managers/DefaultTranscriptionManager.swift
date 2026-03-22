@@ -11,6 +11,9 @@ import FluidAudio
 actor DefaultTranscriptionManager {
     static let shared = DefaultTranscriptionManager()
 
+    private static let preferredModelVersion: AsrModelVersion = .v3
+    private static let preferredModelLabel = "v3"
+
     private let asrManager = AsrManager()
     private var initializationTask: Task<Void, Error>?
 
@@ -197,10 +200,16 @@ actor DefaultTranscriptionManager {
         }
 
         let task = Task {
-            Logger.debug("Preparing FluidAudio ASR models...", category: .transcription)
-            let models = try await AsrModels.downloadAndLoad()
+            Logger.debug(
+                "Preparing FluidAudio ASR models (\(Self.preferredModelLabel))...",
+                category: .transcription
+            )
+            let models = try await AsrModels.downloadAndLoad(version: Self.preferredModelVersion)
             try await asrManager.initialize(models: models)
-            Logger.info("FluidAudio ASR models ready", category: .transcription)
+            Logger.info(
+                "FluidAudio ASR models ready (\(Self.preferredModelLabel))",
+                category: .transcription
+            )
         }
 
         initializationTask = task
