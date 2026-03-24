@@ -199,11 +199,16 @@ struct RecordingOverlayView: View {
             format: AppLanguage.localized("recording.arg1", comment: "Default recording name with timestamp"),
             formatter.string(from: Date())
         )
-        let newRecord = Record(name: name, fileURL: url, duration: duration, includesSystemAudio: includesSystemAudio)
+        let newRecord = Record(
+            name: name,
+            fileURL: url,
+            duration: duration,
+            includesSystemAudio: includesSystemAudio
+        )
         modelContext.insert(newRecord)
         do {
             try modelContext.save()
-            NotificationCenter.default.post(name: NSNotification.Name("NewRecordCreated"), object: nil, userInfo: ["recordId": newRecord.id])
+            NotificationCenter.default.post(name: .newRecordCreated, object: nil, userInfo: ["recordId": newRecord.id])
         } catch {
             Logger.error("Failed to save record from overlay", error: error, category: .audio)
         }

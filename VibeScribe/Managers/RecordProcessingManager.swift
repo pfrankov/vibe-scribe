@@ -39,6 +39,7 @@ final class RecordProcessingManager: ObservableObject {
         let autoGenerateTitleFromSummary: Bool
         let summaryTitlePrompt: String
         let speechAnalyzerLocaleIdentifier: String
+        let enableSpeakerDiarization: Bool
         
         init(settings: AppSettings) {
             self.whisperProviderRawValue = settings.whisperProviderRawValue
@@ -55,6 +56,7 @@ final class RecordProcessingManager: ObservableObject {
             self.autoGenerateTitleFromSummary = settings.autoGenerateTitleFromSummary
             self.summaryTitlePrompt = settings.summaryTitlePrompt
             self.speechAnalyzerLocaleIdentifier = settings.speechAnalyzerLocaleIdentifier
+            self.enableSpeakerDiarization = settings.enableSpeakerDiarization
         }
         
         var resolvedWhisperModel: String {
@@ -373,8 +375,16 @@ final class RecordProcessingManager: ObservableObject {
             
             try job.modelContext.save()
 
-            // Kick off diarization immediately after transcription so it stays in the same pipeline step.
-            SpeakerDiarizationManager.shared.diarize(record: record, in: job.modelContext, force: true)
+            if job.settings.enableSpeakerDiarization && job.settings.usesDefaultProvider {
+                // Kick off diarization immediately after transcription so it stays in the same pipeline step.
+                SpeakerDiarizationManager.shared.diarize(
+                    record: record,
+                    in: job.modelContext,
+                    force: true
+                )
+            } else {
+                SpeakerDiarizationManager.shared.clearDiarization(for: record, in: job.modelContext)
+            }
             
             if automatic, !trimmed.isEmpty {
                 enqueueSummarization(recordID: job.recordID, context: job.modelContext, settings: job.settings, automatic: true)
@@ -421,7 +431,15 @@ final class RecordProcessingManager: ObservableObject {
 
             try job.modelContext.save()
 
-            SpeakerDiarizationManager.shared.diarize(record: record, in: job.modelContext, force: true)
+            if job.settings.enableSpeakerDiarization && job.settings.usesDefaultProvider {
+                SpeakerDiarizationManager.shared.diarize(
+                    record: record,
+                    in: job.modelContext,
+                    force: true
+                )
+            } else {
+                SpeakerDiarizationManager.shared.clearDiarization(for: record, in: job.modelContext)
+            }
 
             if automatic, !trimmed.isEmpty {
                 enqueueSummarization(recordID: job.recordID, context: job.modelContext, settings: job.settings, automatic: true)

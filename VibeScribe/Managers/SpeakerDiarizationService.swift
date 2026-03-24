@@ -46,15 +46,12 @@ actor SpeakerDiarizationService {
         audioURL: URL,
         knownSpeakers: [SpeakerSnapshot]
     ) async throws -> SpeakerDiarizationOutput {
-        try await prepareIfNeeded()
-        guard let diarizer else {
-            throw DiarizerError.notInitialized
-        }
+        let diarizer = try await prepareIfNeeded()
 
         diarizer.speakerManager.reset()
         let preparedSpeakers = knownSpeakers.compactMap { snapshot -> Speaker? in
             guard snapshot.embedding.count == SpeakerManager.embeddingSize else { return nil }
-            return Speaker(
+            let speaker = Speaker(
                 id: snapshot.id,
                 name: snapshot.name,
                 currentEmbedding: snapshot.embedding,
@@ -63,6 +60,14 @@ actor SpeakerDiarizationService {
                 updatedAt: snapshot.updatedAt,
                 isPermanent: snapshot.isPermanent
             )
+            speaker.addRawEmbedding(
+                RawEmbedding(
+                    segmentId: UUID(),
+                    embedding: snapshot.embedding,
+                    timestamp: snapshot.updatedAt
+                )
+            )
+            return speaker
         }
         diarizer.speakerManager.initializeKnownSpeakers(preparedSpeakers, mode: .merge, preserveIfPermanent: true)
 
@@ -89,13 +94,16 @@ actor SpeakerDiarizationService {
 
     // MARK: - Private
 
-    private func prepareIfNeeded() async throws {
-        if diarizer != nil {
-            return
+    private func prepareIfNeeded() async throws -> DiarizerManager {
+        if let diarizer {
+            return diarizer
         }
 
         if let task = initializationTask {
-            return try await task.value
+            try await task.value
+            if let diarizer {
+                return diarizer
+            }
         }
 
         let task = Task {
@@ -103,14 +111,19 @@ actor SpeakerDiarizationService {
             let models = try await DiarizerModels.downloadIfNeeded()
             let diarizer = DiarizerManager()
             diarizer.initialize(models: models)
-            self.diarizer = diarizer
             Logger.info("FluidAudio diarization models ready", category: .transcription)
+            self.diarizer = diarizer
         }
 
         initializationTask = task
 
         do {
             try await task.value
+            initializationTask = nil
+            guard let diarizer else {
+                throw DiarizerError.notInitialized
+            }
+            return diarizer
         } catch {
             initializationTask = nil
             throw error

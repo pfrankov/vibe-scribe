@@ -8,6 +8,7 @@
 "vibescribe.needs.microphone.access.to.record.audio.please.grant.permission.in.system.preferences.security.privacy.microphone" = "VibeScribe 需要麦克风权限来录制音频。请在“系统设置”>“隐私与安全性”>“麦克风”中授予权限。";
 "open.system.preferences" = "打开系统设置";
 "cancel" = "取消";
+"done" = "完成";
 "import" = "导入";
 "select.audio.youd.like.vibescribe.to.transcribe.and.summarize" = "选择您希望 VibeScribe 转录和总结的音频。";
 "start.a.new.recording" = "开始新录音";
@@ -146,6 +147,8 @@
 "prompt" = "提示词";
 "use.transcription.as.a.placeholder.for.the.individual.chunk.text" = "使用 {transcription} 作为单个块文本的占位符。";
 "generate.short.title.after.summarization" = "总结后生成短标题";
+"enable.speaker.diarization" = "在转写中识别说话人";
+"enable.speaker.diarization.caption" = "转写后添加说话人标签和简洁的说话人时间线。";
 "when.enabled.the.app.asks.the.language.model.for.a.concise.title.based.on.the.final.summary" = "启用后，应用会根据最终摘要要求语言模型提供简洁的标题。";
 "title.generation.prompt" = "标题生成提示词";
 "use.summary.as.a.placeholder.for.the.completed.summary.text.the.model.should.answer.with.a.title.only" = "使用 {summary} 作为已完成摘要文本的占位符。模型应仅回答标题。";
@@ -218,12 +221,12 @@
 "rename.speaker.placeholder" = "说话人姓名";
 "rename.speakers" = "重命名或合并说话人";
 "merge.speakers" = "合并说话人";
-"merge.target" = "设为主说话人";
+"merge.target" = "设为主要";
 "merge.include" = "加入合并";
-"merge.selected" = "合并所选";
-"speaker.merge.instructions" = "选择主说话人，勾选相似的声音并将其合并。";
+"merge.selected" = "合并";
+"speaker.merge.instructions" = "直接重命名说话人。只有在需要合并时才选择相似声音。";
+"speaker.merge.kept.badge" = "主要";
 "speaker.record.time" = "当前录音";
-"speaker.library.time" = "全部录音";
 "jump.to.speaker.start" = "跳到此说话人的首次出现";
 "last.updated.arg1" = "更新于 %@";
 "playhead" = "播放位置";

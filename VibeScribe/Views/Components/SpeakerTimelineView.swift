@@ -14,6 +14,7 @@ struct SpeakerTimelineSegment: Identifiable, Hashable {
     let endTime: TimeInterval
     let hue: Double
     let label: String
+    let mergeKey: String
 
     var duration: TimeInterval {
         endTime - startTime
@@ -35,6 +36,7 @@ struct SpeakerTimelineView: View {
         GeometryReader { geometry in
             let totalWidth = max(geometry.size.width, 1)
             let barHeight = max(18, geometry.size.height - 10)
+            let visibleSegments = collapsedSegments(totalWidth: totalWidth)
 
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 8)
@@ -45,7 +47,7 @@ struct SpeakerTimelineView: View {
                             .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
                     )
 
-                ForEach(collapsedSegments(totalWidth: totalWidth)) { segment in
+                ForEach(Array(visibleSegments.enumerated()), id: \.element.id) { index, segment in
                     let rawWidth = width(for: segment, totalWidth: totalWidth)
                     let visualWidth = max(rawWidth, 2)
                     let startX = offset(for: segment, totalWidth: totalWidth)
@@ -69,7 +71,18 @@ struct SpeakerTimelineView: View {
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
                     .frame(width: visualWidth, height: barHeight)
-                    .position(x: startX + visualWidth / 2, y: geometry.size.height / 2)
+                    .offset(x: startX, y: (geometry.size.height - barHeight) / 2)
+                    .accessibilityIdentifier("\(AccessibilityID.speakerTimelineSegmentPrefix)\(index)")
+                    .accessibilityLabel(Text(segment.label))
+                    .accessibilityValue(Text("\(clockString(from: segment.startTime))-\(clockString(from: segment.endTime))"))
+                    .accessibilityAction {
+                        onSeek(segment.startTime)
+                    }
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            onSeek(segment.startTime)
+                        }
+                    )
                 }
 
                 let playheadX = playheadOffset(totalWidth: totalWidth)
@@ -77,6 +90,7 @@ struct SpeakerTimelineView: View {
                     .fill(Color.primary.opacity(0.9))
                     .frame(width: 2, height: geometry.size.height - 2)
                     .offset(x: playheadX)
+                    .allowsHitTesting(false)
                     .accessibilityLabel(Text(AppLanguage.localized("playhead")))
             }
         }
@@ -105,63 +119,72 @@ struct SpeakerTimelineView: View {
     }
 
     private func collapsedSegments(totalWidth: CGFloat) -> [SpeakerTimelineSegment] {
-        guard !segments.isEmpty else { return [] }
-        let minWidth = minTapWidth
-
-        func combine(_ group: [SpeakerTimelineSegment]) -> SpeakerTimelineSegment {
-            let start = group.first!.startTime
-            let end = group.last!.endTime
-
-            var durationByLabel: [String: TimeInterval] = [:]
-            var hueByLabel: [String: Double] = [:]
-            for seg in group {
-                durationByLabel[seg.label, default: 0] += seg.duration
-                hueByLabel[seg.label] = seg.hue
-            }
-            let dominant = durationByLabel.max(by: { $0.value < $1.value })?.key ?? group.first!.label
-            let dominantHue = hueByLabel[dominant] ?? group.first!.hue
-
-            return SpeakerTimelineSegment(
-                id: UUID(),
-                startTime: start,
-                endTime: end,
-                hue: dominantHue,
-                label: dominant
-            )
+        guard !segments.isEmpty, duration > 0, totalWidth > 0 else {
+            return segments.sorted { $0.startTime < $1.startTime }
         }
+        let sorted = segments.sorted { $0.startTime < $1.startTime }
+        // Pass 1: merge consecutive same-speaker segments separated by short pauses.
+        let runs = mergeSameSpeakerRuns(sorted, maxGap: 3.0)
+        // Pass 2: absorb any segment narrower than 4 px into its predecessor.
+        return absorbTinySegments(runs, totalWidth: totalWidth, minPx: 4)
+    }
 
+    /// Merges consecutive same-speaker segments whose gap is at most `maxGap` seconds.
+    private func mergeSameSpeakerRuns(
+        _ sorted: [SpeakerTimelineSegment],
+        maxGap: TimeInterval
+    ) -> [SpeakerTimelineSegment] {
         var result: [SpeakerTimelineSegment] = []
-        var buffer: [SpeakerTimelineSegment] = []
-        var bufferWidth: CGFloat = 0
-
-        func flush() {
-            if !buffer.isEmpty {
-                result.append(combine(buffer))
-                buffer.removeAll()
-                bufferWidth = 0
-            }
-        }
-
-        let ordered = segments.sorted { $0.startTime < $1.startTime }
-
-        for segment in ordered {
-            let w = width(for: segment, totalWidth: totalWidth)
-            if w >= minWidth && buffer.isEmpty {
-                result.append(segment)
+        for seg in sorted {
+            if let last = result.last,
+               last.mergeKey == seg.mergeKey,
+               seg.startTime - last.endTime <= maxGap {
+                result[result.count - 1] = SpeakerTimelineSegment(
+                    id: last.id,
+                    startTime: last.startTime,
+                    endTime: max(last.endTime, seg.endTime),
+                    hue: last.hue,
+                    label: last.label,
+                    mergeKey: last.mergeKey
+                )
             } else {
-                buffer.append(segment)
-                bufferWidth += w
-                if bufferWidth >= minWidth {
-                    flush()
-                }
+                result.append(seg)
             }
-        }
-        if !buffer.isEmpty {
-            if bufferWidth < minWidth, let last = result.popLast() {
-                buffer.insert(last, at: 0)
-            }
-            flush()
         }
         return result
+    }
+
+    /// Absorbs any segment whose rendered width is below `minPx` into its predecessor,
+    /// keeping the predecessor's speaker identity.
+    private func absorbTinySegments(
+        _ sorted: [SpeakerTimelineSegment],
+        totalWidth: CGFloat,
+        minPx: CGFloat
+    ) -> [SpeakerTimelineSegment] {
+        guard sorted.count > 1 else { return sorted }
+        var result: [SpeakerTimelineSegment] = []
+        for seg in sorted {
+            let px = CGFloat(seg.duration / duration) * totalWidth
+            if px < minPx, let last = result.last {
+                result[result.count - 1] = SpeakerTimelineSegment(
+                    id: last.id,
+                    startTime: last.startTime,
+                    endTime: max(last.endTime, seg.endTime),
+                    hue: last.hue,
+                    label: last.label,
+                    mergeKey: last.mergeKey
+                )
+            } else {
+                result.append(seg)
+            }
+        }
+        return result
+    }
+
+    private func clockString(from time: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(time.rounded(.down)))
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 }

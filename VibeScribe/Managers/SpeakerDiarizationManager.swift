@@ -59,7 +59,9 @@ final class SpeakerDiarizationManager: ObservableObject {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let known = fetchKnownSpeakers(in: context)
+                // When force re-running, only pass permanent (user-labeled) speakers so that
+                // the diarizer can freely reorganize auto-detected speakers.
+                let known = fetchKnownSpeakers(for: record, permanentOnly: force)
                 let output = try await SpeakerDiarizationService.shared.diarize(
                     audioURL: fileURL,
                     knownSpeakers: known
@@ -140,9 +142,40 @@ final class SpeakerDiarizationManager: ObservableObject {
         record.lastDiarizationAt = Date()
 
         do {
+            pruneOrphanedProfiles(in: context)
             try context.save()
         } catch {
             Logger.error("Failed to merge speakers", error: error, category: .general)
+        }
+    }
+
+    func clearDiarization(for record: Record, in context: ModelContext) {
+        if let task = activeTasks[record.id] {
+            task.cancel()
+            activeTasks[record.id] = nil
+        }
+
+        let existingSegments = Array(record.speakerSegments)
+        guard !existingSegments.isEmpty || record.lastDiarizationAt != nil || states[record.id] != nil else {
+            return
+        }
+
+        for segment in existingSegments {
+            context.delete(segment)
+        }
+        record.speakerSegments.removeAll()
+        record.lastDiarizationAt = nil
+
+        do {
+            pruneOrphanedProfiles(in: context)
+            try context.save()
+            updateState(for: record.id) { state in
+                state.isProcessing = false
+                state.error = nil
+                state.lastRunAt = nil
+            }
+        } catch {
+            Logger.error("Failed to clear diarization", error: error, category: .general)
         }
     }
 
@@ -208,10 +241,9 @@ final class SpeakerDiarizationManager: ObservableObject {
         activeTasks[recordID] = task
     }
 
-    private func fetchKnownSpeakers(in context: ModelContext) -> [SpeakerSnapshot] {
-        let descriptor = FetchDescriptor<SpeakerProfile>()
-        let profiles = (try? context.fetch(descriptor)) ?? []
-        return profiles.compactMap { profile in
+    private func fetchKnownSpeakers(for record: Record, permanentOnly: Bool = false) -> [SpeakerSnapshot] {
+        speakerProfiles(for: record).compactMap { profile in
+            if permanentOnly && !profile.isPermanent { return nil }
             guard profile.embedding.count == SpeakerManager.embeddingSize else { return nil }
             return SpeakerSnapshot(
                 id: profile.speakerId,
@@ -228,9 +260,7 @@ final class SpeakerDiarizationManager: ObservableObject {
     private func apply(output: SpeakerDiarizationOutput, to record: Record, in context: ModelContext) throws {
         let now = Date()
 
-        // Cache existing profiles for quick lookup
-        let descriptor = FetchDescriptor<SpeakerProfile>()
-        let existingProfiles = (try? context.fetch(descriptor)) ?? []
+        let existingProfiles = speakerProfiles(for: record)
         var profilesByID: [String: SpeakerProfile] = [:]
         for profile in existingProfiles {
             profilesByID[profile.speakerId] = profile
@@ -308,6 +338,7 @@ final class SpeakerDiarizationManager: ObservableObject {
 
         record.lastDiarizationAt = now
 
+        pruneOrphanedProfiles(in: context)
         try context.save()
     }
 
@@ -316,16 +347,17 @@ final class SpeakerDiarizationManager: ObservableObject {
         to record: Record,
         in context: ModelContext
     ) throws {
+        let existingProfiles = speakerProfiles(for: record)
+
         for segment in record.speakerSegments {
             context.delete(segment)
         }
         record.speakerSegments.removeAll()
 
-        let descriptor = FetchDescriptor<SpeakerProfile>()
-        let existingProfiles = (try? context.fetch(descriptor)) ?? []
-        var profilesByID: [String: SpeakerProfile] = Dictionary(
-            uniqueKeysWithValues: existingProfiles.map { ($0.speakerId, $0) }
-        )
+        var profilesByID: [String: SpeakerProfile] = [:]
+        for profile in existingProfiles {
+            profilesByID[profile.speakerId] = profile
+        }
 
         var durationsBySpeakerID: [String: TimeInterval] = [:]
         let now = Date()
@@ -383,7 +415,23 @@ final class SpeakerDiarizationManager: ObservableObject {
         }
 
         record.lastDiarizationAt = now
+        pruneOrphanedProfiles(in: context)
         try context.save()
+    }
+
+    private func speakerProfiles(for record: Record) -> [SpeakerProfile] {
+        var seen: Set<UUID> = []
+        return record.speakerSegments.compactMap(\.speaker).filter { profile in
+            seen.insert(profile.id).inserted
+        }
+    }
+
+    private func pruneOrphanedProfiles(in context: ModelContext) {
+        let descriptor = FetchDescriptor<SpeakerProfile>()
+        let profiles = (try? context.fetch(descriptor)) ?? []
+        for profile in profiles where profile.segments.isEmpty {
+            context.delete(profile)
+        }
     }
 
     private func mockEmbedding(for speakerID: String) -> [Float] {

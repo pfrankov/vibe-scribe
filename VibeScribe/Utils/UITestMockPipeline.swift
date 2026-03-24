@@ -12,6 +12,11 @@ enum UITestMockPipeline {
         case manualSummaryError = "manual_summary_error"
         case threeSpeakersMerge = "three_speakers_merge"
         case providerMatrix = "provider_matrix"
+        case timedTranscriptFormatting = "timed_transcript_formatting"
+        case timedTranscriptTailRecovery = "timed_transcript_tail_recovery"
+        case timedTranscriptWithSpeakers = "timed_transcript_with_speakers"
+        case singleSpeakerSuccess = "single_speaker_success"
+        case speakerTimelineInteractions = "speaker_timeline_interactions"
     }
 
     struct SpeakerSegment: Equatable {
@@ -73,7 +78,9 @@ enum UITestMockPipeline {
     private static let scenarioEnvKey = "VIBESCRIBE_UI_SCENARIO"
     private static let mockAudioPathEnvKey = "VIBESCRIBE_UI_MOCK_AUDIO_PATH"
     private static let forcedWhisperProviderEnvKey = "VIBESCRIBE_UI_MOCK_WHISPER_PROVIDER"
+    private static let firstRecordSpeakerNameEnvKey = "VIBESCRIBE_UI_MOCK_FIRST_RECORD_SPEAKER_NAME"
     private static let dynamicSummaryToken = "__DYNAMIC_SUMMARY__"
+    private static var diarizationInvocationCount = 0
 
     static var isEnabled: Bool {
         guard VibeScribeApp.isUITesting else { return false }
@@ -93,6 +100,14 @@ enum UITestMockPipeline {
     static var currentConfig: Config? {
         guard isEnabled else { return nil }
         return configuration(for: currentScenario)
+    }
+
+    /// Non-nil when the test set `VIBESCRIBE_UI_MOCK_WHISPER_PROVIDER` to override AppSettings on launch.
+    static var forcedWhisperProviderRawValue: String? {
+        guard isEnabled else { return nil }
+        let raw = ProcessInfo.processInfo.environment[forcedWhisperProviderEnvKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (raw?.isEmpty == false) ? raw : nil
     }
 
     static var mockWhisperModels: [String] {
@@ -183,7 +198,32 @@ enum UITestMockPipeline {
     }
 
     static func diarizationResult() -> DiarizationResult {
-        currentConfig?.diarization ?? .none
+        let result = currentConfig?.diarization ?? .none
+        defer { diarizationInvocationCount += 1 }
+
+        guard
+            diarizationInvocationCount == 0,
+            case .speakers(let segments) = result,
+            let customSpeakerName = ProcessInfo.processInfo.environment[firstRecordSpeakerNameEnvKey]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !customSpeakerName.isEmpty,
+            let firstSpeakerID = segments.first?.speakerID
+        else {
+            return result
+        }
+
+        let renamedSegments = segments.map { segment in
+            guard segment.speakerID == firstSpeakerID else { return segment }
+            return SpeakerSegment(
+                speakerID: segment.speakerID,
+                speakerName: customSpeakerName,
+                hue: segment.hue,
+                startTime: segment.startTime,
+                endTime: segment.endTime
+            )
+        }
+
+        return .speakers(renamedSegments)
     }
 
     private static func dynamicSummary(model: String, transcription: String, label: String) -> String {
@@ -217,12 +257,88 @@ enum UITestMockPipeline {
         ]
     }
 
+    private static func oneSpeakerSegments() -> [SpeakerSegment] {
+        [
+            SpeakerSegment(speakerID: "speaker_alpha", speakerName: "Speaker Alpha", hue: 0.08, startTime: 0, endTime: 24)
+        ]
+    }
+
     private static func threeSpeakerSegments() -> [SpeakerSegment] {
         [
             SpeakerSegment(speakerID: "speaker_alpha", speakerName: "Speaker Alpha", hue: 0.08, startTime: 0, endTime: 8),
             SpeakerSegment(speakerID: "speaker_beta", speakerName: "Speaker Beta", hue: 0.58, startTime: 8, endTime: 16),
             SpeakerSegment(speakerID: "speaker_gamma", speakerName: "Speaker Gamma", hue: 0.34, startTime: 16, endTime: 24),
         ]
+    }
+
+    private static func timedRangeSpeakerSegments() -> [SpeakerSegment] {
+        [
+            SpeakerSegment(speakerID: "speaker_alpha", speakerName: "Speaker Alpha", hue: 0.08, startTime: 0, endTime: 8),
+            SpeakerSegment(speakerID: "speaker_beta", speakerName: "Speaker Beta", hue: 0.58, startTime: 8, endTime: 16)
+        ]
+    }
+
+    private static func timelineInteractionSegments() -> [SpeakerSegment] {
+        [
+            SpeakerSegment(speakerID: "speaker_alpha", speakerName: "Speaker Alpha", hue: 0.08, startTime: 0, endTime: 5),
+            SpeakerSegment(speakerID: "speaker_alpha", speakerName: "Speaker Alpha", hue: 0.08, startTime: 7, endTime: 11),
+            SpeakerSegment(speakerID: "speaker_beta", speakerName: "Speaker Beta", hue: 0.58, startTime: 13, endTime: 14.2),
+            SpeakerSegment(speakerID: "speaker_alpha", speakerName: "Speaker Alpha", hue: 0.08, startTime: 15, endTime: 16.2),
+            SpeakerSegment(speakerID: "speaker_beta", speakerName: "Speaker Beta", hue: 0.58, startTime: 17, endTime: 24),
+        ]
+    }
+
+    private static func timedTranscriptRangesNoSpeakers() -> String {
+        let rawText = "Good morning team. We are ready to ship the next build today."
+        let tokens: [TranscriptToken] = [
+            .init(token: "Good", startTime: 0.10, endTime: 0.45),
+            .init(token: " morning", startTime: 0.50, endTime: 1.05),
+            .init(token: " team", startTime: 1.10, endTime: 1.55),
+            .init(token: ".", startTime: 1.56, endTime: 1.70),
+            .init(token: " We", startTime: 5.20, endTime: 5.55),
+            .init(token: " are", startTime: 5.60, endTime: 5.95),
+            .init(token: " ready", startTime: 6.00, endTime: 6.45),
+            .init(token: " to", startTime: 6.50, endTime: 6.75),
+            .init(token: " ship", startTime: 6.80, endTime: 7.20),
+            .init(token: " the", startTime: 7.25, endTime: 7.50),
+            .init(token: " next", startTime: 7.55, endTime: 7.95),
+            .init(token: " build", startTime: 8.00, endTime: 8.40),
+            .init(token: " today", startTime: 8.45, endTime: 9.10),
+            .init(token: ".", startTime: 9.11, endTime: 9.30)
+        ]
+        return TranscriptFormatter.formattedText(rawText: rawText, tokens: tokens)
+    }
+
+    private static func timedTranscriptRangesWithSpeakers() -> String {
+        let rawText = "We aligned on project goals. We agreed on next review date."
+        let tokens: [TranscriptToken] = [
+            .init(token: "We", startTime: 0.15, endTime: 0.55),
+            .init(token: " aligned", startTime: 0.60, endTime: 1.30),
+            .init(token: " on", startTime: 1.35, endTime: 1.65),
+            .init(token: " project", startTime: 1.70, endTime: 2.40),
+            .init(token: " goals", startTime: 2.45, endTime: 3.05),
+            .init(token: ".", startTime: 3.10, endTime: 3.30),
+            .init(token: " We", startTime: 8.50, endTime: 8.90),
+            .init(token: " agreed", startTime: 9.30, endTime: 10.10),
+            .init(token: " on", startTime: 10.40, endTime: 10.80),
+            .init(token: " next", startTime: 11.10, endTime: 11.60),
+            .init(token: " review", startTime: 12.00, endTime: 12.80),
+            .init(token: " date", startTime: 13.20, endTime: 14.80),
+            .init(token: ".", startTime: 15.15, endTime: 15.35)
+        ]
+        return TranscriptFormatter.formattedText(rawText: rawText, tokens: tokens)
+    }
+
+    private static func timedTranscriptWithTrailingRawTail() -> String {
+        let rawText = "We can make apple tea."
+        let tokens: [TranscriptToken] = [
+            .init(token: "We", startTime: 0.10, endTime: 0.35),
+            .init(token: " can", startTime: 0.36, endTime: 0.60),
+            .init(token: " make", startTime: 0.61, endTime: 1.00),
+            .init(token: " apple", startTime: 1.01, endTime: 1.45),
+            .init(token: " te", startTime: 1.46, endTime: 1.72),
+        ]
+        return TranscriptFormatter.formattedText(rawText: rawText, tokens: tokens)
     }
 
     private static func baseConfig(
@@ -342,6 +458,53 @@ enum UITestMockPipeline {
                 fallbackSummaryOutcome: .success(dynamicSummaryToken),
                 summaryLabel: "Provider Matrix"
             )
+
+        case .timedTranscriptFormatting:
+            return baseConfig(
+                transcription: .success(timedTranscriptRangesNoSpeakers()),
+                diarization: .none,
+                summaryLabel: "Timed Transcript Formatting"
+            )
+
+        case .timedTranscriptTailRecovery:
+            return baseConfig(
+                transcription: .success(timedTranscriptWithTrailingRawTail()),
+                diarization: .none,
+                summaryLabel: "Timed Transcript Tail Recovery"
+            )
+
+        case .timedTranscriptWithSpeakers:
+            return baseConfig(
+                transcription: .success(timedTranscriptRangesWithSpeakers()),
+                diarization: .speakers(timedRangeSpeakerSegments()),
+                summaryLabel: "Timed Transcript With Speakers"
+            )
+
+        case .singleSpeakerSuccess:
+            return baseConfig(
+                transcription: .success(
+                    """
+                    [00:00:00] Solo interview answer.
+                    [00:00:12] Follow-up detail from the same speaker.
+                    """
+                ),
+                diarization: .speakers(oneSpeakerSegments()),
+                summaryLabel: "Single Speaker Success"
+            )
+
+        case .speakerTimelineInteractions:
+            return baseConfig(
+                transcription: .success(
+                    """
+                    [00:00:00] Opening answer from the first speaker.
+                    [00:00:07] Continuation from the same speaker after a short pause.
+                    [00:00:15] Follow-up from another speaker.
+                    """
+                ),
+                diarization: .speakers(timelineInteractionSegments()),
+                summaryLabel: "Speaker Timeline Interactions"
+            )
+
         }
     }
 }

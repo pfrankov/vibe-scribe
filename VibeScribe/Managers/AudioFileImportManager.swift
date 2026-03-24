@@ -212,7 +212,7 @@ class AudioFileImportManager: ObservableObject {
                 
                 // Notify about new record for UI updates
                 NotificationCenter.default.post(
-                    name: NSNotification.Name("NewRecordCreated"),
+                    name: .newRecordCreated,
                     object: nil,
                     userInfo: ["recordId": record.id]
                 )

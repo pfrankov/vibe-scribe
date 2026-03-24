@@ -930,20 +930,8 @@ class VibeScribeUITestCase: XCTestCase {
     ) -> Bool {
         let canUseTypeTextFallback = allowTypeTextFallback && text.canBeConverted(to: .ascii)
         for attempt in 0..<max(1, attempts) {
-            let shouldPrepareField = !(preserveInitialSelection && attempt == 0)
-            if shouldPrepareField {
-                let shouldRecoverFocusByClick = forceClickToFocus || (preserveInitialSelection && attempt > 0)
-                if shouldRecoverFocusByClick && field.exists {
-                    if field.isHittable {
-                        field.click()
-                    } else {
-                        let center = field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                        center.click()
-                    }
-                }
-                app.typeKey("a", modifierFlags: .command)
-                app.typeKey(.delete, modifierFlags: [])
-            }
+            let shouldRecoverFocusByClick = forceClickToFocus || (!preserveInitialSelection && attempt == 0) || attempt > 0
+            clearFocusedFieldText(field, rounds: 2, forceClickToFocus: shouldRecoverFocusByClick)
             pasteIntoFocusedField(text)
 
             let deadline = Date().addingTimeInterval(timeout)
@@ -957,10 +945,7 @@ class VibeScribeUITestCase: XCTestCase {
 
             // Keep typeText fallback opt-in to avoid keyboard layout side effects on macOS.
             if canUseTypeTextFallback {
-                if shouldPrepareField {
-                    app.typeKey("a", modifierFlags: .command)
-                    app.typeKey(.delete, modifierFlags: [])
-                }
+                clearFocusedFieldText(field, rounds: 2, forceClickToFocus: true)
                 field.typeText(text)
 
                 let typeDeadline = Date().addingTimeInterval(timeout)
@@ -974,6 +959,31 @@ class VibeScribeUITestCase: XCTestCase {
             }
         }
         return textValue(of: field) == text
+    }
+
+    func clearFocusedFieldText(
+        _ field: XCUIElement,
+        rounds: Int = 2,
+        forceClickToFocus: Bool = false
+    ) {
+        guard rounds > 0 else { return }
+
+        for round in 0..<rounds {
+            if field.exists && (forceClickToFocus || round > 0) {
+                if field.isHittable {
+                    field.click()
+                } else {
+                    let center = field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    center.click()
+                }
+            }
+
+            app.activate()
+            app.typeKey("a", modifierFlags: .command)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            app.typeKey(.delete, modifierFlags: [])
+            RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+        }
     }
 
     func pasteIntoFocusedField(_ text: String) {

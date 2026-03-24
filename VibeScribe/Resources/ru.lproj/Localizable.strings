@@ -8,6 +8,7 @@
 "vibescribe.needs.microphone.access.to.record.audio.please.grant.permission.in.system.preferences.security.privacy.microphone" = "VibeScribe нужен доступ к микрофону для записи звука. Пожалуйста, предоставьте разрешение в Системных настройках > Конфиденциальность и безопасность > Микрофон.";
 "open.system.preferences" = "Открыть Системные настройки";
 "cancel" = "Отмена";
+"done" = "Готово";
 "import" = "Импорт";
 "select.audio.youd.like.vibescribe.to.transcribe.and.summarize" = "Выберите аудио, которое VibeScribe должен транскрибировать и кратко изложить.";
 "start.a.new.recording" = "Начать новую запись";
@@ -146,6 +147,8 @@
 "prompt" = "Промпт";
 "use.transcription.as.a.placeholder.for.the.individual.chunk.text" = "Используйте {transcription} как плейсхолдер для текста фрагмента.";
 "generate.short.title.after.summarization" = "Генерировать короткий заголовок после суммаризации";
+"enable.speaker.diarization" = "Определять спикеров в транскрипте";
+"enable.speaker.diarization.caption" = "Добавляет подписи спикеров и простую ленту спикеров после расшифровки.";
 "when.enabled.the.app.asks.the.language.model.for.a.concise.title.based.on.the.final.summary" = "Если включено, приложение запрашивает у языковой модели краткий заголовок на основе итоговой сводки.";
 "title.generation.prompt" = "Промпт для генерации заголовка";
 "use.summary.as.a.placeholder.for.the.completed.summary.text.the.model.should.answer.with.a.title.only" = "Используйте {summary} как плейсхолдер для готового текста сводки. Модель должна вернуть только заголовок.";
@@ -220,10 +223,10 @@
 "merge.speakers" = "Объединение спикеров";
 "merge.target" = "Сделать основным";
 "merge.include" = "Добавить в объединение";
-"merge.selected" = "Объединить выбранных";
-"speaker.merge.instructions" = "Выберите основного спикера, отметьте похожие голоса и объедините их.";
+"merge.selected" = "Объединить";
+"speaker.merge.instructions" = "Переименуйте спикеров. Отмечайте похожие голоса только если хотите объединить их.";
+"speaker.merge.kept.badge" = "Основной";
 "speaker.record.time" = "В записи";
-"speaker.library.time" = "Во всех записях";
 "jump.to.speaker.start" = "Перейти к первому моменту этого спикера";
 "last.updated.arg1" = "Обновлено %@";
 "playhead" = "Текущий курсор";

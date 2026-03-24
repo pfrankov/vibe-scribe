@@ -35,16 +35,20 @@ private enum MockAID {
 
     static let speakersSection = "speakersSection"
     static let speakerTimeline = "speakerTimeline"
+    static let speakerTimelineSegmentPrefix = "speakerTimelineSegment_"
     static let speakerManageButton = "speakerManageButton"
     static let speakerMergeSheet = "speakerMergeSheet"
+    static let speakerMergeCloseButton = "speakerMergeCloseButton"
     static let speakerMergeConfirmButton = "speakerMergeConfirmButton"
-    static let speakerChip = "speakerChip"
+    static let speakerMergeCandidatePrefix = "speakerMergeCandidate_"
     static let speakerRenameFieldPrefix = "speakerRenameField_"
 
     static let settingsView = "settingsView"
     static let settingsCloseButton = "settingsCloseButton"
     static let settingsProviderPicker = "settingsProviderPicker"
+    static let settingsDiarizationToggle = "settingsDiarizationToggle"
 }
+private let mockFirstRecordSpeakerNameEnvKey = "VIBESCRIBE_UI_MOCK_FIRST_RECORD_SPEAKER_NAME"
 
 private enum MockScenario: String {
     case noSpeakersFullFlow = "no_speakers_full_flow"
@@ -57,6 +61,11 @@ private enum MockScenario: String {
     case manualSummaryError = "manual_summary_error"
     case threeSpeakersMerge = "three_speakers_merge"
     case providerMatrix = "provider_matrix"
+    case timedTranscriptFormatting = "timed_transcript_formatting"
+    case timedTranscriptTailRecovery = "timed_transcript_tail_recovery"
+    case timedTranscriptWithSpeakers = "timed_transcript_with_speakers"
+    case singleSpeakerSuccess = "single_speaker_success"
+    case speakerTimelineInteractions = "speaker_timeline_interactions"
 }
 
 private enum MockToken: String {
@@ -67,8 +76,7 @@ private enum MockToken: String {
 }
 
 final class MockPipelineFlowTests: VibeScribeUITestCase {
-    private static var cachedMockFixturePath: String?
-
+    private static var cachedMockFixturePaths: [Int: String] = [:]
     override func setUpWithError() throws {
         try super.setUpWithError()
         executionTimeAllowance = 240
@@ -108,15 +116,21 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
     }
 
     func testMockFlow_WithSpeakers_EndToEndIncludesDiarization() {
-        launchMockScenario(.twoSpeakersSuccess)
+        launchMockScenario(
+            .twoSpeakersSuccess,
+            extraEnvironment: [mockFirstRecordSpeakerNameEnvKey: "Architect Speaker"]
+        )
 
         performMockRecordingRoundTrip()
-        _ = waitForNonEmptyTranscription()
+        let transcription = waitForNonEmptyTranscription(contains: "Architect Speaker:")
 
         assertExists(MockAID.speakersSection, timeout: 2)
         assertExists(MockAID.speakerTimeline, timeout: 2)
         assertExists(MockAID.speakerManageButton, timeout: 2)
-        renameFirstSpeakerInMergeSheet(to: "Architect Speaker")
+        XCTAssertTrue(
+            transcription.contains("Architect Speaker:"),
+            "Annotated transcription should include speaker labels from diarization"
+        )
     }
 
     func testMockFlow_WithSpeakers_MergeSpeakersRoundTrip() {
@@ -128,8 +142,14 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         openSpeakerMergeSheet()
         let beforeMergeCount = speakerMergeCardCount()
         XCTAssertGreaterThanOrEqual(beforeMergeCount, 2, "Merge sheet should expose at least two speakers")
+        assertExists(MockAID.speakerMergeCloseButton, timeout: 2.0)
+        assertSpeakerMergePrimaryAction(isEnabled: false)
 
-        ensureAtLeastTwoSpeakersSelectedForMerge()
+        selectFirstAdditionalSpeakerForMerge()
+        assertSpeakerMergePrimaryAction(isEnabled: false)
+
+        selectFirstAdditionalSpeakerForMerge()
+        assertSpeakerMergePrimaryAction(isEnabled: true)
         confirmSpeakerMerge()
         closeSpeakerMergeSheetIfPresented()
 
@@ -218,16 +238,11 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
 
         let beforeMergeCount = speakerMergeCardCount()
         XCTAssertGreaterThanOrEqual(beforeMergeCount, 3, "Three-speaker scenario should show at least three merge cards")
-
-        let checkboxes = app.checkBoxes
-        if checkboxes.count >= 3 {
-            let lastCheckbox = checkboxes.element(boundBy: checkboxes.count - 1)
-            if lastCheckbox.exists && lastCheckbox.isHittable {
-                lastCheckbox.click()
-            }
-        }
-
-        ensureAtLeastTwoSpeakersSelectedForMerge()
+        assertSpeakerMergePrimaryAction(isEnabled: false)
+        selectFirstAdditionalSpeakerForMerge()
+        assertSpeakerMergePrimaryAction(isEnabled: false)
+        selectFirstAdditionalSpeakerForMerge()
+        assertSpeakerMergePrimaryAction(isEnabled: true)
         confirmSpeakerMerge()
         closeSpeakerMergeSheetIfPresented()
 
@@ -252,10 +267,200 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         }
     }
 
+    func testMockFlow_DefaultProvider_FormatsTranscriptionWithStartTimestamps() {
+        launchMockScenario(.timedTranscriptFormatting)
+
+        performMockRecordingRoundTrip()
+        let transcription = waitForNonEmptyTranscription(contains: "[00:00:00]")
+
+        XCTAssertTrue(
+            transcription.contains("[00:00:00] Good morning team."),
+            "First sentence should keep a start-time prefix"
+        )
+        XCTAssertTrue(
+            transcription.contains("[00:00:05] We are ready to ship the next build today."),
+            "Second sentence should keep a start-time prefix"
+        )
+    }
+
+    func testMockFlow_DefaultProvider_PreservesTrailingTranscriptTailWhenTokenTimingsEndEarly() {
+        launchMockScenario(.timedTranscriptTailRecovery)
+
+        performMockRecordingRoundTrip()
+        let transcription = waitForNonEmptyTranscription(contains: "[00:00:00]")
+
+        XCTAssertTrue(
+            transcription.contains("[00:00:00] We can make apple tea."),
+            "Timed transcript should preserve the full raw-text tail when token timings stop early"
+        )
+        XCTAssertFalse(
+            transcription.contains("apple te\n") || transcription.hasSuffix("apple te"),
+            "Timed transcript should not truncate the final word to the incomplete token stream"
+        )
+    }
+
+    func testMockFlow_WithSpeakers_PreservesStartTimestampsDuringAnnotation() {
+        launchMockScenario(.timedTranscriptWithSpeakers)
+
+        performMockRecordingRoundTrip()
+        _ = waitForNonEmptyTranscription(contains: "[00:00:00]")
+
+        assertExists(MockAID.speakersSection, timeout: 2)
+        assertExists(MockAID.speakerTimeline, timeout: 2)
+        let transcription = waitForNonEmptyTranscription(contains: ": We agreed on next review date.", timeout: 12)
+
+        XCTAssertTrue(
+            transcription.contains("[00:00:00]") &&
+            transcription.contains(": We aligned on project goals.") &&
+            !transcription.contains("[00:00:00] We aligned on project goals."),
+            "First timed line should keep its start timestamp and insert a speaker label before the sentence"
+        )
+        XCTAssertTrue(
+            transcription.contains("[00:00:08]") &&
+            transcription.contains(": We agreed on next review date.") &&
+            !transcription.contains("[00:00:08] We agreed on next review date."),
+            "Second timed line should keep its start timestamp and insert a speaker label before the sentence"
+        )
+        XCTAssertFalse(
+            transcription.contains(": 08]"),
+            "Speaker annotation should not leak timestamp fragments into the transcript body"
+        )
+    }
+
+    func testMockFlow_WithSpeakers_SpeakerRenamePersistsWithoutMerge() {
+        launchMockScenario(.twoSpeakersSuccess)
+
+        performMockRecordingRoundTrip()
+        let initialTranscription = waitForNonEmptyTranscription(contains: "Speaker Alpha:")
+        XCTAssertTrue(
+            initialTranscription.contains("Speaker Alpha:"),
+            "Baseline annotated transcription should contain the original first speaker label"
+        )
+
+        openSpeakerMergeSheet()
+        assertSpeakerMergePrimaryAction(isEnabled: false)
+        assertSpeakerModalLayoutIsBalanced()
+        renameFirstSpeakerInMergeSheet(to: "Design Lead")
+        closeSpeakerMergeSheetIfPresented()
+
+        let renamedTranscription = waitForNonEmptyTranscription(contains: "Design Lead:")
+        XCTAssertTrue(
+            renamedTranscription.contains("Design Lead:"),
+            "Rename-only flow should update the annotated transcription"
+        )
+        XCTAssertFalse(
+            renamedTranscription.contains("Speaker Alpha:"),
+            "Old speaker label should disappear after rename is persisted"
+        )
+
+        openSpeakerMergeSheet()
+        XCTAssertTrue(
+            waitUntil(timeout: 4.0) {
+                self.anySpeakerRenameFieldContains("Design Lead")
+            },
+            "Renamed speaker should still be visible after reopening the shared rename/merge modal"
+        )
+        closeSpeakerMergeSheetIfPresented()
+    }
+
+    func testMockFlow_WithSpeakers_SpeakerRenameIsScopedToCurrentRecord() {
+        launchMockScenario(
+            .twoSpeakersSuccess,
+            extraEnvironment: [mockFirstRecordSpeakerNameEnvKey: "Architect Speaker"]
+        )
+
+        performMockRecordingRoundTrip()
+        let firstRecordTranscription = waitForNonEmptyTranscription(contains: "Architect Speaker:")
+        XCTAssertTrue(
+            firstRecordTranscription.contains("Architect Speaker:"),
+            "First record should render the custom speaker name in annotated transcription"
+        )
+
+        performMockRecordingRoundTrip()
+        let secondRecordTranscription = waitForNonEmptyTranscription()
+
+        XCTAssertFalse(
+            secondRecordTranscription.contains("Architect Speaker:"),
+            "Speaker name from the first record should not leak into annotated transcription for a later record"
+        )
+    }
+
+    func testMockFlow_DiarizationDisabled_TranscriptionStaysAvailableWithoutSpeakerUI() {
+        launchMockScenario(.twoSpeakersSuccess, forcedWhisperProvider: "default")
+        assertMockDiarizationToggleVisibility(expectedToExist: true)
+
+        launchMockScenario(.twoSpeakersSuccess, forcedWhisperProvider: "compatibleAPI")
+        assertMockDiarizationToggleVisibility(expectedToExist: false)
+
+        launchMockScenario(.twoSpeakersSuccess, forcedWhisperProvider: "default")
+        setMockDiarizationEnabled(false)
+
+        performMockRecordingRoundTrip()
+        let transcription = waitForNonEmptyTranscription(contains: "[00:00:00]")
+
+        XCTAssertFalse(
+            transcription.contains("Speaker Alpha:") || transcription.contains("Speaker Beta:"),
+            "Transcript should remain unlabeled when diarization is disabled"
+        )
+        assertNotExists(MockAID.speakersSection, timeout: 1.0)
+        assertNotExists(MockAID.speakerTimeline, timeout: 1.0)
+    }
+
+    func testMockFlow_WithSingleSpeaker_DoesNotInjectSpeakerLabelIntoTranscript() {
+        launchMockScenario(.singleSpeakerSuccess)
+
+        performMockRecordingRoundTrip()
+        let transcription = waitForNonEmptyTranscription(contains: "[00:00:00]")
+
+        XCTAssertTrue(
+            transcription.contains("[00:00:00] Solo interview answer.") &&
+            transcription.contains("[00:00:12] Follow-up detail from the same speaker."),
+            "Single-speaker scenario should still render the expected transcript text"
+        )
+        XCTAssertFalse(
+            transcription.contains("Speaker Alpha:") || transcription.contains("Speaker:"),
+            "Transcript should stay unlabeled when diarization resolves to only one speaker"
+        )
+    }
+
+    func testMockFlow_SpeakerTimeline_MergesShortSameSpeakerGapsAndSeeksOnClick() {
+        launchMockScenario(.speakerTimelineInteractions)
+
+        performMockRecordingRoundTrip()
+        _ = waitForNonEmptyTranscription(contains: "[00:00:00]")
+
+        assertExists(MockAID.speakerTimeline, timeout: 2.0)
+        XCTAssertEqual(
+            speakerTimelineSegmentCount(),
+            4,
+            "Timeline should merge same-speaker neighbors, but keep short blocks from different speakers separate"
+        )
+
+        let currentTimeBeforeClick = textValue(of: waitFor(MockAID.currentTimeLabel, timeout: 2.0))
+        clickSpeakerTimelineSegment(at: 3)
+
+        var lastObservedTime = currentTimeBeforeClick
+
+        XCTAssertTrue(
+            waitUntil(timeout: 3.0) {
+                let now = self.textValue(of: self.waitFor(MockAID.currentTimeLabel, timeout: 1.0))
+                lastObservedTime = now
+                guard let seconds = self.clockLabelSeconds(now) else { return false }
+                return (17...18).contains(seconds) && now != currentTimeBeforeClick
+            },
+            "Clicking a timeline block should seek playback to the beginning of that merged segment. Last observed time: \(lastObservedTime)"
+        )
+    }
+
     // MARK: - Scenario Launch
 
-    private func launchMockScenario(_ scenario: MockScenario, forcedWhisperProvider: String? = nil) {
-        let fixturePath = mockAudioFixturePath()
+    private func launchMockScenario(
+        _ scenario: MockScenario,
+        forcedWhisperProvider: String? = nil,
+        extraEnvironment: [String: String] = [:]
+    ) {
+        let minimumFixtureDuration: UInt32 = scenario == .speakerTimelineInteractions ? 24 : 3
+        let fixturePath = mockAudioFixturePath(minimumDurationSeconds: minimumFixtureDuration)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixturePath), "Missing test fixture at \(fixturePath)")
 
         Self.terminateRunningTargetApp()
@@ -269,6 +474,9 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         if let forcedWhisperProvider, !forcedWhisperProvider.isEmpty {
             app.launchEnvironment["VIBESCRIBE_UI_MOCK_WHISPER_PROVIDER"] = forcedWhisperProvider
         }
+        for (key, value) in extraEnvironment {
+            app.launchEnvironment[key] = value
+        }
 
         if app.state != .notRunning {
             app.terminate()
@@ -277,11 +485,9 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         _ = dismissInterferingDialogsIfNeeded()
     }
 
-    private func mockAudioFixturePath() -> String {
-        if
-            let cachedPath = Self.cachedMockFixturePath,
-            FileManager.default.fileExists(atPath: cachedPath)
-        {
+    private func mockAudioFixturePath(minimumDurationSeconds: UInt32 = 3) -> String {
+        if let cachedPath = Self.cachedMockFixturePaths[Int(minimumDurationSeconds)],
+           FileManager.default.fileExists(atPath: cachedPath) {
             return cachedPath
         }
 
@@ -292,7 +498,7 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
 
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("VibeScribeUITests/fixtures", isDirectory: true)
-        let tempFixtureURL = tempDirectory.appendingPathComponent("jfk.wav")
+        let tempFixtureURL = tempDirectory.appendingPathComponent("mock_\(minimumDurationSeconds)s.wav")
 
         do {
             if !FileManager.default.fileExists(atPath: tempDirectory.path) {
@@ -302,18 +508,20 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
             for root in candidateRoots {
                 let rootFixture = root.appendingPathComponent("jfk.wav")
                 if FileManager.default.fileExists(atPath: rootFixture.path) {
-                    if !FileManager.default.fileExists(atPath: tempFixtureURL.path) {
+                    if minimumDurationSeconds <= 3, !FileManager.default.fileExists(atPath: tempFixtureURL.path) {
                         try FileManager.default.copyItem(at: rootFixture, to: tempFixtureURL)
                     }
-                    Self.cachedMockFixturePath = tempFixtureURL.path
-                    return tempFixtureURL.path
+                    if minimumDurationSeconds <= 3 {
+                        Self.cachedMockFixturePaths[Int(minimumDurationSeconds)] = tempFixtureURL.path
+                        return tempFixtureURL.path
+                    }
                 }
             }
 
             if !FileManager.default.fileExists(atPath: tempFixtureURL.path) {
-                try createSilentWAVFixture(at: tempFixtureURL)
+                try createSilentWAVFixture(at: tempFixtureURL, durationSeconds: minimumDurationSeconds)
             }
-            Self.cachedMockFixturePath = tempFixtureURL.path
+            Self.cachedMockFixturePaths[Int(minimumDurationSeconds)] = tempFixtureURL.path
             return tempFixtureURL.path
         } catch {
             XCTFail("Failed to prepare mock fixture in temporary directory: \(error.localizedDescription)")
@@ -321,11 +529,10 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         }
     }
 
-    private func createSilentWAVFixture(at url: URL) throws {
+    private func createSilentWAVFixture(at url: URL, durationSeconds: UInt32) throws {
         let sampleRate: UInt32 = 16_000
         let channels: UInt16 = 1
         let bitsPerSample: UInt16 = 16
-        let durationSeconds: UInt32 = 3
 
         let bytesPerSample = UInt32(channels) * UInt32(bitsPerSample / 8)
         let sampleCount = sampleRate * durationSeconds
@@ -339,8 +546,8 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         appendLittleEndian(riffChunkSize, to: &data)
         data.append(contentsOf: Array("WAVE".utf8))
         data.append(contentsOf: Array("fmt ".utf8))
-        appendLittleEndian(UInt32(16), to: &data) // PCM fmt chunk size
-        appendLittleEndian(UInt16(1), to: &data)  // PCM format
+        appendLittleEndian(UInt32(16), to: &data)
+        appendLittleEndian(UInt16(1), to: &data)
         appendLittleEndian(channels, to: &data)
         appendLittleEndian(sampleRate, to: &data)
         appendLittleEndian(byteRate, to: &data)
@@ -348,7 +555,7 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         appendLittleEndian(bitsPerSample, to: &data)
         data.append(contentsOf: Array("data".utf8))
         appendLittleEndian(dataSize, to: &data)
-        data.append(Data(count: Int(dataSize))) // silence
+        data.append(Data(count: Int(dataSize)))
 
         try data.write(to: url, options: .atomic)
     }
@@ -370,6 +577,18 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
     }
 
     private func performMockRecordingRoundTrip() {
+        let existingRows = app.staticTexts.matching(identifier: MockAID.recordRowName)
+        let existingCount = existingRows.count
+        var existingNames: Set<String> = []
+        if existingCount > 0 {
+            for index in 0..<existingCount {
+                let row = existingRows.element(boundBy: index)
+                if row.exists {
+                    existingNames.insert(row.label)
+                }
+            }
+        }
+
         let createButton = waitFor(MockAID.newRecordingButton, timeout: 1.5)
         createButton.click()
 
@@ -387,19 +606,37 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
 
         XCTAssertTrue(
             waitUntil(timeout: 8.0) {
-                self.app.staticTexts.matching(identifier: MockAID.recordRowName).count > 0
+                self.app.staticTexts.matching(identifier: MockAID.recordRowName).count > existingCount
             },
             "Saved mock recording should appear in list"
         )
 
         let rows = app.staticTexts.matching(identifier: MockAID.recordRowName)
-        let latestRow = rows.element(boundBy: max(rows.count - 1, 0))
-        if latestRow.exists {
-            latestRow.click()
+        var createdRow: XCUIElement?
+        for index in 0..<rows.count {
+            let row = rows.element(boundBy: index)
+            guard row.exists else { continue }
+            if !existingNames.contains(row.label) {
+                createdRow = row
+                break
+            }
+        }
+
+        let targetRow = createdRow ?? rows.element(boundBy: 0)
+        if targetRow.exists {
+            targetRow.click()
         }
 
         assertExists(MockAID.recordDetailView, timeout: 5.0)
         assertExists(MockAID.tabPicker, timeout: 5.0)
+    }
+
+    private func selectRecordRow(named expectedTitle: String) {
+        let rowPredicate = NSPredicate(format: "identifier == %@ AND label == %@", MockAID.recordRowName, expectedTitle)
+        let row = app.staticTexts.matching(rowPredicate).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 3.0), "Record row '\(expectedTitle)' should exist")
+        row.click()
+        assertExists(MockAID.recordDetailView, timeout: 3.0)
     }
 
     private func assertPlaybackAndScrubRoundTrip() {
@@ -457,15 +694,17 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         var capturedText = ""
         let success = waitUntil(timeout: timeout) {
             let text = self.textValue(of: editor).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                capturedText = text
+            }
             guard !text.isEmpty else { return false }
             if let expectedSubstring, !text.contains(expectedSubstring) {
                 return false
             }
-            capturedText = text
             return true
         }
 
-        XCTAssertTrue(success, "Expected non-empty transcription text")
+        XCTAssertTrue(success, "Expected non-empty transcription text. Last observed text: \(capturedText)")
         return capturedText
     }
 
@@ -510,7 +749,7 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         XCTAssertTrue(trySwitchDetailTab(to: 0), "Transcription tab should be available")
         let editor = focusTextEditor(identifier: MockAID.transcriptionEditor, timeout: 2.5)
         XCTAssertTrue(
-            replaceFocusedFieldText(editor, with: marker),
+            replaceFocusedFieldText(editor, with: marker, allowTypeTextFallback: true),
             "Transcription editor should accept manual edit marker"
         )
         XCTAssertTrue(
@@ -529,7 +768,7 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         let existing = textValue(of: editor).trimmingCharacters(in: .whitespacesAndNewlines)
         let updatedSummary = existing.isEmpty ? marker : "\(existing)\n\(marker)"
         XCTAssertTrue(
-            replaceFocusedFieldText(editor, with: updatedSummary),
+            replaceFocusedFieldText(editor, with: updatedSummary, allowTypeTextFallback: true),
             "Summary editor should accept manual edit marker"
         )
         XCTAssertTrue(
@@ -574,14 +813,43 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         XCTAssertTrue(didComplete, "Summary generation should finish before manual summary edits")
     }
 
+    private func speakerTimelineSegmentCount() -> Int {
+        let predicate = NSPredicate(
+            format: "identifier BEGINSWITH %@",
+            MockAID.speakerTimelineSegmentPrefix
+        )
+        return app.descendants(matching: .any).matching(predicate).count
+    }
+
+    private func clickSpeakerTimelineSegment(at index: Int) {
+        let identifier = "\(MockAID.speakerTimelineSegmentPrefix)\(index)"
+        let segment = waitFor(identifier, timeout: 2.0)
+        XCTAssertTrue(segment.isHittable, "Timeline segment \(index) should be hittable")
+        segment.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+    }
+
+    private func clockLabelSeconds(_ label: String) -> Int? {
+        let parts = label.split(separator: ":").compactMap { Int($0) }
+        switch parts.count {
+        case 2:
+            return (parts[0] * 60) + parts[1]
+        case 3:
+            return (parts[0] * 3600) + (parts[1] * 60) + parts[2]
+        default:
+            return nil
+        }
+    }
+
     private func openSpeakerMergeSheet() {
         if isSpeakerMergeUIVisible() {
+            stabilizeSpeakerMergeSheetViewport()
             return
         }
 
         // In mock mode the merge UI is rendered inline and auto-opened on appear.
         // Wait briefly before attempting to click the manage button.
         if waitUntil(timeout: 2.5, condition: { self.isSpeakerMergeUIVisible() }) {
+            stabilizeSpeakerMergeSheetViewport()
             return
         }
 
@@ -597,6 +865,7 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
             }
 
             if waitUntil(timeout: 2.0, condition: { self.isSpeakerMergeUIVisible() }) {
+                stabilizeSpeakerMergeSheetViewport()
                 return
             }
 
@@ -604,6 +873,7 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
             // remains in the accessibility tree for deterministic querying.
             revealInMainDetailScroll(button)
             if waitUntil(timeout: 1.0, condition: { self.isSpeakerMergeUIVisible() }) {
+                stabilizeSpeakerMergeSheetViewport()
                 return
             }
         }
@@ -612,15 +882,50 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
     }
 
     private func speakerMergeCardCount() -> Int {
-        let cardPredicate = NSPredicate(
-            format: "identifier BEGINSWITH %@",
-            "\(MockAID.speakerChip)_"
-        )
-        let cards = app.descendants(matching: .any).matching(cardPredicate)
-        if cards.count > 0 {
-            return cards.count
+        let candidateRows = speakerMergeCandidateRows()
+        if candidateRows.count > 0 {
+            return candidateRows.count
         }
-        return app.checkBoxes.count
+        return speakerMergeCheckboxes().count
+    }
+
+    private func assertSpeakerModalLayoutIsBalanced() {
+        let renameFieldPredicate = NSPredicate(
+            format: "identifier BEGINSWITH %@",
+            MockAID.speakerRenameFieldPrefix
+        )
+        let fields = speakerRenameFieldsInMergeSheet(matching: renameFieldPredicate)
+        XCTAssertGreaterThanOrEqual(fields.count, 2, "Speaker modal should expose at least two rename fields")
+
+        let firstField = fields.element(boundBy: 0)
+        let secondField = fields.element(boundBy: 1)
+        XCTAssertTrue(firstField.waitForExistence(timeout: 1.0), "First rename field should exist")
+        XCTAssertTrue(secondField.waitForExistence(timeout: 1.0), "Second rename field should exist")
+
+        let leadingDelta = abs(firstField.frame.minX - secondField.frame.minX)
+        let widthDelta = abs(firstField.frame.width - secondField.frame.width)
+        XCTAssertLessThanOrEqual(leadingDelta, 6.0, "Speaker rename fields should stay visually aligned")
+        XCTAssertLessThanOrEqual(widthDelta, 12.0, "Speaker rename fields should keep comparable widths")
+
+        let dismissButton = element(MockAID.speakerMergeCloseButton)
+        XCTAssertTrue(
+            dismissButton.exists || dismissButton.waitForExistence(timeout: 1.0),
+            "Speaker sheet should expose a single header close action"
+        )
+
+        let mergeButton = speakerMergeConfirmButton()
+        XCTAssertTrue(mergeButton.exists || mergeButton.waitForExistence(timeout: 1.0), "Footer merge button should exist")
+        XCTAssertTrue(mergeButton.frame.width >= 96, "Footer merge button should keep a usable width")
+        XCTAssertLessThan(
+            dismissButton.frame.maxY,
+            firstField.frame.minY,
+            "Close action should live in the header above the editable rows"
+        )
+        XCTAssertGreaterThan(
+            mergeButton.frame.minY,
+            secondField.frame.maxY,
+            "Primary merge action should stay in the footer below the editable rows"
+        )
     }
 
     private func renameFirstSpeakerInMergeSheet(to newName: String) {
@@ -659,14 +964,6 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
             return true
         }
 
-        let cardPredicate = NSPredicate(
-            format: "identifier BEGINSWITH %@",
-            "\(MockAID.speakerChip)_"
-        )
-        if app.descendants(matching: .any).matching(cardPredicate).count > 0 {
-            return true
-        }
-
         let renameFieldPredicate = NSPredicate(
             format: "identifier BEGINSWITH %@",
             MockAID.speakerRenameFieldPrefix
@@ -685,29 +982,88 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
             format: "identifier BEGINSWITH %@",
             MockAID.speakerRenameFieldPrefix
         )
-        let namedFields = app.textFields.matching(renameFieldPredicate)
-        if namedFields.count > 0 {
-            for index in 0..<namedFields.count {
-                let candidate = namedFields.element(boundBy: index)
-                if candidate.exists && candidate.isHittable {
-                    return candidate
-                }
-            }
-            return namedFields.element(boundBy: 0)
+        let namedFields = speakerRenameFieldsInMergeSheet(matching: renameFieldPredicate)
+        if let bestNamedField = preferredSpeakerRenameField(in: namedFields) {
+            return bestNamedField
         }
 
-        let genericFields = app.textFields
-        if genericFields.count > 0 {
-            for index in 0..<genericFields.count {
-                let candidate = genericFields.element(boundBy: index)
-                if candidate.exists && candidate.isHittable {
-                    return candidate
-                }
-            }
-            return genericFields.element(boundBy: 0)
+        let genericFields = speakerRenameFieldsInMergeSheet()
+        if let bestGenericField = preferredSpeakerRenameField(in: genericFields) {
+            return bestGenericField
         }
 
         return app.textFields.firstMatch
+    }
+
+    private func speakerRenameFieldsInMergeSheet(matching predicate: NSPredicate? = nil) -> XCUIElementQuery {
+        let mergeSheet = element(MockAID.speakerMergeSheet)
+        let baseQuery: XCUIElementQuery
+        if mergeSheet.exists {
+            baseQuery = mergeSheet.descendants(matching: .textField)
+        } else {
+            baseQuery = app.textFields
+        }
+
+        if let predicate {
+            return baseQuery.matching(predicate)
+        }
+        return baseQuery
+    }
+
+    private func preferredSpeakerRenameField(in query: XCUIElementQuery) -> XCUIElement? {
+        guard query.count > 0 else { return nil }
+
+        var bestVisible: XCUIElement?
+        var bestVisibleY = CGFloat.greatestFiniteMagnitude
+        var firstHittable: XCUIElement?
+        var topmostField: XCUIElement?
+        var topmostFieldY = CGFloat.greatestFiniteMagnitude
+
+        for index in 0..<query.count {
+            let candidate = query.element(boundBy: index)
+            guard candidate.exists else { continue }
+
+            let minY = candidate.frame.minY
+            if minY < topmostFieldY {
+                topmostFieldY = minY
+                topmostField = candidate
+            }
+
+            if firstHittable == nil && candidate.isHittable {
+                firstHittable = candidate
+            }
+
+            if isComfortablyVisibleInWindow(candidate, inset: 12), minY < bestVisibleY {
+                bestVisibleY = minY
+                bestVisible = candidate
+            }
+        }
+
+        return bestVisible ?? firstHittable ?? topmostField
+    }
+
+    private func stabilizeSpeakerMergeSheetViewport() {
+        let mergeSheet = element(MockAID.speakerMergeSheet)
+        guard mergeSheet.exists || mergeSheet.waitForExistence(timeout: 0.4) else { return }
+
+        let mainScrollView = app.scrollViews.firstMatch
+        guard mainScrollView.exists || mainScrollView.waitForExistence(timeout: 0.3) else { return }
+
+        for _ in 0..<3 where !isComfortablyVisibleInWindow(mergeSheet, inset: 120) {
+            nudge(mainScrollView, direction: .down)
+        }
+    }
+
+    private func isComfortablyVisibleInWindow(_ element: XCUIElement, inset: CGFloat = 32) -> Bool {
+        guard element.exists else { return false }
+        let window = app.windows.firstMatch
+        guard window.exists || window.waitForExistence(timeout: 0.2) else { return false }
+
+        let frame = element.frame
+        let windowFrame = window.frame.insetBy(dx: 0, dy: inset)
+        guard !frame.isEmpty, !windowFrame.isEmpty else { return false }
+
+        return frame.minY >= windowFrame.minY && frame.maxY <= windowFrame.maxY
     }
 
     private func revealInMainDetailScroll(_ element: XCUIElement) {
@@ -803,8 +1159,8 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
             format: "identifier BEGINSWITH %@",
             MockAID.speakerRenameFieldPrefix
         )
-        let namedFields = app.textFields.matching(renameFieldPredicate)
-        let query = namedFields.count > 0 ? namedFields : app.textFields
+        let namedFields = speakerRenameFieldsInMergeSheet(matching: renameFieldPredicate)
+        let query = namedFields.count > 0 ? namedFields : speakerRenameFieldsInMergeSheet()
 
         for index in 0..<query.count {
             let value = speakerFieldValue(of: query.element(boundBy: index))
@@ -829,30 +1185,42 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
 
         var targetField = field
         if !targetField.isHittable {
-            revealInMainDetailScroll(targetField)
             let fallbackField = firstSpeakerRenameFieldInMergeSheet()
-            if fallbackField.exists && fallbackField.isHittable {
+            if fallbackField.exists {
                 targetField = fallbackField
             }
         }
 
-        if targetField.isHittable {
+        if targetField.exists {
+            app.activate()
+            if targetField.isHittable {
+                targetField.click()
+            } else {
+                targetField.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            }
+        }
+
+        if replaceFocusedFieldText(
+            targetField,
+            with: newName,
+            attempts: 2,
+            timeout: 1.5,
+            forceClickToFocus: false,
+            allowTypeTextFallback: true
+        ) {
+            return waitUntil(timeout: 1.0, condition: {
+                self.speakerFieldValue(of: targetField).contains(newName) || self.anySpeakerRenameFieldContains(newName)
+            })
+        }
+
+        if targetField.exists {
             targetField.click()
         }
 
-        app.typeKey("a", modifierFlags: .command)
-        app.typeKey(.delete, modifierFlags: [])
-        pasteIntoFocusedField(newName)
-
-        if waitUntil(timeout: 1.2, condition: {
-            self.speakerFieldValue(of: targetField).contains(newName) || self.anySpeakerRenameFieldContains(newName)
-        }) {
-            return true
-        }
-
         // Fallback for cases where Cmd+V is swallowed by app-level shortcuts.
-        if targetField.isHittable {
+        if targetField.exists {
             targetField.doubleClick()
+            clearFocusedFieldText(targetField, rounds: 2, forceClickToFocus: false)
             targetField.typeText(newName)
             return waitUntil(timeout: 1.2, condition: {
                 self.speakerFieldValue(of: targetField).contains(newName) || self.anySpeakerRenameFieldContains(newName)
@@ -864,7 +1232,16 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
 
     private func closeSpeakerMergeSheetIfPresented() {
         guard isSpeakerMergeUIVisible() else { return }
-        app.typeKey(.escape, modifierFlags: [])
+        let closeButton = element(MockAID.speakerMergeCloseButton)
+        if closeButton.exists || closeButton.waitForExistence(timeout: 0.6) {
+            if closeButton.isHittable {
+                closeButton.click()
+            } else {
+                closeButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            }
+        } else {
+            app.typeKey(.escape, modifierFlags: [])
+        }
         _ = waitUntil(timeout: 2.0) { !self.isSpeakerMergeUIVisible() }
     }
 
@@ -925,6 +1302,46 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         assertNotExists(MockAID.settingsView, timeout: 1.2)
     }
 
+    private func setMockDiarizationEnabled(_ isEnabled: Bool) {
+        openSettings()
+        assertExists(MockAID.settingsView, timeout: 1.2, "Settings should open before changing diarization setting")
+        switchSettingsTab(to: 0)
+
+        let toggle = waitFor(MockAID.settingsDiarizationToggle, timeout: 1.2)
+        let currentValue = checkboxValue(MockAID.settingsDiarizationToggle)
+        if currentValue != isEnabled {
+            toggle.click()
+        }
+
+        let closeButton = element(MockAID.settingsCloseButton)
+        if closeButton.exists || closeButton.waitForExistence(timeout: 0.5) {
+            closeButton.click()
+        } else {
+            app.typeKey(.escape, modifierFlags: [])
+        }
+        assertNotExists(MockAID.settingsView, timeout: 1.2)
+    }
+
+    private func assertMockDiarizationToggleVisibility(expectedToExist: Bool) {
+        openSettings()
+        assertExists(MockAID.settingsView, timeout: 1.2, "Settings should open before checking diarization visibility")
+        switchSettingsTab(to: 0)
+
+        if expectedToExist {
+            assertExists(MockAID.settingsDiarizationToggle, timeout: 1.2)
+        } else {
+            assertNotExists(MockAID.settingsDiarizationToggle, timeout: 1.2)
+        }
+
+        let closeButton = element(MockAID.settingsCloseButton)
+        if closeButton.exists || closeButton.waitForExistence(timeout: 0.5) {
+            closeButton.click()
+        } else {
+            app.typeKey(.escape, modifierFlags: [])
+        }
+        assertNotExists(MockAID.settingsView, timeout: 1.2)
+    }
+
     private func waitForToken(_ token: String, timeout: TimeInterval = 8) -> Bool {
         return waitUntil(timeout: timeout) {
             let staticTextPredicate = NSPredicate(format: "label CONTAINS[c] %@", token)
@@ -966,23 +1383,47 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         for _ in 0..<4 {
             _ = dismissInterferingDialogsIfNeeded()
             app.activate()
-            if editor.exists {
-                if editor.isHittable {
-                    editor.click()
-                    return editor
+            let target = actualTextInput(for: editor)
+            if target.exists {
+                if target.isHittable {
+                    target.click()
+                    return target
                 }
-                let center = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 center.click()
-                return editor
+                return target
             }
             _ = editor.waitForExistence(timeout: 0.2)
         }
         XCTFail("Editor '\(identifier)' should exist and accept focus")
+        return actualTextInput(for: editor)
+    }
+
+    private func actualTextInput(for editor: XCUIElement) -> XCUIElement {
+        if editor.elementType == .textView || editor.elementType == .textField {
+            return editor
+        }
+
+        let nestedTextView = editor.descendants(matching: .textView).firstMatch
+        if nestedTextView.exists {
+            return nestedTextView
+        }
+
+        let detailTextView = element(MockAID.recordDetailView).descendants(matching: .textView).firstMatch
+        if detailTextView.exists {
+            return detailTextView
+        }
+
+        let appTextView = app.textViews.firstMatch
+        if appTextView.exists {
+            return appTextView
+        }
+
         return editor
     }
 
     private func confirmSpeakerMerge() {
-        let mergeButton = element(MockAID.speakerMergeConfirmButton)
+        let mergeButton = speakerMergeConfirmButton()
         if mergeButton.exists || mergeButton.waitForExistence(timeout: 1.0) {
             if mergeButton.isEnabled {
                 if mergeButton.isHittable {
@@ -1017,33 +1458,85 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
         app.typeKey(.return, modifierFlags: [])
     }
 
-    private func ensureAtLeastTwoSpeakersSelectedForMerge() {
-        let checkboxes = app.checkBoxes
-        XCTAssertGreaterThanOrEqual(checkboxes.count, 2, "Merge sheet should provide at least two speaker checkboxes")
+    private func assertSpeakerMergePrimaryAction(isEnabled: Bool) {
+        let mergeButton = speakerMergeConfirmButton()
+        XCTAssertTrue(
+            mergeButton.exists || mergeButton.waitForExistence(timeout: 1.5),
+            "Speaker merge primary action should exist"
+        )
+        XCTAssertEqual(
+            mergeButton.isEnabled,
+            isEnabled,
+            "Speaker merge primary action should \(isEnabled ? "" : "not ")be enabled"
+        )
+    }
 
-        var selectedCount = 0
-        for index in 0..<checkboxes.count where checkboxAt(index: index, in: checkboxes).exists {
-            if checkboxIsSelected(checkboxAt(index: index, in: checkboxes)) {
-                selectedCount += 1
+    private func selectFirstAdditionalSpeakerForMerge() {
+        let candidates = speakerMergeCandidateRows()
+        if candidates.count > 0 {
+            for i in 0..<candidates.count {
+                let candidate = candidates.element(boundBy: i)
+                guard candidate.exists else { continue }
+                // Skip already-selected candidates — robust against re-render reordering
+                if let value = candidate.value as? String, value == "selected" { continue }
+                app.activate()
+                candidate.click()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+                return
             }
+            XCTFail("No unselected merge candidate found")
+            return
         }
 
-        guard selectedCount < 2 else { return }
+        let checkboxes = speakerMergeCheckboxes()
+        XCTAssertGreaterThanOrEqual(checkboxes.count, 1, "Merge sheet should provide at least one merge candidate checkbox")
 
-        for index in 0..<checkboxes.count where selectedCount < 2 {
+        for index in 0..<checkboxes.count {
             let checkbox = checkboxAt(index: index, in: checkboxes)
             guard checkbox.exists else { continue }
             if !checkboxIsSelected(checkbox) {
-                checkbox.click()
-                if checkboxIsSelected(checkbox) {
-                    selectedCount += 1
+                if checkbox.isHittable {
+                    checkbox.click()
+                } else {
+                    checkbox.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
                 }
+                return
             }
         }
+
+        XCTFail("Expected at least one unchecked speaker merge candidate")
     }
 
     private func checkboxAt(index: Int, in query: XCUIElementQuery) -> XCUIElement {
         query.element(boundBy: index)
+    }
+
+    private func speakerMergeCheckboxes() -> XCUIElementQuery {
+        let mergeSheet = element(MockAID.speakerMergeSheet)
+        if mergeSheet.exists || mergeSheet.waitForExistence(timeout: 0.3) {
+            return mergeSheet.descendants(matching: .checkBox)
+        }
+        return app.checkBoxes
+    }
+
+    private func speakerMergeConfirmButton() -> XCUIElement {
+        let button = app.buttons[MockAID.speakerMergeConfirmButton]
+        if button.exists {
+            return button
+        }
+        return element(MockAID.speakerMergeConfirmButton)
+    }
+
+    private func speakerMergeCandidateRows() -> XCUIElementQuery {
+        let predicate = NSPredicate(
+            format: "identifier BEGINSWITH %@",
+            MockAID.speakerMergeCandidatePrefix
+        )
+        let mergeSheet = element(MockAID.speakerMergeSheet)
+        if mergeSheet.exists || mergeSheet.waitForExistence(timeout: 0.3) {
+            return mergeSheet.descendants(matching: .any).matching(predicate)
+        }
+        return app.descendants(matching: .any).matching(predicate)
     }
 
     private func checkboxIsSelected(_ checkbox: XCUIElement) -> Bool {

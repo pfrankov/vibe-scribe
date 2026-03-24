@@ -210,7 +210,7 @@ struct RecordingView: View {
              
              // Post notification about new record creation
              NotificationCenter.default.post(
-                 name: NSNotification.Name("NewRecordCreated"),
+                 name: .newRecordCreated,
                  object: nil,
                  userInfo: ["recordId": newRecord.id]
              )

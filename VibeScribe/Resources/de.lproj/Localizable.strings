@@ -8,6 +8,7 @@
 "vibescribe.needs.microphone.access.to.record.audio.please.grant.permission.in.system.preferences.security.privacy.microphone" = "VibeScribe benötigt Zugriff auf das Mikrofon, um Audio aufzunehmen. Bitte gewähren Sie den Zugriff in den Systemeinstellungen > Sicherheit & Datenschutz > Mikrofon.";
 "open.system.preferences" = "Systemeinstellungen öffnen";
 "cancel" = "Abbrechen";
+"done" = "Fertig";
 "import" = "Importieren";
 "select.audio.youd.like.vibescribe.to.transcribe.and.summarize" = "Wählen Sie Audio aus, das VibeScribe transkribieren und zusammenfassen soll.";
 "start.a.new.recording" = "Neue Aufnahme starten";
@@ -146,6 +147,8 @@
 "prompt" = "Prompt";
 "use.transcription.as.a.placeholder.for.the.individual.chunk.text" = "Verwenden Sie {transcription} als Platzhalter für den individuellen Textabschnitt.";
 "generate.short.title.after.summarization" = "Kurzen Titel nach Zusammenfassung generieren";
+"enable.speaker.diarization" = "Sprecher im Transkript erkennen";
+"enable.speaker.diarization.caption" = "Fügt nach der Transkription Sprecherlabels und eine einfache Sprecher-Zeitleiste hinzu.";
 "when.enabled.the.app.asks.the.language.model.for.a.concise.title.based.on.the.final.summary" = "Wenn aktiviert, fragt die App das Sprachmodell nach einem prägnanten Titel basierend auf der finalen Zusammenfassung.";
 "title.generation.prompt" = "Titelgenerierungs-Prompt";
 "use.summary.as.a.placeholder.for.the.completed.summary.text.the.model.should.answer.with.a.title.only" = "Verwenden Sie {summary} als Platzhalter für den fertigen Zusammenfassungstext. Das Modell sollte nur mit einem Titel antworten.";
@@ -218,12 +221,12 @@
 "rename.speaker.placeholder" = "Sprechername";
 "rename.speakers" = "Sprecher umbenennen oder zusammenführen";
 "merge.speakers" = "Sprecher zusammenführen";
-"merge.target" = "Als Ziel festlegen";
+"merge.target" = "Als primär festlegen";
 "merge.include" = "Für Zusammenführung auswählen";
-"merge.selected" = "Auswahl zusammenführen";
-"speaker.merge.instructions" = "Wähle den Hauptsprecher, markiere ähnliche Stimmen und führe sie zusammen.";
+"merge.selected" = "Zusammenführen";
+"speaker.merge.instructions" = "Benenne Sprecher direkt um. Wähle ähnliche Stimmen nur aus, wenn du sie zusammenführen willst.";
+"speaker.merge.kept.badge" = "Primär";
 "speaker.record.time" = "In dieser Aufnahme";
-"speaker.library.time" = "In der Bibliothek";
 "jump.to.speaker.start" = "Zum ersten Moment dieses Sprechers springen";
 "last.updated.arg1" = "Aktualisiert %@";
 "playhead" = "Abspielposition";

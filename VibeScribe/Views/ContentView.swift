@@ -91,6 +91,13 @@ private var appSettings: [AppSettings]
                 settings.appLanguageCode = appLanguageCode
                 try? modelContext.save()
             }
+            // Apply forced whisper provider from UI-test env so SettingsView reflects it immediately.
+            if let raw = UITestMockPipeline.forcedWhisperProviderRawValue,
+               let provider = WhisperProvider(rawValue: raw),
+               settings.whisperProvider != provider {
+                settings.whisperProviderRawValue = raw
+                try? modelContext.save()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowSettings"))) { _ in
             isShowingSettings = true
@@ -98,7 +105,7 @@ private var appSettings: [AppSettings]
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StartRecording"))) { _ in
             presentRecordingOverlay()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
+        .onReceive(NotificationCenter.default.publisher(for: .newRecordCreated)) { notification in
             guard let recordId = notification.userInfo?["recordId"] as? UUID else { return }
             guard let newRecord = fetchRecord(with: recordId) else {
                 Logger.error("New record with ID \(recordId) not found immediately after creation", category: .data)

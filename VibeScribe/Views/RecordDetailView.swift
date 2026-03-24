@@ -245,7 +245,6 @@ struct RecordDetailView: View {
         var id: UUID { speaker.id }
         let speaker: SpeakerProfile
         let duration: TimeInterval
-        let share: Double
     }
     
     // Reusable copy button component
@@ -361,6 +360,12 @@ struct RecordDetailView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 1)
             )
+            .accessibilityIdentifier(
+                editor == .transcription
+                    ? AccessibilityID.transcriptionEditor
+                    : AccessibilityID.summaryEditor
+            )
+            .accessibilityValue(text)
             .onPreferenceChange(TextEditorHeightKey.self) { newHeight in
                 let clamped = max(minimumContentHeight, newHeight)
                 if abs(clamped - measuredContentHeight) > 0.5 {
@@ -1157,12 +1162,8 @@ struct RecordDetailView: View {
                 Spacer()
 
                 Button {
-                    if UITestMockPipeline.isEnabled {
-                        isSpeakerModalPresented = true
-                    } else {
-                        isSpeakerModalPresented = true
-                    }
-                    primeMergeDefaults()
+                    resetMergeFlow()
+                    isSpeakerModalPresented = true
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 14, weight: .semibold))
@@ -1185,21 +1186,8 @@ struct RecordDetailView: View {
             }
 
             if UITestMockPipeline.isEnabled && isSpeakerModalPresented {
-                Color.clear
-                    .frame(width: 2, height: 2)
-                    .accessibilityElement()
-                    .accessibilityIdentifier(AccessibilityID.speakerMergeSheet)
-
                 speakerMergeSheet
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(NSColor.windowBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(NSColor.separatorColor).opacity(0.45), lineWidth: 1)
-                    )
-                    .padding(.top, 6)
+                    .padding(.top, 8)
             }
 
             if !timelineSegments.isEmpty {
@@ -1217,137 +1205,159 @@ struct RecordDetailView: View {
     }
 
     private var speakerMergeSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.75))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: "person.3.sequence")
-                        .font(.system(size: 18, weight: .semibold))
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(AppLanguage.localized("merge.speakers"))
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppLanguage.localized("speakers"))
                         .font(.title3.weight(.semibold))
                     Text(AppLanguage.localized("speaker.merge.instructions"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+
+                Spacer(minLength: 0)
+
                 Button {
                     isSpeakerModalPresented = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.secondary)
-                        .font(.system(size: 18, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .font(.system(size: 18))
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help(AppLanguage.localized("close"))
+                .accessibilityLabel(AppLanguage.localized("close"))
+                .accessibilityIdentifier(AccessibilityID.speakerMergeCloseButton)
             }
 
-            if speakerSummaries.isEmpty {
-                InlineMessageView(AppLanguage.localized("no.speakers.yet"), style: .info)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    if speakerSummaries.isEmpty {
+                        InlineMessageView(AppLanguage.localized("no.speakers.yet"), style: .info)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 12)
+                    } else {
                         ForEach(speakerSummaries) { summary in
-                            speakerMergeCard(for: summary)
+                            speakerMergeCandidateRow(for: summary)
                         }
                     }
-                    .padding(.vertical, 2)
                 }
-                .frame(maxHeight: 340)
+                .padding(.vertical, 4)
             }
+            .frame(minHeight: 190, maxHeight: 280)
 
-            HStack {
+            HStack(spacing: 12) {
                 Spacer()
-                Button {
+                Button(AppLanguage.localized("merge.selected")) {
                     performMerge()
-                } label: {
-                    Label(AppLanguage.localized("merge.selected"), systemImage: "arrow.triangle.merge")
                 }
                 .disabled(!canMerge)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier(AccessibilityID.speakerMergeConfirmButton)
             }
+            .controlSize(.large)
         }
-        .padding(18)
+        .padding(24)
+        .onDisappear {
+            persistSpeakerChanges()
+        }
+        .transaction { transaction in
+            if VibeScribeApp.isUITesting { transaction.animation = nil }
+        }
+        .frame(maxWidth: 620, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.speakerMergeSheet)
     }
 
-    private func speakerMergeCard(for summary: SpeakerSummary) -> some View {
-        let tint = Color(hue: summary.speaker.accentHue, saturation: 0.65, brightness: 0.95)
-        let isTarget = mergeTargetID == summary.speaker.id
+    private func speakerMergeCandidateRow(for summary: SpeakerSummary) -> some View {
+        let tint = speakerMergeTint(for: summary)
+        let isSelected = mergeSelection.contains(summary.speaker.id)
+        let isTarget = isSelected && mergeTargetID == summary.speaker.id
 
-        return HStack(alignment: .top, spacing: 12) {
+        return HStack(alignment: .top, spacing: 14) {
             Button {
-                mergeTargetID = summary.speaker.id
-                mergeSelection.insert(summary.speaker.id)
+                updateMergeSelection(toggling: summary.speaker.id)
             } label: {
-                Image(systemName: isTarget ? "largecircle.fill.circle" : "circle")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(tint)
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color(NSColor.tertiaryLabelColor))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+                    .animation(VibeScribeApp.isUITesting ? nil : .spring(response: 0.2, dampingFraction: 0.8), value: isSelected)
             }
             .buttonStyle(.plain)
-            .help(AppLanguage.localized("merge.target"))
+            .accessibilityValue(isSelected ? "selected" : "deselected")
+            .accessibilityIdentifier("\(AccessibilityID.speakerMergeCandidatePrefix)\(summary.speaker.id.uuidString)")
+            .padding(.top, 6)
 
-            VStack(alignment: .leading, spacing: 8) {
-                TextField(
-                    AppLanguage.localized("rename.speaker.placeholder"),
-                    text: Binding(
-                        get: { summary.speaker.displayName },
-                        set: { newValue in
-                            summary.speaker.displayName = newValue
-                            summary.speaker.isUserRenamed = true
-                        }
+            Circle()
+                .fill(tint)
+                .frame(width: 8, height: 8)
+                .padding(.top, 9)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    TextField(
+                        AppLanguage.localized("rename.speaker.placeholder"),
+                        text: speakerNameBinding(for: summary)
                     )
-                )
-                .textFieldStyle(.roundedBorder)
-                .font(.headline)
-                .accessibilityIdentifier("\(AccessibilityID.speakerRenameFieldPrefix)\(summary.speaker.id.uuidString)")
-                .onSubmit {
-                    persistSpeakerChanges()
+                    .textFieldStyle(.plain)
+                    .font(.body.weight(.medium))
+                    .disableAutocorrection(true)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("\(AccessibilityID.speakerRenameFieldPrefix)\(summary.speaker.id.uuidString)")
+                    .onSubmit { persistSpeakerChanges() }
+
+                    if isTarget {
+                        speakerMergeBadge(
+                            AppLanguage.localized("speaker.merge.kept.badge"),
+                            tint: Color.accentColor
+                        )
+                    }
                 }
 
-                HStack(spacing: 10) {
-                    Label("\(AppLanguage.localized("speaker.record.time")) \(summary.duration.clockString)", systemImage: "waveform")
+                HStack(alignment: .center, spacing: 12) {
+                    Text("\(AppLanguage.localized("speaker.record.time")) \(summary.duration.clockString)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Label("\(AppLanguage.localized("speaker.library.time")) \(summary.speaker.totalDuration.clockString)", systemImage: "clock")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                Toggle(isOn: Binding(
-                    get: { mergeSelection.contains(summary.speaker.id) },
-                    set: { isOn in
-                        if isOn {
-                            mergeSelection.insert(summary.speaker.id)
-                        } else if summary.speaker.id != mergeTargetID {
-                            mergeSelection.remove(summary.speaker.id)
+                    if mergeSelection.count >= 2, isSelected, !isTarget {
+                        Button(AppLanguage.localized("merge.target")) {
+                            mergeTargetID = summary.speaker.id
                         }
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
                     }
-                )) {
-                    Text(AppLanguage.localized("merge.include"))
-                        .font(.subheadline)
                 }
-                .toggleStyle(.checkbox)
-                .tint(tint)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(NSColor.controlBackgroundColor).opacity(0.9))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isTarget ? tint : Color(NSColor.separatorColor).opacity(0.35), lineWidth: 1)
-                )
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isSelected
+                    ? Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.08)
+                    : Color(NSColor.controlBackgroundColor).opacity(colorScheme == .dark ? 0.22 : 0.42))
         )
-        .contentShape(RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("\(AccessibilityID.speakerChip)_\(summary.speaker.id.uuidString)")
+    }
+
+    private func speakerMergeBadge(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(colorScheme == .dark ? 0.20 : 0.12))
+            )
+            .foregroundStyle(tint)
     }
 
     private var processingSection: some View {
@@ -1396,11 +1406,10 @@ struct RecordDetailView: View {
     }
 
     private var canMerge: Bool {
-        guard let targetID = mergeTargetID else { return false }
-        let selectedOthers = mergeSelection.filter { $0 != targetID }
-        return !selectedOthers.isEmpty
+        guard let mergeTargetID else { return false }
+        return mergeSelection.count > 1 && mergeSelection.contains(mergeTargetID)
     }
-    
+
     // Get current settings
     private var settings: AppSettings {
         if let existingSettings = appSettings.first {
@@ -1472,6 +1481,13 @@ struct RecordDetailView: View {
         diarizationState.isProcessing
     }
 
+    private var shouldShowSpeakersSection: Bool {
+        (settings.whisperProvider == .defaultProvider && settings.enableSpeakerDiarization)
+            || !speakerSegments.isEmpty
+            || isDiarizing
+            || diarizationError != nil
+    }
+
     private var timelineSegments: [SpeakerTimelineSegment] {
         speakerSegments.compactMap { segment in
             guard segment.endTime > segment.startTime else { return nil }
@@ -1482,7 +1498,8 @@ struct RecordDetailView: View {
                 startTime: segment.startTime,
                 endTime: segment.endTime,
                 hue: hue,
-                label: speakerName
+                label: speakerName,
+                mergeKey: segment.speaker?.speakerId ?? speakerName
             )
         }
     }
@@ -1512,11 +1529,11 @@ struct RecordDetailView: View {
             guard let speaker = speakerSegments.first(where: { $0.speaker?.id == id })?.speaker else {
                 return nil
             }
-            let share = record.duration > 0 ? duration / record.duration : 0
-            return SpeakerSummary(speaker: speaker, duration: duration, share: share)
+            return SpeakerSummary(speaker: speaker, duration: duration)
         }
         .sorted { lhs, rhs in
-            lhs.duration > rhs.duration
+            if lhs.duration != rhs.duration { return lhs.duration > rhs.duration }
+            return lhs.speaker.speakerId < rhs.speaker.speakerId
         }
     }
 
@@ -1659,7 +1676,9 @@ struct RecordDetailView: View {
                 headerSection
                 playerControls
             }
-            speakersSection
+            if shouldShowSpeakersSection {
+                speakersSection
+            }
             Divider()
             processingSection
             tabsSection
@@ -1692,10 +1711,7 @@ struct RecordDetailView: View {
             scheduleAnnotationRefresh(force: true)
             
             loadSpeechAnalyzerLocales()
-            primeMergeDefaults()
-            if UITestMockPipeline.isEnabled {
-                isSpeakerModalPresented = true
-            }
+            resetMergeFlow()
 
             // Initialize processing state based on current record state
             // --- Refined File Loading Logic ---
@@ -1724,7 +1740,7 @@ struct RecordDetailView: View {
             updateSummaryMarkdownContentIfNeeded(force: true)
         })
 
-        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NewRecordCreated"))) { notification in
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .newRecordCreated)) { notification in
             // If this view is showing the newly created record, start automatic processing
             if let recordId = notification.userInfo?["recordId"] as? UUID,
                recordId == record.id {
@@ -1834,6 +1850,12 @@ struct RecordDetailView: View {
         
         view = AnyView(view.onChange(of: settings.whisperProvider) { _, _ in
             loadSpeechAnalyzerLocales()
+            refreshDiarizationForCurrentSettings()
+        })
+
+        view = AnyView(view.onChange(of: appSettings.first?.enableSpeakerDiarization ?? true) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            refreshDiarizationForCurrentSettings()
         })
 
         view = AnyView(view.onReceive(processingManager.$recordStates) { _ in
@@ -1841,17 +1863,20 @@ struct RecordDetailView: View {
         })
 
         view = AnyView(view.onChange(of: speakerChangeSignature) { _, _ in
+            primeMergeDefaults()
             scheduleAnnotationRefresh(force: true, persist: true)
         })
 
         view = AnyView(view.onChange(of: record.lastDiarizationAt) { _, _ in
+            primeMergeDefaults()
             scheduleAnnotationRefresh(force: true, persist: true)
         })
 
         view = AnyView(view.onChange(of: record.transcriptionText ?? "") { _, newValue in
             guard focusedEditor != .transcription else { return }
-            if newValue != transcriptionDraft {
-                transcriptionDraft = newValue
+            let strippedValue = stripSpeakerLabels(from: newValue)
+            if strippedValue != transcriptionDraft {
+                transcriptionDraft = strippedValue
                 scheduleAnnotationRefresh()
             }
         })
@@ -1899,7 +1924,7 @@ struct RecordDetailView: View {
             view = AnyView(
                 view.sheet(isPresented: $isSpeakerModalPresented) {
                     speakerMergeSheet
-                        .frame(minWidth: 420, minHeight: 320)
+                        .frame(minWidth: 540, idealWidth: 600, maxWidth: 620, minHeight: 320)
                 }
             )
         }
@@ -2035,7 +2060,11 @@ struct RecordDetailView: View {
     }
 
     private func annotateTranscription(baseText: String) -> String {
+        let segments = speakerSegments
+        let shouldInsertSpeakerLabels = hasMultipleDistinctSpeakers(in: segments)
+
         guard !baseText.isEmpty else {
+            guard shouldInsertSpeakerLabels else { return "" }
             return speakerSegments.map { segment in
                 let time = clockString(from: segment.startTime)
                 let name = segment.speaker?.displayName ?? AppLanguage.localized("speaker")
@@ -2044,30 +2073,23 @@ struct RecordDetailView: View {
         }
 
         let lines = baseText.components(separatedBy: .newlines)
-        let segments = speakerSegments
-
-        func speakerName(for time: TimeInterval) -> String {
-            if let segment = segments.first(where: { time >= $0.startTime && time < $0.endTime }) {
-                return segment.speaker?.displayName ?? AppLanguage.localized("speaker")
-            }
-            return AppLanguage.localized("speaker")
-        }
+        guard !segments.isEmpty, shouldInsertSpeakerLabels else { return baseText }
 
         var annotated: [String] = []
         var matchedTimestamp = false
 
         for line in lines {
-            guard let (ts, remainder) = extractTimestamp(from: line) else {
+            guard let parsedLine = TranscriptFormatter.parseTimestampPrefix(from: line) else {
                 annotated.append(line)
                 continue
             }
             matchedTimestamp = true
-            let name = speakerName(for: ts)
-            let cleanRemainder = stripLeadingSpeakerPrefix(from: remainder)
+            let name = speakerName(for: parsedLine.timestamp, segments: segments)
+            let cleanRemainder = stripLeadingSpeakerPrefix(from: parsedLine.remainder)
             if cleanRemainder.isEmpty {
-                annotated.append("[\(clockString(from: ts))] \(name):")
+                annotated.append("\(parsedLine.timestamp.prefix) \(name):")
             } else {
-                annotated.append("[\(clockString(from: ts))] \(name): \(cleanRemainder)")
+                annotated.append("\(parsedLine.timestamp.prefix) \(name): \(cleanRemainder)")
             }
         }
 
@@ -2097,12 +2119,25 @@ struct RecordDetailView: View {
         return output.joined(separator: "\n")
     }
 
+    private func hasMultipleDistinctSpeakers(in segments: [RecordSpeakerSegment]) -> Bool {
+        let speakerIDs = Set(
+            segments.compactMap { segment in
+                segment.speaker?.speakerId
+            }
+        )
+        return speakerIDs.count > 1
+    }
+
     private func stripSpeakerLabels(from text: String) -> String {
         guard !text.isEmpty else { return text }
         let lines = text.components(separatedBy: .newlines)
         let cleaned = lines.map { line in
-            guard let (_, remainder) = extractTimestamp(from: line) else { return line }
-            return stripLeadingSpeakerPrefix(from: remainder)
+            guard let parsedLine = TranscriptFormatter.parseTimestampPrefix(from: line) else { return line }
+            let cleanRemainder = stripLeadingSpeakerPrefix(from: parsedLine.remainder)
+            guard !cleanRemainder.isEmpty else {
+                return parsedLine.timestamp.prefix
+            }
+            return "\(parsedLine.timestamp.prefix) \(cleanRemainder)"
         }
         return cleaned.joined(separator: "\n")
     }
@@ -2116,23 +2151,58 @@ struct RecordDetailView: View {
         return result.trimmingCharacters(in: .whitespaces)
     }
 
-    private func extractTimestamp(from line: String) -> (TimeInterval, String)? {
-        let pattern = #"^\[(\d{2}):(\d{2}):(\d{2})\]\s*(.*)$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let range = NSRange(location: 0, length: line.utf16.count)
-        guard let match = regex.firstMatch(in: line, range: range),
-              match.numberOfRanges == 5,
-              let hRange = Range(match.range(at: 1), in: line),
-              let mRange = Range(match.range(at: 2), in: line),
-              let sRange = Range(match.range(at: 3), in: line),
-              let textRange = Range(match.range(at: 4), in: line) else { return nil }
+    private func speakerName(for timestamp: TranscriptTimestamp, segments: [RecordSpeakerSegment]) -> String {
+        guard let segment = dominantSpeakerSegment(for: timestamp, segments: segments) else {
+            return AppLanguage.localized("speaker")
+        }
+        return segment.speaker?.displayName ?? AppLanguage.localized("speaker")
+    }
 
-        let hours = Int(line[hRange]) ?? 0
-        let minutes = Int(line[mRange]) ?? 0
-        let seconds = Int(line[sRange]) ?? 0
-        let ts = TimeInterval(hours * 3600 + minutes * 60 + seconds)
-        let remainder = String(line[textRange])
-        return (ts, remainder)
+    private func dominantSpeakerSegment(
+        for timestamp: TranscriptTimestamp,
+        segments: [RecordSpeakerSegment]
+    ) -> RecordSpeakerSegment? {
+        if let endTime = timestamp.endTime, endTime > timestamp.startTime {
+            let bestOverlapSegment = segments.max { lhs, rhs in
+                let lhsOverlap = overlapDuration(from: timestamp.startTime, to: endTime, with: lhs)
+                let rhsOverlap = overlapDuration(from: timestamp.startTime, to: endTime, with: rhs)
+                if lhsOverlap == rhsOverlap {
+                    return lhs.startTime > rhs.startTime
+                }
+                return lhsOverlap < rhsOverlap
+            }
+
+            if let bestOverlapSegment,
+               overlapDuration(from: timestamp.startTime, to: endTime, with: bestOverlapSegment) > 0 {
+                return bestOverlapSegment
+            }
+        }
+
+        if let containingSegment = segments.first(where: { timestamp.startTime >= $0.startTime && timestamp.startTime < $0.endTime }) {
+            return containingSegment
+        }
+
+        return segments.min { lhs, rhs in
+            distance(from: timestamp.startTime, to: lhs) < distance(from: timestamp.startTime, to: rhs)
+        }
+    }
+
+    private func overlapDuration(
+        from startTime: TimeInterval,
+        to endTime: TimeInterval,
+        with segment: RecordSpeakerSegment
+    ) -> TimeInterval {
+        max(0, min(endTime, segment.endTime) - max(startTime, segment.startTime))
+    }
+
+    private func distance(from time: TimeInterval, to segment: RecordSpeakerSegment) -> TimeInterval {
+        if time < segment.startTime {
+            return segment.startTime - time
+        }
+        if time > segment.endTime {
+            return time - segment.endTime
+        }
+        return 0
     }
 
     private func clockString(from time: TimeInterval) -> String {
@@ -2144,26 +2214,101 @@ struct RecordDetailView: View {
     }
 
     private func handleSpeakerSeek(_ target: TimeInterval) {
+        if !playerManager.isReady,
+           let fileURL = record.fileURL,
+           FileManager.default.fileExists(atPath: fileURL.path) {
+            playerManager.setupPlayer(url: fileURL)
+        }
+
         guard playerManager.isReady else { return }
         playerManager.seek(to: target)
     }
 
+    private func refreshDiarizationForCurrentSettings() {
+        let shouldDiarize = settings.whisperProvider == .defaultProvider && settings.enableSpeakerDiarization
+        guard shouldDiarize else {
+            isSpeakerModalPresented = false
+            diarizationManager.clearDiarization(for: record, in: modelContext)
+            return
+        }
+
+        let persistedText = (record.transcriptionText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let draftText = trimmedTranscriptionDraft
+        guard !persistedText.isEmpty || !draftText.isEmpty else { return }
+
+        diarizationManager.diarize(
+            record: record,
+            in: modelContext,
+            force: true
+        )
+    }
+
+    private func speakerNameBinding(for summary: SpeakerSummary) -> Binding<String> {
+        Binding(
+            get: { summary.speaker.displayName },
+            set: { newValue in
+                summary.speaker.displayName = newValue
+                summary.speaker.isUserRenamed = true
+            }
+        )
+    }
+
+    private func speakerMergeTint(for summary: SpeakerSummary) -> Color {
+        Color(
+            hue: summary.speaker.accentHue,
+            saturation: colorScheme == .dark ? 0.58 : 0.74,
+            brightness: colorScheme == .dark ? 0.96 : 0.84
+        )
+    }
+
+    private func preferredMergeTargetID(from selectedIDs: Set<UUID>) -> UUID? {
+        speakerSummaries.first { selectedIDs.contains($0.speaker.id) }?.speaker.id
+    }
+
+    private func updateMergeSelection(toggling speakerID: UUID) {
+        var updatedSelection = mergeSelection
+
+        if updatedSelection.contains(speakerID) {
+            updatedSelection.remove(speakerID)
+        } else {
+            updatedSelection.insert(speakerID)
+        }
+
+        mergeSelection = updatedSelection
+
+        if let mergeTargetID, updatedSelection.contains(mergeTargetID) {
+            return
+        }
+
+        mergeTargetID = preferredMergeTargetID(from: updatedSelection)
+    }
+
+    private func resetMergeFlow() {
+        mergeSelection = []
+        mergeTargetID = nil
+        primeMergeDefaults()
+    }
+
     private func primeMergeDefaults() {
-        guard let first = speakerSummaries.first else {
+        guard !speakerSummaries.isEmpty else {
             mergeTargetID = nil
             mergeSelection = []
             return
         }
-        if mergeTargetID == nil {
-            mergeTargetID = first.speaker.id
+
+        let validSpeakerIDs = Set(speakerSummaries.map { $0.speaker.id })
+        mergeSelection = mergeSelection.intersection(validSpeakerIDs)
+
+        if let mergeTargetID, mergeSelection.contains(mergeTargetID) {
+            return
         }
-        if mergeSelection.isEmpty {
-            mergeSelection = Set(speakerSummaries.map { $0.speaker.id })
-        }
+
+        mergeTargetID = preferredMergeTargetID(from: mergeSelection)
     }
 
     private func performMerge() {
         guard let targetID = mergeTargetID,
+              mergeSelection.contains(targetID),
               let target = speakerSummaries.first(where: { $0.speaker.id == targetID })?.speaker else { return }
 
         let merging = speakerSummaries
@@ -2179,7 +2324,7 @@ struct RecordDetailView: View {
         )
         scheduleAnnotationRefresh(force: true, persist: true)
         isSpeakerModalPresented = false
-        primeMergeDefaults()
+        resetMergeFlow()
     }
 
     private func copyTranscription() {

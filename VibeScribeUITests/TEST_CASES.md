@@ -1,6 +1,6 @@
 # VibeScribe UI Test Cases
 
-> **25 automated UI tests** across 7 test classes.
+> **33 automated UI tests** across 7 test classes.
 > Platform: macOS (XCUITest).
 > Modes: seeded library (`--uitesting`) + empty onboarding + mock end-to-end pipeline (`--uitesting --empty-state` + mock env).
 >
@@ -8,7 +8,7 @@
 > If it diverges from UI test sources or attached `AccessibilityID` controls, fix both in the same commit.
 >
 > **Sync rule**: every `func test*` in `VibeScribeUITests/*.swift` must have a case below.
-> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **25**.
+> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **33**.
 > Validation command: `./scripts/validate_ui_test_cases.sh`.
 
 ## Test Class Matrix
@@ -21,7 +21,7 @@
 | `AppLaunchPerformanceTests` | Per-test launch | Seeded data | 1 |
 | `DeleteFlowTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `StateTransitionTests` | Per-test launch | Seeded data (destructive) | 1 |
-| `MockPipelineFlowTests` | Per-test launch | First-run empty state + mocked recording/transcription/summary/diarization | 10 |
+| `MockPipelineFlowTests` | Per-test launch | First-run empty state + mocked recording/transcription/summary/diarization | 18 |
 
 ## Optimized Run Profiles (Coverage per Launch)
 
@@ -36,8 +36,8 @@
 - Goal: primary UX safety net for merge checks.
 
 3. `ui-mock` (full mocked pipeline)
-- Scope: all `MockPipelineFlowTests` including provider matrix.
-- Relaunch budget: 10 mock launches (one per scenario test); `VS-MOCK-010` runs in a single mock session.
+- Scope: all `MockPipelineFlowTests` including provider matrix and timed transcript coverage.
+- Relaunch budget: 18 mock launches (one per scenario test); `VS-MOCK-010` runs in a single mock session.
 - Goal: pipeline and failure-recovery regression coverage.
 
 ## Interactive Coverage (Path-Based)
@@ -49,14 +49,14 @@
 | `recordDetailView`, `recordTitle`, `recordTitleEditField` | `VS-POP-001`, `VS-POP-005`, `VS-MOCK-001` |
 | `playPauseButton`, `skipBackwardButton`, `skipForwardButton`, `playbackSpeedButton`, `waveformScrubber`, `currentTimeLabel`, `durationLabel` | `VS-POP-002`, `VS-MOCK-001` |
 | `tabPicker`, `transcribeButton`, `summarizeButton` | `VS-POP-002`, `VS-POP-003`, `VS-MOCK-001` |
-| `transcriptionEditor`, `summaryEditor` | `VS-MOCK-001`, `VS-MOCK-007`, `VS-MOCK-009` |
+| `transcriptionEditor`, `summaryEditor` | `VS-MOCK-001`, `VS-MOCK-007`, `VS-MOCK-009`, `VS-MOCK-011`, `VS-MOCK-012` |
 | `transcriptionModelPicker`, `summaryModelPicker` | `VS-POP-007`, `VS-MOCK-001`, `VS-MOCK-007` |
 | `recordingTimer`, `recordingStopButton`, `recordingResumeButton`, `recordingSaveButton`, `recordingCloseButton` | `VS-MOCK-001`, `VS-MOCK-002`, `VS-MOCK-005` |
 | `processingProgress` | `VS-MOCK-001`, `VS-MOCK-004`, `VS-MOCK-008` |
-| `speakersSection`, `speakerTimeline`, `speakerManageButton`, `speakerMergeSheet`, `speakerMergeConfirmButton`, `speakerChip`, `speakerRenameField_*` | `VS-MOCK-002`, `VS-MOCK-003`, `VS-MOCK-009` |
+| `speakersSection`, `speakerTimeline`, `speakerTimelineSegment_*`, `speakerManageButton`, `speakerMergeSheet`, `speakerMergeCloseButton`, `speakerMergeTargetSelector`, `speakerMergePreview`, `speakerMergeConfirmButton`, `speakerMergeCandidate_*`, `speakerRenameField_*` | `VS-MOCK-002`, `VS-MOCK-003`, `VS-MOCK-009`, `VS-MOCK-012`, `VS-MOCK-016`, `VS-MOCK-019` |
 | `tagsSection` + clickable tag chips + `clearFilterButton` | `VS-POP-004` |
 | `moreActionsMenu` + menu actions (`Rename`, `Download audio`, `Delete`) | `VS-POP-005`, `VS-DEL-001`, `VS-STATE-001`, `VS-MOCK-001` |
-| `openSettingsContextButton`, `settingsView`, `settingsTabPicker`, `settingsProviderPicker`, `settingsLanguagePicker`, `settingsTitleToggle`, `settingsChunkToggle`, `settingsCloseButton` | `VS-POP-006`, `VS-EMP-002`, `VS-LANG-001` |
+| `openSettingsContextButton`, `settingsView`, `settingsTabPicker`, `settingsProviderPicker`, `settingsLanguagePicker`, `settingsTitleToggle`, `settingsChunkToggle`, `settingsDiarizationToggle`, `settingsCloseButton` | `VS-POP-006`, `VS-EMP-002`, `VS-LANG-001`, `VS-MOCK-014` |
 | Restart confirmation alert (`Restart Now`) and relaunch behavior | `VS-LANG-001` |
 | `welcomeView`, `welcomeStartRecordingButton`, `welcomeImportAudioButton`, `welcomeSettingsLink`, `emptyStateView` | `VS-EMP-001`, `VS-EMP-002`, `VS-STATE-001`, `VS-MOCK-001` |
 
@@ -270,7 +270,7 @@ Elements intentionally out of fast UI automation scope:
 - Expected result:
 1. App correctly transitions from populated workflow to empty onboarding workflow.
 
-## 7. MockPipelineFlowTests — 10 cases
+## 7. MockPipelineFlowTests — 18 cases
 
 ### VS-MOCK-001 — First-Run Full Flow, Playback/Scrub, Manual Re-Summary
 - Method: `testMockFlow_NoSpeakers_EndToEndFromFirstLaunchToManualSummaryEdit`
@@ -295,31 +295,35 @@ Elements intentionally out of fast UI automation scope:
 - Expected result:
 1. Full user journey from first launch to edited summary passes end-to-end on mocked pipeline, including audio playback/scrubbing.
 
-### VS-MOCK-002 — Diarization Surface + Speaker Rename
+### VS-MOCK-002 — Diarization Surface + Speaker Labels
 - Method: `testMockFlow_WithSpeakers_EndToEndIncludesDiarization`
 - Preconditions:
 1. Mock scenario returns successful transcription + two speaker segments.
+2. Mock diarization exposes a deterministic custom speaker name in the annotated transcript.
 - Steps:
 1. Complete recording save flow.
 2. Wait for transcription+summary completion.
 3. Verify speaker timeline appears and speaker management button is available.
-4. Open speaker management sheet, rename a speaker, close and reopen sheet.
-5. Verify renamed speaker name persisted.
+4. Verify annotated transcription includes the speaker label injected by diarization.
 - Expected result:
-1. Successful diarization exposes speaker controls, and speaker rename persists.
+1. Successful diarization exposes speaker controls and inserts speaker labels into the visible transcript.
 
-### VS-MOCK-003 — Diarization + Merge Speakers
+### VS-MOCK-003 — Diarization + Minimal Guided Merge
 - Method: `testMockFlow_WithSpeakers_MergeSpeakersRoundTrip`
 - Preconditions:
 1. Mock scenario returns at least two speakers eligible for merge.
 - Steps:
 1. Complete recording and wait for diarization.
 2. Open speaker merge sheet.
-3. Verify multiple speaker cards are present.
-4. Execute merge and close sheet.
-5. Reopen sheet and verify speaker card count decreased.
+3. Verify the sheet shows an explicit close control and a scrollable list of speakers.
+4. Verify merge confirmation starts disabled before any speakers are selected.
+5. Select the first matching speaker and verify merge confirmation stays disabled while selection is still incomplete.
+6. Select another matching speaker and verify the kept-speaker control appears for the selected subset.
+7. Verify merge confirmation becomes enabled only after at least two speakers are selected.
+8. Execute merge and close sheet.
+9. Reopen sheet and verify speaker card count decreased.
 - Expected result:
-1. Merge flow works and speaker set is actually consolidated.
+1. Merge flow follows the user’s natural sequence: first mark matching speakers, then optionally adjust which selected speaker stays, then confirm the merge.
 
 ### VS-MOCK-004 — Diarization Error with Successful Text Pipeline
 - Method: `testMockFlow_DiarizationError_TranscriptionAndSummaryStillAvailable`
@@ -406,3 +410,115 @@ Elements intentionally out of fast UI automation scope:
 3. For each provider, complete recording and verify transcription contains provider-specific token.
 - Expected result:
 1. Mock transcription is provider-aware per selected provider in a single mock app session.
+
+### VS-MOCK-011 — Timed Transcript Uses Start Timestamps
+- Method: `testMockFlow_DefaultProvider_FormatsTranscriptionWithStartTimestamps`
+- Preconditions:
+1. Mock scenario returns deterministic token-timed transcription with no diarization.
+- Steps:
+1. Complete recording save flow.
+2. Wait for transcription to appear in the editor.
+3. Verify transcript contains multiple `[HH:MM:SS]` prefixes.
+4. Verify each timestamp prefixes the expected sentence text.
+- Expected result:
+1. Time-aware transcription is rendered with stable start timestamps only, without showing end-of-range times in the editor.
+
+### VS-MOCK-012 — Speaker Annotation Preserves Start Timestamps
+- Method: `testMockFlow_WithSpeakers_PreservesStartTimestampsDuringAnnotation`
+- Preconditions:
+1. Mock scenario returns deterministic timed transcript ranges and diarization segments for two speakers.
+- Steps:
+1. Complete recording save flow.
+2. Wait for transcription to appear in the editor.
+3. Verify speakers section and timeline are visible.
+4. Verify annotated transcript still contains the original start-time prefixes.
+5. Verify speaker labels are inserted after the timestamp prefix without leftover timestamp fragments.
+- Expected result:
+1. Diarization augments the timed transcript without corrupting the visible timestamps or truncating sentence text.
+
+### VS-MOCK-013 — Speaker Rename Does Not Leak Across Records
+- Method: `testMockFlow_WithSpeakers_SpeakerRenameIsScopedToCurrentRecord`
+- Preconditions:
+1. Mock scenario returns deterministic two-speaker diarization for every newly created record in the same app session.
+2. The first mock record is configured to expose a custom speaker name in annotated transcription.
+- Steps:
+1. Create the first mocked record and wait for diarization.
+2. Verify annotated transcription for the first record contains the custom speaker name.
+3. Create a second mocked record in the same session.
+4. Verify annotated transcription for the second record does not contain the custom speaker name from the first record.
+- Expected result:
+1. Speaker names and profiles are scoped to the current record instead of leaking through a global speaker store.
+
+### VS-MOCK-014 — Diarization Can Be Disabled
+- Method: `testMockFlow_DiarizationDisabled_TranscriptionStaysAvailableWithoutSpeakerUI`
+- Preconditions:
+1. Mock scenario returns successful transcription and would normally return speaker diarization.
+2. User can open Settings from the empty-state mock session before creating a recording.
+- Steps:
+1. Open Settings on the speech-to-text tab while `FluidAudio` is selected.
+2. Verify the speaker-identification toggle is visible for `FluidAudio`.
+3. Switch the transcription provider to a non-FluidAudio option and verify the speaker-identification toggle is hidden.
+4. Switch back to `FluidAudio`, disable the speaker-identification toggle, and close Settings.
+5. Create a mocked recording and wait for transcription.
+6. Verify the transcription editor contains transcript text.
+7. Verify the speakers section and speaker timeline are absent for that record.
+8. Verify the visible transcript does not inject speaker labels.
+- Expected result:
+1. Speaker-identification stays scoped to `FluidAudio`, and turning diarization off still leaves a clean, unlabeled transcript path available.
+
+### VS-MOCK-015 — Single Speaker Does Not Label Transcript
+- Method: `testMockFlow_WithSingleSpeaker_DoesNotInjectSpeakerLabelIntoTranscript`
+- Preconditions:
+1. Mock scenario returns successful transcription and diarization with exactly one speaker.
+- Steps:
+1. Complete recording save flow.
+2. Wait for transcription to appear in the editor.
+3. Verify transcript contains the expected text.
+4. Verify visible transcript does not inject `Speaker:` labels for the single-speaker case.
+- Expected result:
+1. When diarization finds only one speaker, transcript text stays clean and unlabeled instead of repeating the only speaker name on every line.
+
+### VS-MOCK-016 — Timeline Merges Short Same-Speaker Gaps and Seeks Reliably
+- Method: `testMockFlow_SpeakerTimeline_MergesShortSameSpeakerGapsAndSeeksOnClick`
+- Preconditions:
+1. Mock scenario returns timeline segments where two neighboring segments belong to the same speaker and the pause between them is under 3 seconds.
+2. The same mock scenario also contains short segments from different speakers later in the file.
+3. Timeline exposes deterministic segment targets for UI automation.
+- Steps:
+1. Complete recording save flow and wait for diarization.
+2. Verify the speaker timeline is visible.
+3. Verify same-speaker neighbors with pauses under 3 seconds are merged into one visible block.
+4. Verify short segments from different speakers still remain separate visible blocks instead of being collapsed into one dominant color.
+5. Click the later visible timeline block.
+6. Verify playback time jumps to the start of that block.
+- Expected result:
+1. Same-speaker segments with gaps under 3 seconds are shown as one continuous block, different speakers remain visually separate, and clicking a timeline block seeks to the beginning of the represented audio span.
+
+### VS-MOCK-017 — Timed Transcript Preserves Raw Tail Beyond Token Timings
+- Method: `testMockFlow_DefaultProvider_PreservesTrailingTranscriptTailWhenTokenTimingsEndEarly`
+- Preconditions:
+1. Mock scenario returns a full raw transcript string, but its token timing stream is truncated before the final word is complete.
+- Steps:
+1. Complete recording save flow.
+2. Wait for transcription to appear in the editor.
+3. Verify transcript still contains the full trailing word from the raw transcript, not the truncated token-timing prefix.
+- Expected result:
+1. The visible timed transcript preserves the raw-text tail when `tokenTimings` end early, instead of cutting the last phrase mid-word.
+
+### VS-MOCK-019 — Speaker Modal Supports Rename Without Merge
+- Method: `testMockFlow_WithSpeakers_SpeakerRenamePersistsWithoutMerge`
+- Preconditions:
+1. Mock scenario returns deterministic two-speaker diarization for the current record.
+2. Speaker management is presented through the shared rename/merge modal.
+- Steps:
+1. Complete recording save flow and wait for diarization.
+2. Open the speaker management modal.
+3. Verify merge confirmation stays disabled before any merge selection is made.
+4. Verify the first two speaker rows keep aligned rename fields with consistent widths.
+5. Verify the modal exposes a single close button in the header and does not duplicate it with a footer dismiss action.
+6. Edit the first speaker name directly inside the modal without selecting speakers for merge.
+7. Close the modal.
+8. Verify the visible transcript updates to the renamed speaker label.
+9. Reopen the modal and verify the edited speaker name persists.
+- Expected result:
+1. The same modal supports rename-only edits independently from merge selection, keeps a stable row layout, uses a single header close affordance without duplicated dismiss controls, persists the new name, and reflects it in the annotated transcript.

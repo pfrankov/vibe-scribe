@@ -129,6 +129,9 @@ final class AppSettings {
     var whisperModel: String = ""
     var whisperProviderRawValue: String = WhisperProvider.defaultProvider.rawValue
     var speechAnalyzerLocaleIdentifier: String = ""
+    var enableSpeakerDiarization: Bool = true
+    // Retained for SwiftData schema compatibility; no longer exposed in UI.
+    var fluidAudioDiarizationThreshold: Double = 0.55
     
     // LLM Context settings
     var useChunking: Bool = true // Option to enable/disable chunking entirely
@@ -198,13 +201,14 @@ final class AppSettings {
         // Use default values - let user choose provider explicitly
     }
     
-    init(id: String = "app_settings", 
+    init(id: String = "app_settings",
          whisperProvider: WhisperProvider = .defaultProvider,
-         whisperBaseURL: String, 
+         whisperBaseURL: String,
          whisperAPIKey: String = "",
          whisperModel: String = "",
+         enableSpeakerDiarization: Bool = true,
          useChunking: Bool = true,
-         chunkSize: Int = 25000, 
+         chunkSize: Int = 25000,
          openAIBaseURL: String,
          openAIAPIKey: String = "",
          openAIModel: String = "",
@@ -221,6 +225,7 @@ Create a concise title of at most five words that captures the essence of this s
         self.whisperBaseURL = whisperBaseURL
         self.whisperAPIKey = whisperAPIKey
         self.whisperModel = whisperModel
+        self.enableSpeakerDiarization = enableSpeakerDiarization
         self.useChunking = useChunking
         self.chunkSize = chunkSize
         self.openAIBaseURL = openAIBaseURL

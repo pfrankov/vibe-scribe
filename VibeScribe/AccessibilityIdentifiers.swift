@@ -63,10 +63,12 @@ enum AccessibilityID {
     // Speakers
     static let speakersSection = "speakersSection"
     static let speakerTimeline = "speakerTimeline"
-    static let speakerChip = "speakerChip"
+    static let speakerTimelineSegmentPrefix = "speakerTimelineSegment_"
     static let speakerManageButton = "speakerManageButton"
     static let speakerMergeSheet = "speakerMergeSheet"
+    static let speakerMergeCloseButton = "speakerMergeCloseButton"
     static let speakerMergeConfirmButton = "speakerMergeConfirmButton"
+    static let speakerMergeCandidatePrefix = "speakerMergeCandidate_"
     static let speakerRenameFieldPrefix = "speakerRenameField_"
 
     // Actions
@@ -109,6 +111,7 @@ enum AccessibilityID {
     static let settingsTitlePrompt = "settingsTitlePrompt"
     static let settingsChunkToggle = "settingsChunkToggle"
     static let settingsTitleToggle = "settingsTitleToggle"
+    static let settingsDiarizationToggle = "settingsDiarizationToggle"
     static let settingsChunkSize = "settingsChunkSize"
 
     // MARK: - Drag & Drop Overlay

@@ -7,6 +7,7 @@
 "vibescribe.needs.microphone.access.to.record.audio.please.grant.permission.in.system.preferences.security.privacy.microphone" = "VibeScribe needs microphone access to record audio. Please grant permission in System Preferences > Security & Privacy > Microphone.";
 "open.system.preferences" = "Open System Preferences";
 "cancel" = "Cancel";
+"done" = "Done";
 "import" = "Import";
 "select.audio.youd.like.vibescribe.to.transcribe.and.summarize" = "Select audio you'd like VibeScribe to transcribe and summarize.";
 "start.a.new.recording" = "Start a new recording";
@@ -145,6 +146,8 @@
 "prompt" = "Prompt";
 "use.transcription.as.a.placeholder.for.the.individual.chunk.text" = "Use {transcription} as a placeholder for the individual chunk text.";
 "generate.short.title.after.summarization" = "Generate short title after summarization";
+"enable.speaker.diarization" = "Identify speakers in transcript";
+"enable.speaker.diarization.caption" = "Adds speaker labels and a simple speaker timeline after transcription.";
 "when.enabled.the.app.asks.the.language.model.for.a.concise.title.based.on.the.final.summary" = "When enabled, the app asks the language model for a concise title based on the final summary.";
 "title.generation.prompt" = "Title generation prompt";
 "use.summary.as.a.placeholder.for.the.completed.summary.text.the.model.should.answer.with.a.title.only" = "Use {summary} as a placeholder for the completed summary text. The model should answer with a title only.";
@@ -217,12 +220,12 @@
 "rename.speaker.placeholder" = "Speaker name";
 "rename.speakers" = "Rename or merge speakers";
 "merge.speakers" = "Merge speakers";
-"merge.target" = "Set as target";
+"merge.target" = "Make primary";
 "merge.include" = "Include in merge";
-"merge.selected" = "Merge selected";
-"speaker.merge.instructions" = "Choose the main speaker, select similar voices, and merge them into one.";
+"merge.selected" = "Merge";
+"speaker.merge.instructions" = "Rename speakers directly. Select matching voices only when you want to merge them.";
+"speaker.merge.kept.badge" = "Primary";
 "speaker.record.time" = "This recording";
-"speaker.library.time" = "Across library";
 "jump.to.speaker.start" = "Jump to the first moment for this speaker";
 "last.updated.arg1" = "Updated %@";
 "playhead" = "Playhead";

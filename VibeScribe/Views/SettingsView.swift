@@ -374,6 +374,22 @@ struct SettingsView: View {
             speechAnalyzerLanguageSection
         }
 
+        if settings.whisperProvider == .defaultProvider {
+            VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
+                Toggle(AppLanguage.localized("enable.speaker.diarization"), isOn: Binding(
+                    get: { settings.enableSpeakerDiarization },
+                    set: { newValue in
+                        settings.enableSpeakerDiarization = newValue
+                        trySave()
+                    }
+                ))
+                .toggleStyle(.checkbox)
+                .accessibilityIdentifier(AccessibilityID.settingsDiarizationToggle)
+
+                captionText(LocalizedStringKey("enable.speaker.diarization.caption"))
+            }
+        }
+
         // Group: WhisperServer
         if settings.whisperProvider == .whisperServer {
             VStack(alignment: .leading, spacing: UIConstants.tinySpacing) {
@@ -903,7 +919,7 @@ struct SettingsView: View {
             chunkSizeText = String(settings.chunkSize)
         }
     }
-    
+
     private func loadModelsIfNeeded() {
         loadWhisperModelsIfURLValid()
         loadOpenAIModelsIfURLValid()
