@@ -49,6 +49,8 @@ private enum AID {
     static let tagsSection = "tagsSection"
     static let tagChip = "tagChip"
     static let speakersSection = "speakersSection"
+    static let speakerTimeline = "speakerTimeline"
+    static let speakerTimelineSegmentPrefix = "speakerTimelineSegment_"
 
     // Settings
     static let settingsView = "settingsView"
@@ -1551,7 +1553,118 @@ final class AppLaunchPerformanceTests: VibeScribeUITestCase {
     }
 }
 
-// MARK: - 5. Delete Flow Tests (per-test launch, destructive)
+// MARK: - 5. Demo Screenshot Tests
+
+final class DemoScreenshotTests: VibeScribeUITestCase {
+    private enum DemoSeed {
+        static var scenario: String { "executive_demo_screenshot" }
+        static var languageCode: String { "en" }
+        static var playbackProgress: String { "0.3333333333" }
+
+        static var selectedTitle: String { "Sprint Risk Review - Payments Rollout" }
+        static var sidebarTitle1: String { "Incident Review - Checkout Retry Storm" }
+        static var sidebarTitle2: String { "Hiring Debrief - Staff Backend Candidate" }
+        static var meetingTag1: String { "SprintReview" }
+        static var meetingTag2: String { "ReleaseReadiness" }
+        static var summaryNeedle1: String { "Status:" }
+        static var summaryNeedle2: String { "Why this recording matters:" }
+        static var legacyHeading: String { "Executive Brief" }
+        static var localModel: String { "gpt-oss-20b" }
+        static var speakerOne: String { "Nina Torres" }
+        static var speakerTwo: String { "Alex Chen" }
+    }
+
+    func testExecutiveDemoScreenshot_CapturesSummaryTabWithLeadershipMeetingContent() {
+        launchExecutiveDemoScreenshotApp()
+
+        app.activate()
+        let mainWindow = app.windows.firstMatch
+        ensurePopulatedDetailReady(timeout: 8.0)
+        XCTAssertTrue(mainWindow.exists || mainWindow.waitForExistence(timeout: 3.0), "Main window should be visible")
+
+        let selectedTitle = waitFor(AID.recordTitle, timeout: 1.5)
+        XCTAssertEqual(
+            textValue(of: selectedTitle),
+            DemoSeed.selectedTitle,
+            "Demo scenario should open the leadership record selected for the screenshot"
+        )
+
+        let screenshot = mainWindow.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "executive-demo-summary-window"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        assertExists(AID.summarizeButton, timeout: 1.5, "Summary tab should be visible in demo scenario")
+        let timeline = waitFor(AID.speakerTimeline, timeout: 1.5)
+        XCTAssertTrue(timeline.exists, "Selected record should expose a speaker timeline")
+
+        let timelineSegments = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", AID.speakerTimelineSegmentPrefix)
+        )
+        XCTAssertGreaterThanOrEqual(timelineSegments.count, 2, "Speaker timeline should expose visible segments")
+
+        var labels = Set<String>()
+        for index in 0..<timelineSegments.count {
+            let label = timelineSegments.element(boundBy: index).label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !label.isEmpty {
+                labels.insert(label)
+            }
+        }
+        XCTAssertEqual(labels, Set([DemoSeed.speakerOne, DemoSeed.speakerTwo]), "Demo screenshot should show exactly two speakers")
+
+        let currentTime = textValue(of: waitFor(AID.currentTimeLabel, timeout: 1.0))
+        let duration = textValue(of: waitFor(AID.durationLabel, timeout: 1.0))
+        let currentSeconds = clockLabelSeconds(currentTime)
+        let durationSeconds = clockLabelSeconds(duration)
+        XCTAssertNotNil(currentSeconds, "Current time label should be parseable")
+        XCTAssertNotNil(durationSeconds, "Duration label should be parseable")
+        if let currentSeconds, let durationSeconds {
+            XCTAssertGreaterThan(currentSeconds, 0, "Demo playback should not start from zero")
+            XCTAssertLessThanOrEqual(
+                abs((currentSeconds * 3) - durationSeconds),
+                3,
+                "Playback should be paused at one-third progress"
+            )
+        }
+
+        let skipBackward = waitFor(AID.skipBackwardButton, timeout: 1.0)
+        let skipForward = waitFor(AID.skipForwardButton, timeout: 1.0)
+        XCTAssertFalse(skipBackward.isEnabled, "Screenshot should be captured with playback paused")
+        XCTAssertFalse(skipForward.isEnabled, "Screenshot should be captured with playback paused")
+
+    }
+
+    private func launchExecutiveDemoScreenshotApp() {
+        Self.terminateRunningTargetApp()
+        app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["VIBESCRIBE_UI_TESTING"] = "1"
+        app.launchEnvironment["VIBESCRIBE_UI_EMPTY_STATE"] = "0"
+        app.launchEnvironment["VIBESCRIBE_UI_DATA_SCENARIO"] = DemoSeed.scenario
+        app.launchEnvironment["VIBESCRIBE_UI_LANGUAGE_CODE"] = DemoSeed.languageCode
+        app.launchEnvironment["VIBESCRIBE_UI_PLAYBACK_PROGRESS"] = DemoSeed.playbackProgress
+        app.launchEnvironment["VIBESCRIBE_UI_OPEN_MAIN_WINDOW"] = "1"
+        if app.state != .notRunning {
+            app.terminate()
+        }
+        app.launch()
+        _ = dismissInterferingDialogsIfNeeded()
+    }
+    private func clockLabelSeconds(_ label: String) -> Int? {
+        let parts = label.split(separator: ":").compactMap { Int($0) }
+        switch parts.count {
+        case 2:
+            return (parts[0] * 60) + parts[1]
+        case 3:
+            return (parts[0] * 3600) + (parts[1] * 60) + parts[2]
+        default:
+            return nil
+        }
+    }
+}
+
+// MARK: - 6. Delete Flow Tests (per-test launch, destructive)
 
 final class DeleteFlowTests: VibeScribeUITestCase {
 
@@ -1622,7 +1735,7 @@ final class DeleteFlowTests: VibeScribeUITestCase {
     }
 }
 
-// MARK: - 6. State Transition Tests (per-test launch, destructive)
+// MARK: - 7. State Transition Tests (per-test launch, destructive)
 
 final class StateTransitionTests: VibeScribeUITestCase {
 

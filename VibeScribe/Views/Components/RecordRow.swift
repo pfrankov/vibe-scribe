@@ -176,6 +176,7 @@ struct RecordRow: View {
     }()
 
     private func formattedDateTime(_ date: Date) -> String {
-        Self.dateTimeFormatter.string(from: date)
+        Self.dateTimeFormatter.locale = AppLanguage.currentLocale
+        return Self.dateTimeFormatter.string(from: date)
     }
 } 

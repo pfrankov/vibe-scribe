@@ -1,6 +1,6 @@
 # VibeScribe UI Test Cases
 
-> **33 automated UI tests** across 7 test classes.
+> **34 automated UI tests** across 8 test classes.
 > Platform: macOS (XCUITest).
 > Modes: seeded library (`--uitesting`) + empty onboarding + mock end-to-end pipeline (`--uitesting --empty-state` + mock env).
 >
@@ -8,7 +8,7 @@
 > If it diverges from UI test sources or attached `AccessibilityID` controls, fix both in the same commit.
 >
 > **Sync rule**: every `func test*` in `VibeScribeUITests/*.swift` must have a case below.
-> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **33**.
+> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **34**.
 > Validation command: `./scripts/validate_ui_test_cases.sh`.
 
 ## Test Class Matrix
@@ -19,6 +19,7 @@
 | `EmptyStateTests` | Shared launch | Empty state (`--empty-state`) | 2 |
 | `LanguageRestartTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `AppLaunchPerformanceTests` | Per-test launch | Seeded data | 1 |
+| `DemoScreenshotTests` | Per-test launch | Executive demo screenshot state (`--uitesting` + screenshot env) | 1 |
 | `DeleteFlowTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `StateTransitionTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `MockPipelineFlowTests` | Per-test launch | First-run empty state + mocked recording/transcription/summary/diarization | 18 |
@@ -39,6 +40,11 @@
 - Scope: all `MockPipelineFlowTests` including provider matrix and timed transcript coverage.
 - Relaunch budget: 18 mock launches (one per scenario test); `VS-MOCK-010` runs in a single mock session.
 - Goal: pipeline and failure-recovery regression coverage.
+
+4. `ui-screenshot` (demo capture)
+- Scope: `VS-DEMO-001`.
+- Relaunch budget: 1 app launch in executive demo screenshot mode.
+- Goal: deterministic window capture with leadership-oriented sample data for product/demo assets.
 
 ## Interactive Coverage (Path-Based)
 
@@ -244,7 +250,26 @@ Elements intentionally out of fast UI automation scope:
 - Expected result:
 1. Launch metric is captured for regression tracking.
 
-## 5. DeleteFlowTests — 1 case
+## 5. DemoScreenshotTests — 1 case
+
+### VS-DEMO-001 — Executive Demo Summary Screenshot
+- Method: `testExecutiveDemoScreenshot_CapturesSummaryTabWithLeadershipMeetingContent`
+- Preconditions:
+1. App launched with seeded executive-demo screenshot data.
+2. UI-test launch forces English UI, a team-lead themed records list, a local summary model label (`gpt-oss-20b`), two speaker segments labeled with realistic human names, a speech-like waveform with varied phrases and pauses, and initial playback progress at exactly one-third while paused.
+- Steps:
+1. Wait for the populated demo workspace to appear.
+2. Verify the selected record opens on the Summary tab with non-empty team-lead oriented Markdown content.
+3. Verify the summary model picker shows `gpt-oss-20b`.
+4. Verify the summary follows the app’s bullet-list prompt style instead of using an H1 heading.
+5. Verify sidebar rows use thematic English meeting titles and meeting-type tags relevant to a typical engineering team lead.
+6. Verify the selected record shows two named speakers in the speaker timeline rather than role-only labels.
+7. Verify the player is paused, current time reflects one-third of the total duration, and the waveform looks like real conversation with varied bursts and pauses instead of synthetic repeated peaks.
+8. Capture a window screenshot attachment.
+- Expected result:
+1. The test produces a deterministic English-language screenshot from the Summary tab that feels native to a local-first engineering team lead workflow: familiar meeting topics, `gpt-oss-20b` selected, high-signal bullet-style summary content, realistic meeting tags, two named speakers, and a paused one-third playback position with a conversation-like waveform. When launched through `./scripts/run_test_sets.sh ui-screenshot`, the exported PNG is copied to Desktop for easy manual reuse.
+
+## 6. DeleteFlowTests — 1 case
 
 ### VS-DEL-001 — Delete Confirmation End-to-End
 - Method: `testDeleteFlow_CancelThenConfirmRemovesExactlyOneRecord`
@@ -258,7 +283,7 @@ Elements intentionally out of fast UI automation scope:
 - Expected result:
 1. Both cancel and confirm branches of delete confirmation work as expected.
 
-## 6. StateTransitionTests — 1 case
+## 7. StateTransitionTests — 1 case
 
 ### VS-STATE-001 — Populated to Empty Transition
 - Method: `testDeleteAllFlow_TransitionsFromPopulatedToWelcomeState`
@@ -270,7 +295,7 @@ Elements intentionally out of fast UI automation scope:
 - Expected result:
 1. App correctly transitions from populated workflow to empty onboarding workflow.
 
-## 7. MockPipelineFlowTests — 18 cases
+## 8. MockPipelineFlowTests — 18 cases
 
 ### VS-MOCK-001 — First-Run Full Flow, Playback/Scrub, Manual Re-Summary
 - Method: `testMockFlow_NoSpeakers_EndToEndFromFirstLaunchToManualSummaryEdit`

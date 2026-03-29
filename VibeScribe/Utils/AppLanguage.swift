@@ -9,17 +9,34 @@ import Foundation
 
 enum AppLanguage {
     private static let storageKey = "ui.language.code"
+    private static let uiTestingLanguageEnvKey = "VIBESCRIBE_UI_LANGUAGE_CODE"
     private static var lastAppliedAppleLanguages: String?
+
+    private static var uiTestingOverrideCode: String? {
+        let raw = ProcessInfo.processInfo.environment[uiTestingLanguageEnvKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (raw?.isEmpty == false) ? raw : nil
+    }
+
+    private static func resolvedCode(from code: String) -> String {
+        if let uiTestingOverrideCode {
+            return uiTestingOverrideCode
+        }
+        return code.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     /// Returns the app language code stored in user defaults (empty string = system language).
     static var storedCode: String {
-        UserDefaults.standard.string(forKey: storageKey)?
+        if let uiTestingOverrideCode {
+            return uiTestingOverrideCode
+        }
+        return UserDefaults.standard.string(forKey: storageKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     /// Computes a Locale for a given language code or falls back to the system locale.
     static func locale(for code: String) -> Locale {
-        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = resolvedCode(from: code)
         return normalized.isEmpty ? .autoupdatingCurrent : Locale(identifier: normalized)
     }
 
@@ -31,7 +48,7 @@ enum AppLanguage {
     /// Applies the preferred language to Foundation lookups (used by NSLocalizedString)
     /// so managers and AppKit components also respect the override.
     static func applyPreferredLanguagesIfNeeded(code: String) {
-        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = resolvedCode(from: code)
         guard normalized != lastAppliedAppleLanguages else { return }
 
         lastAppliedAppleLanguages = normalized

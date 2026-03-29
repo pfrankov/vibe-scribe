@@ -7,6 +7,9 @@ cd "$ROOT_DIR"
 SCHEME="${SCHEME:-VibeScribeUITests}"
 DESTINATION="${DESTINATION:-platform=macOS}"
 XCODEBUILD_BIN="${XCODEBUILD_BIN:-xcodebuild}"
+SCREENSHOT_TEST_ID="DemoScreenshotTests/testExecutiveDemoScreenshot_CapturesSummaryTabWithLeadershipMeetingContent"
+SCREENSHOT_ATTACHMENT_NAME="executive-demo-summary-window"
+SCREENSHOT_DESKTOP_PATH="$HOME/Desktop/VibeScribe-executive-demo-summary-window.png"
 
 usage() {
     cat <<'EOF'
@@ -18,6 +21,7 @@ Sets:
   ui-core               Run core UI flows (populated/empty/settings/delete/state).
   ui-mock               Run all mock pipeline flows.
   ui-mock-core          Run mock flows except provider matrix check (faster).
+  ui-screenshot         Run the executive demo screenshot capture test.
   ui-smoke              Run high-coverage smoke with minimal app relaunches.
   ui-smoke-lite         Run an expanded smoke subset with the same 3-launch budget.
   ui-class <ClassName>  Run one UI test class (e.g. MockPipelineFlowTests).
@@ -35,6 +39,33 @@ run_xcodebuild_tests() {
     local -a args=("$@")
     echo "Running: $XCODEBUILD_BIN -scheme \"$SCHEME\" -destination \"$DESTINATION\" ${args[*]} test"
     "$XCODEBUILD_BIN" -scheme "$SCHEME" -destination "$DESTINATION" "${args[@]}" test
+}
+
+run_ui_screenshot_test() {
+    local result_bundle
+    local export_dir
+    local screenshot_path
+
+    result_bundle="$(mktemp -d "${TMPDIR:-/tmp}/vibescribe-ui-screenshot.XXXXXX")/DemoScreenshot.xcresult"
+    export_dir="$(mktemp -d "${TMPDIR:-/tmp}/vibescribe-ui-screenshot-export.XXXXXX")"
+
+    run_xcodebuild_tests \
+        -resultBundlePath "$result_bundle" \
+        "-only-testing:VibeScribeUITests/$SCREENSHOT_TEST_ID"
+
+    xcrun xcresulttool export attachments \
+        --path "$result_bundle" \
+        --output-path "$export_dir" >/dev/null
+
+    screenshot_path="$(find "$export_dir" -maxdepth 1 -type f -name '*.png' | head -n 1)"
+    if [[ -z "$screenshot_path" ]]; then
+        echo "Error: screenshot attachment '$SCREENSHOT_ATTACHMENT_NAME' was not exported from $result_bundle" >&2
+        exit 1
+    fi
+
+    cp "$screenshot_path" "$SCREENSHOT_DESKTOP_PATH"
+    echo "Desktop screenshot: $SCREENSHOT_DESKTOP_PATH"
+    echo "Result bundle: $result_bundle"
 }
 
 set_name="${1:-help}"
@@ -62,6 +93,10 @@ case "$set_name" in
         run_xcodebuild_tests \
             -only-testing:VibeScribeUITests/MockPipelineFlowTests \
             -skip-testing:VibeScribeUITests/MockPipelineFlowTests/testMockFlow_ProviderMatrix_TranscriptionReflectsSelectedProvider
+        ;;
+
+    ui-screenshot)
+        run_ui_screenshot_test
         ;;
 
     ui-smoke)

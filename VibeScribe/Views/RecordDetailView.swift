@@ -1727,6 +1727,7 @@ struct RecordDetailView: View {
 
             Logger.debug("Loading audio from: \(fileURL.path)", category: .audio)
             playerManager.setupPlayer(url: fileURL)
+            applyUITestPlaybackProgressIfNeeded()
             registerSpacebarShortcut()
 
             // Check if this is a new record that should auto-process
@@ -2454,6 +2455,16 @@ struct RecordDetailView: View {
         }
 
         renderedSummarySnapshot = currentValue
+    }
+
+    private func applyUITestPlaybackProgressIfNeeded() {
+        guard VibeScribeApp.isUITesting else { return }
+
+        let rawProgress = ProcessInfo.processInfo.environment[UITestEnvironmentKey.playbackProgress]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let progress = Double(rawProgress), playerManager.isReady else { return }
+
+        playerManager.seek(toProgress: min(max(progress, 0), 1))
     }
 
     private func saveSummaryIfNeeded() {
