@@ -1,0 +1,38 @@
+name: Validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      # Validated toolchain for the pinned FluidAudio 0.12.5 dependency graph.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun swift --version
+      - name: Install test inventory dependency
+        run: brew install ripgrep
+      - name: Validate UI test inventory
+        run: ./scripts/validate_ui_test_cases.sh
+      - name: Reproduce historical audio overwrite
+        run: ./scripts/run_audio_storage_tests.sh d48af9d9cfc04c6ea0ad208a7de55303551e2c78
+      - name: Verify audio preservation
+        run: ./scripts/run_audio_storage_tests.sh
+      - name: Build unmodified Release sources
+        run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribe -configuration Release -destination 'platform=macOS' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build

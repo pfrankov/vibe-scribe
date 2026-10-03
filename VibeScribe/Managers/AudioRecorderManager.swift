@@ -58,7 +58,7 @@ class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate 
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
             let dateString = dateFormatter.string(from: Date())
-            let fileName = "recording_\(dateString).m4a"
+            let fileName = "recording_\(dateString)_\(UUID().uuidString).m4a"
             audioFileURL = getRecordingsDirectory().appendingPathComponent(fileName)
 
             guard let url = audioFileURL else {

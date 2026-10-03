@@ -547,3 +547,21 @@ Elements intentionally out of fast UI automation scope:
 9. Reopen the modal and verify the edited speaker name persists.
 - Expected result:
 1. The same modal supports rename-only edits independently from merge selection, keeps a stable row layout, uses a single header close affordance without duplicated dismiss controls, persists the new name, and reflects it in the annotated transcript.
+
+## Audio storage regression contract (native integration)
+
+These storage checks exercise AVFoundation directly, without recording devices or UI automation. They do not add UI-test methods to the inventory above.
+
+### VS-STORAGE-001 — Rapid imports preserve each recording
+- Preconditions: two distinct synthetic WAV files; an isolated recordings directory; the clock held at one instant for both conversions
+- User steps: import the two files in one batch, then retain or remove one imported recording
+- Expected result: each import has a distinct audio URL, the first file is byte-for-byte unchanged after the second import, and removing one output leaves the other intact
+- Regression coverage: `VibeScribeTests/AudioStorageRegression.swift`, run by `scripts/run_audio_storage_tests.sh`
+
+### VS-STORAGE-002 — Rapid merges preserve previous output
+- Preconditions: synthetic microphone/system audio pairs of equal duration; an isolated recordings directory; the same fixed clock
+- User steps: save two combined recordings
+- Expected result: each merge has a distinct URL and preserves the earlier recording and all source files
+- Regression coverage: `VibeScribeTests/AudioStorageRegression.swift`, run by `scripts/run_audio_storage_tests.sh`
+
+The integration harness makes only two explicit substitutions in a temporary copy of `AudioUtils`: a fixed `Date()` and an isolated recordings-directory lookup. It asserts the exact number of substitutions. Export, conversion, output naming, and deletion code are otherwise unchanged. CI also builds the unmodified app sources in Release configuration.
