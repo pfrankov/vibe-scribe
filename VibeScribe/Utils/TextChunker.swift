@@ -242,8 +242,8 @@ private extension NSRegularExpression {
         }
         
         // Add the remaining part
-        if lastEnd < string.count {
-            let substringRange = NSRange(location: lastEnd, length: string.count - lastEnd)
+        if lastEnd < string.utf16.count {
+            let substringRange = NSRange(location: lastEnd, length: string.utf16.count - lastEnd)
             if let range = Range(substringRange, in: string) {
                 result.append(String(string[range]))
             }

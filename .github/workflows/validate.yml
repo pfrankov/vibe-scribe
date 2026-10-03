@@ -34,5 +34,9 @@ jobs:
         run: ./scripts/run_audio_storage_tests.sh d48af9d9cfc04c6ea0ad208a7de55303551e2c78
       - name: Verify audio preservation
         run: ./scripts/run_audio_storage_tests.sh
+      - name: Reproduce historical Unicode truncation
+        run: ./scripts/run_text_chunker_tests.sh d48af9d9cfc04c6ea0ad208a7de55303551e2c78
+      - name: Verify complete Unicode chunks
+        run: ./scripts/run_text_chunker_tests.sh
       - name: Build unmodified Release sources
         run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribe -configuration Release -destination 'platform=macOS' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build
