@@ -575,3 +575,17 @@ The integration harness makes only two explicit substitutions in a temporary cop
 - Regression coverage: `VibeScribeTests/TextChunkerRegression.swift`, run by `scripts/run_text_chunker_tests.sh`; this directly exercises the production Foundation chunker without an AI service or UI mock
 
 The native regression runs unchanged `TextChunker` source against both a historical commit and the candidate. Single-space sentence fixtures allow exact reconstruction by joining chunks, including a transcript larger than the default 25,000-character limit. ASCII and BMP text are unchanged controls. Non-positive chunk-size behavior is outside this change.
+
+## Chunk-size validation regression contract
+
+### VS-CHUNK-001 — Reject nonpositive chunk limits
+- Preconditions: chunking enabled; an existing positive character limit
+- User steps: enter zero or a negative number in the chunk-size field and submit or leave the field
+- Expected result: retain the previous setting and restore the field, matching the existing invalid-input behavior
+
+### VS-CHUNK-002 — Recover from a previously stored invalid limit
+- Preconditions: an existing record with transcription and a stored zero or negative chunk size
+- User steps: request a summary
+- Expected result: show an actionable local error directing the user to Settings; keep the app responsive and make no AI request
+
+Initial native reproduction uses `VibeScribeTests/InvalidChunkSizeProbe.swift` and `scripts/run_invalid_chunk_size_tests.sh`. Each synthetic subprocess has a one-second wall-time limit and cannot produce core dumps. The historical zero-size path must positively reproduce nontermination after entering the chunker; the negative-size path must produce the specific Swift index-bounds failure. Implementation and UI regression coverage follow this reproduction.
