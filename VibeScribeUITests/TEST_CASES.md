@@ -565,3 +565,13 @@ These storage checks exercise AVFoundation directly, without recording devices o
 - Regression coverage: `VibeScribeTests/AudioStorageRegression.swift`, run by `scripts/run_audio_storage_tests.sh`
 
 The integration harness makes only two explicit substitutions in a temporary copy of `AudioUtils`: a fixed `Date()` and an isolated recordings-directory lookup. It asserts the exact number of substitutions. Export, conversion, output naming, and deletion code are otherwise unchanged. CI also builds the unmodified app sources in Release configuration.
+
+## Text chunking regression contract (Foundation integration)
+
+### VS-TEXT-001 — Summaries receive the complete Unicode transcript
+- Preconditions: chunking enabled; a transcript exceeds the configured character limit and contains emoji, combining marks, or a joined emoji sequence
+- User steps: request a summary of the transcript
+- Expected result: sentence-based chunks retain the final sentence and all Unicode characters, preserve their order, and stay within the configured character limit
+- Regression coverage: `VibeScribeTests/TextChunkerRegression.swift`, run by `scripts/run_text_chunker_tests.sh`; this directly exercises the production Foundation chunker without an AI service or UI mock
+
+The native regression runs unchanged `TextChunker` source against both a historical commit and the candidate. Single-space sentence fixtures allow exact reconstruction by joining chunks, including a transcript larger than the default 25,000-character limit. ASCII and BMP text are unchanged controls. Non-positive chunk-size behavior is outside this change.
