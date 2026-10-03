@@ -126,12 +126,7 @@ struct AudioUtils {
                 // Generate unique output URL
                 let timestamp = Int(Date().timeIntervalSince1970)
                 let recordingsDir = try AudioUtils.getRecordingsDirectory()
-                let outputURL = recordingsDir.appendingPathComponent("imported_\(timestamp).m4a")
-                
-                // Remove existing file if it exists
-                if FileManager.default.fileExists(atPath: outputURL.path) {
-                    try FileManager.default.removeItem(at: outputURL)
-                }
+                let outputURL = recordingsDir.appendingPathComponent("imported_\(timestamp)_\(UUID().uuidString).m4a")
                 
                 guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
                     throw AudioUtilsError.exportFailed("Could not create export session")
@@ -260,12 +255,7 @@ struct AudioUtils {
         // Generate unique output URL for merged file
         let timestamp = Int(Date().timeIntervalSince1970)
         let recordingsDir = try AudioUtils.getRecordingsDirectory()
-        let outputURL = recordingsDir.appendingPathComponent("merged_\(timestamp).m4a")
-        
-        // Remove existing file if it exists
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
+        let outputURL = recordingsDir.appendingPathComponent("merged_\(timestamp)_\(UUID().uuidString).m4a")
         
         do {
             try await exportSession.export(to: outputURL, as: .m4a)
