@@ -38,5 +38,11 @@ jobs:
         run: ./scripts/run_text_chunker_tests.sh d48af9d9cfc04c6ea0ad208a7de55303551e2c78
       - name: Verify complete Unicode chunks
         run: ./scripts/run_text_chunker_tests.sh
+      - name: Reproduce invalid chunk-size failures
+        run: ./scripts/run_invalid_chunk_size_tests.sh 7f2b2d578fa86bf2712a3e334b812036019d9e7b
+      - name: Verify invalid chunk sizes are rejected
+        run: ./scripts/run_invalid_chunk_size_tests.sh
       - name: Build unmodified Release sources
         run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribe -configuration Release -destination 'platform=macOS' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build
+      - name: Test chunk-size settings and recovery UI
+        run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribeUITests -configuration Debug -destination 'platform=macOS' -disableAutomaticPackageResolution -only-testing:VibeScribeUITests/ChunkSizeValidationTests CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual test

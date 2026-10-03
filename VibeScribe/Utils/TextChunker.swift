@@ -7,10 +7,11 @@ struct TextChunker {
     /// Chunk text intelligently based on natural boundaries
     /// - Parameters:
     ///   - text: The text to chunk
-    ///   - maxChunkSize: Maximum size per chunk in characters
+    ///   - maxChunkSize: Maximum positive size per chunk in characters
     ///   - forceChunking: If false, returns single chunk if text fits within maxChunkSize
-    /// - Returns: Array of text chunks
+    /// - Returns: Array of text chunks, or an empty array for a nonpositive limit
     static func chunkText(_ text: String, maxChunkSize: Int, forceChunking: Bool = false) -> [String] {
+        guard maxChunkSize > 0 else { return [] }
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Return single chunk if text is small enough and we're not forcing chunking

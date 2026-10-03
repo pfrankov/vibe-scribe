@@ -699,6 +699,7 @@ struct SettingsView: View {
                     .font(.system(size: UIConstants.fontSize))
                 
                 TextField("25000", text: $chunkSizeText)
+                    .accessibilityIdentifier(AccessibilityID.settingsChunkSize)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 100)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -910,8 +911,8 @@ struct SettingsView: View {
     }
 
     private func saveChunkSize() {
-        // Convert text to Int, allow any number (including 0 or negative)
-        if let chunkSize = Int(chunkSizeText) {
+        // Keep the previous setting when the input is not a positive integer.
+        if let chunkSize = Int(chunkSizeText), chunkSize > 0 {
             settings.chunkSize = chunkSize
             trySave()
         } else {

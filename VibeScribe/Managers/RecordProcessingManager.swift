@@ -129,6 +129,7 @@ final class RecordProcessingManager: ObservableObject {
         case recordNotFound
         case missingAudioFile
         case emptyCleanText
+        case invalidChunkSize
         case summaryEmpty
         case invalidURL
         case invalidResponse
@@ -143,6 +144,8 @@ final class RecordProcessingManager: ObservableObject {
                 return AppLanguage.localized("audio.file.not.found.on.disk")
             case .emptyCleanText:
                 return AppLanguage.localized("transcription.text.is.empty.after.processing")
+            case .invalidChunkSize:
+                return AppLanguage.localized("chunk.size.must.be.greater.than.zero.update.it.in.settings")
             case .summaryEmpty:
                 return AppLanguage.localized("summary.is.empty")
             case .invalidURL:
@@ -640,6 +643,10 @@ final class RecordProcessingManager: ObservableObject {
     }
     
     private func generateSummary(for text: String, job: ProcessingJob) async throws -> String {
+        if job.settings.useChunking && job.settings.chunkSize <= 0 {
+            throw RecordProcessingError.invalidChunkSize
+        }
+
         if UITestMockPipeline.isEnabled {
             try await UITestMockPipeline.sleepForProcessingStep()
             return try UITestMockPipeline.summaryText(model: job.settings.openAIModel, transcription: text)

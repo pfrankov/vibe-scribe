@@ -236,3 +236,5 @@
 "custom.ellipsis" = "Custom...";
 "enter.custom.value" = "Enter custom value";
 "enter.value.ellipsis" = "Enter value...";
+
+"chunk.size.must.be.greater.than.zero.update.it.in.settings" = "Chunk size must be greater than zero. Update it in Settings.";

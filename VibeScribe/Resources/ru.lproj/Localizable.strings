@@ -237,3 +237,5 @@
 "custom.ellipsis" = "Другая...";
 "enter.custom.value" = "Введите свое значение";
 "enter.value.ellipsis" = "Введите значение...";
+
+"chunk.size.must.be.greater.than.zero.update.it.in.settings" = "Размер фрагмента должен быть больше нуля. Измените его в настройках.";
