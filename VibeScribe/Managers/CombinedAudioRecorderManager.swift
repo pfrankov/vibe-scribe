@@ -137,7 +137,7 @@ class CombinedAudioRecorderManager: NSObject, ObservableObject {
             }
             recordingsDir = tempDir
         }
-        let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp).caf")
+        let sysURL = recordingsDir.appendingPathComponent("sys_\(timestamp)_\(UUID().uuidString).caf")
         systemAudioOutputURL = sysURL
         systemRecorderManager.startRecording(outputURL: sysURL)
 
