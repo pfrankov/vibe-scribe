@@ -237,3 +237,5 @@
 "custom.ellipsis" = "Benutzerdefiniert...";
 "enter.custom.value" = "Benutzerdefinierten Wert eingeben";
 "enter.value.ellipsis" = "Wert eingeben...";
+
+"chunk.size.must.be.greater.than.zero.update.it.in.settings" = "Die Blockgröße muss größer als null sein. Bitte in den Einstellungen ändern.";

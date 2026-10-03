@@ -60,6 +60,8 @@ private enum AID {
     static let settingsLanguagePicker = "settingsLanguagePicker"
     static let settingsTitleToggle = "settingsTitleToggle"
     static let settingsChunkToggle = "settingsChunkToggle"
+    static let settingsChunkSize = "settingsChunkSize"
+    static let summaryEditor = "summaryEditor"
     static let uiTestAppRootRefreshStatus = "uiTestAppRootRefreshStatus"
     static let uiTestLaunchPermissionStatus = "uiTestLaunchPermissionStatus"
 
@@ -1776,5 +1778,128 @@ final class StateTransitionTests: VibeScribeUITestCase {
 
         assertExists(AID.welcomeView, timeout: 1, "Welcome view should appear after deleting all records")
         assertExists(AID.emptyStateView, timeout: 1)
+    }
+}
+
+
+// MARK: - Chunk-size validation (per-test launch, isolated mock AI)
+
+final class ChunkSizeValidationTests: VibeScribeUITestCase {
+    private let chunkSizeError = "Chunk size must be greater than zero. Update it in Settings."
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        app.launchEnvironment["VIBESCRIBE_UI_USE_MOCK_PIPELINE"] = "1"
+        app.launchEnvironment["VIBESCRIBE_UI_LANGUAGE_CODE"] = "en"
+        app.launchEnvironment["VIBESCRIBE_UI_CHUNK_SIZE"] = "25000"
+    }
+
+    func testChunkSizeInput_RejectsNonpositiveValuesAndPersistsPositiveValue() {
+        launchApp()
+        selectRecord(named: "Team Standup")
+        openSettings()
+        switchSettingsTab(to: 1)
+        let field = revealSettingsControl(AID.settingsChunkSize)
+        assertValue(field, equals: "25000")
+
+        XCTAssertTrue(replaceFocusedFieldText(field, with: "0"))
+        field.typeKey(.return, modifierFlags: [])
+        assertValue(field, equals: "25000")
+
+        XCTAssertTrue(replaceFocusedFieldText(field, with: "-1"))
+        switchSettingsTab(to: 0)
+        switchSettingsTab(to: 1)
+        assertValue(revealSettingsControl(AID.settingsChunkSize), equals: "25000")
+
+        savePositiveChunkSize("1234")
+        dismissSettings()
+        openSettings()
+        switchSettingsTab(to: 1)
+        assertValue(revealSettingsControl(AID.settingsChunkSize), equals: "1234")
+    }
+
+    func testLegacyChunkSize_ShowsLocalErrorAndRecoversAfterCorrection() {
+        for size in ["0", "-1"] {
+            app.launchEnvironment["VIBESCRIBE_UI_CHUNK_SIZE"] = size
+            launchApp()
+            selectRecord(named: "Team Standup")
+            switchDetailTab(to: 1)
+            let editor = waitFor(AID.summaryEditor, timeout: 5)
+            let original = textValue(of: editor)
+            waitFor(AID.summarizeButton, timeout: 5).click()
+            let error = chunkErrorElement
+            XCTAssertTrue(error.waitForExistence(timeout: 5), "Stored invalid limit should produce an actionable error")
+            XCTAssertEqual(textValue(of: editor), original, "Invalid settings must preserve the existing summary")
+
+            openSettings()
+            switchSettingsTab(to: 1)
+            savePositiveChunkSize("1234")
+            dismissSettings()
+            requestSummaryAndWaitForChange(from: original)
+            XCTAssertFalse(chunkErrorElement.exists)
+        }
+    }
+
+    func testDisabledChunking_IgnoresStoredZeroLimit() {
+        app.launchEnvironment["VIBESCRIBE_UI_CHUNK_SIZE"] = "0"
+        launchApp()
+        selectRecord(named: "Team Standup")
+        switchDetailTab(to: 1)
+        let original = textValue(of: waitFor(AID.summaryEditor, timeout: 5))
+        openSettings()
+        switchSettingsTab(to: 1)
+        XCTAssertEqual(checkboxValue(AID.settingsChunkToggle), true)
+        revealSettingsControl(AID.settingsChunkToggle).click()
+        XCTAssertEqual(checkboxValue(AID.settingsChunkToggle), false)
+        dismissSettings()
+        requestSummaryAndWaitForChange(from: original)
+        XCTAssertFalse(chunkErrorElement.exists)
+        openSettings()
+        switchSettingsTab(to: 1)
+        revealSettingsControl(AID.settingsChunkToggle).click()
+        assertValue(revealSettingsControl(AID.settingsChunkSize), equals: "0")
+    }
+
+    private func revealSettingsControl(_ identifier: String) -> XCUIElement {
+        let control = waitFor(identifier, timeout: 5)
+        let scrollView = app.scrollViews.containing(.any, identifier: identifier).firstMatch
+        XCTAssertTrue(scrollView.exists, "Settings control should belong to its scroll view")
+        for _ in 0..<8 {
+            if control.isHittable { return control }
+            // Scroll the outer gutter rather than one of the nested prompt editors.
+            scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5))
+                .scroll(byDeltaX: 0, deltaY: -250)
+        }
+        XCTAssertTrue(control.isHittable, "Settings control should be visible before interacting")
+        return control
+    }
+
+    private var chunkErrorElement: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", chunkSizeError)).firstMatch
+    }
+
+    private func savePositiveChunkSize(_ value: String) {
+        let field = revealSettingsControl(AID.settingsChunkSize)
+        XCTAssertTrue(replaceFocusedFieldText(field, with: value))
+        field.typeKey(.return, modifierFlags: [])
+        assertValue(field, equals: value)
+    }
+
+    private func assertValue(_ field: XCUIElement, equals expected: String, file: StaticString = #filePath, line: UInt = #line) {
+        let predicate = NSPredicate { _, _ in self.textValue(of: field) == expected }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: field)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed,
+                       "Expected \(expected), found \(textValue(of: field))", file: file, line: line)
+    }
+
+    private func requestSummaryAndWaitForChange(from previous: String) {
+        let editor = waitFor(AID.summaryEditor, timeout: 5)
+        waitFor(AID.summarizeButton, timeout: 5).click()
+        let predicate = NSPredicate { _, _ in
+            let value = self.textValue(of: editor)
+            return !value.isEmpty && value != previous
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: editor)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 10), .completed)
     }
 }
