@@ -691,13 +691,13 @@ final class RecordProcessingManager: ObservableObject {
             }
             
             if record.name == sanitizedTitle {
-                Logger.info("Generated title matches existing name '\(sanitizedTitle)'; no update needed.", category: .llm)
+                Logger.info("Generated title matches existing name; no update needed.", category: .llm)
                 return
             }
             
             record.name = sanitizedTitle
             try job.modelContext.save()
-            Logger.info("Auto-generated title saved: \(sanitizedTitle)", category: .llm)
+            Logger.info("Auto-generated title saved.", category: .llm)
         } catch {
             Logger.error("Failed to generate title from summary: \(error.localizedDescription)", category: .llm)
         }
@@ -765,9 +765,7 @@ final class RecordProcessingManager: ObservableObject {
             let message = firstChoice["message"] as? [String: Any],
             let content = message["content"] as? String
         else {
-            if let jsonString = String(data: data, encoding: .utf8) {
-                Logger.error("❌ Unexpected LLM response: \(jsonString)", category: .llm)
-            }
+            Logger.error("Unexpected LLM response format.", category: .llm)
             throw RecordProcessingError.invalidResponse
         }
         

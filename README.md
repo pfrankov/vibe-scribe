@@ -8,7 +8,7 @@
 </table>
 
 VibeScribe is a macOS app that records your meetings from any app and turns them into smart summaries using AI.  
-🔒 Privacy first—everything can be done using only local AI models.
+Transcription can run on your Mac. For a fully local workflow, also configure a local summary server; selecting a remote provider sends the corresponding audio or text to that service.
 
 ## Key Features
 - Record a meeting from any app (Zoom, Meet, Teams, Discord, Slack, or others) and get a summary in the same language as the conversation.
@@ -19,17 +19,21 @@ VibeScribe is a macOS app that records your meetings from any app and turns them
 
 ## Quick Start
 
+The processing safeguards described below are new since 1.4.0. Until a newer release is available, build the current source to use them.
+
+Requires macOS 26 or later. Configure a summary model and endpoint in Settings before recording if you want automatic summaries. The default FluidAudio transcription provider downloads its models on first use.
+
 ### Record a meeting
 1. Click the menu bar icon.
 2. Select "Start Recording."
 3. Speak or play audio from your computer.
-4. Click "Stop" when finished.
-5. Get near-instant transcription and a summary.
+4. Stop recording and save it.
+5. VibeScribe transcribes the saved audio and creates a summary with your configured summary model.
 
 ### Transcribe an existing audio or video file
 1. Drag and drop any audio or video file into VibeScribe.
 2. Wait for transcription to complete.
-3. Wait for summarization to complete.
+3. Wait for summarization to complete using your configured summary model.
 
 _Note: You can change the summarization prompt in Settings (Cmd + ,)._
 
@@ -42,39 +46,36 @@ _Note: You can change the summarization prompt in Settings (Cmd + ,)._
 
 ### Download from GitHub Releases
 1. Go to the [Releases page](https://github.com/pfrankov/vibe-scribe/releases).
-2. Download the latest `.dmg` file.
-3. Open the `.dmg` file.
+2. Download `VibeScribe.zip`.
+3. Extract the ZIP archive.
 4. Drag VibeScribe to your Applications folder.
 
-### 🚨 First Launch
-Because this app is not signed by Apple, you need to do this:
-1. Right-click VibeScribe in Applications.
-2. Select "Open."
-3. Click "Open" in the warning dialog.
-4. Or go to System Settings → Privacy & Security → allow the app.
+### First Launch
+The 1.4.0 release uses ad-hoc signing and is not notarized. If macOS blocks the app, see [Apple's guidance for opening apps safely](https://support.apple.com/en-us/102445).
 
-The app will ask for these permissions:
-- Microphone — to record your voice
-- Screen Recording — to capture system audio
+The app requests microphone access on launch. Capturing system audio requests the corresponding permission when recording starts. The optional Native provider also requires Speech Recognition authorization.
 
 ## 1️⃣ Transcription Setup
 
-On macOS 26 or later the default `Native` provider handles speech-to-text locally. Make sure **System Settings → Keyboard → Dictation → On-Device** is enabled and the required locale is downloaded. Follow the steps below only if you prefer a server workflow or your Mac is running an earlier release.
+The **Default (FluidAudio)** provider runs transcription on your Mac and downloads its models on first use. It needs no Whisper server or API key.
+
+Select **Native** in Settings to use Apple's on-device speech recognition and choose a supported language. Required speech assets may need to download. If Native is unavailable or permission is denied, VibeScribe displays the error; it does not switch to a remote service. Select another provider explicitly to retry elsewhere.
+
+For server-based transcription, choose one of the following options.
 
 ### Option 1: WhisperServer (recommended, private)
 
 Download and run [WhisperServer](https://github.com/pfrankov/whisper-server).
 
 After running WhisperServer:
-1. Open VibeScribe Settings.
-2. Set Whisper Base URL: `http://localhost:12017/v1/`
-3. Leave the API key empty (not needed for a local server).
-4. Set Model to `parakeet-tdt-0.6b-v3`.
+1. Open VibeScribe Settings and select the **WhisperServer** provider.
+2. This provider uses `http://localhost:12017/v1/` without an API key.
+3. Select a model served by WhisperServer, such as `parakeet-tdt-0.6b-v3`.
 
 ### Option 2: OpenAI Whisper API
 If you have an OpenAI API key:
 
-1. Open VibeScribe Settings.
+1. Open VibeScribe Settings and select **Whisper compatible API**.
 2. Set Whisper Base URL: `https://api.openai.com/v1/`
 3. Create a new [API key](https://platform.openai.com/api-keys).
 4. Enter your API key.
@@ -82,7 +83,7 @@ If you have an OpenAI API key:
 
 ## 2️⃣ Summarization Setup
 
-VibeScribe can create smart summaries using AI. You need an OpenAI-compatible server.
+Summaries and automatic titles use the separate OpenAI-compatible endpoint in the Summary settings. Select a model and a valid HTTP or HTTPS endpoint before processing. Missing configuration produces a local error and preserves existing content. Local services can use an empty API key; remote services may require one.
 
 ### Option 1: Ollama (recommended, private)
 1. Install [Ollama](https://ollama.com/download).
@@ -107,9 +108,8 @@ _Note: You can use any OpenAI-compatible provider, such as OpenRouter._
 If you want to build VibeScribe yourself:
 
 ### Requirements
-- macOS 14.0 or later
-- Xcode 15.0 or later
-- Swift 5.9 or later
+- macOS 26.0 or later
+- Xcode 26.3 and its bundled Swift compiler are the validated CI toolchain for the pinned dependencies
 
 ### Steps
 
@@ -121,15 +121,16 @@ cd vibe-scribe
 
 2. Open the project in Xcode.
 
-3. Select your development team:
-   - Click the project in Xcode
-   - Select the VibeScribe target
-   - Go to "Signing & Capabilities"
-   - Choose your team
+3. Select the **VibeScribe** scheme. The project uses manual ad-hoc signing for local macOS builds.
 
-4. Build and run:
-   - Press `Cmd + R` to build and run
-   - Or use the menu: Product → Run
+4. Press `Cmd + R` to build and run, or use Product → Run.
+
+To run the same unsigned Release compilation as CI:
+```bash
+xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribe -configuration Release -destination 'platform=macOS' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build
+```
+
+The validation workflow also runs synthetic audio, Unicode, processing-configuration, and content-logging regressions plus targeted UI tests. Synthetic request tests intercept requests in process; they do not test real speech permissions, microphones, or remote APIs.
 
 ## License
 MIT

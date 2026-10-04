@@ -44,7 +44,9 @@ jobs:
         run: ./scripts/run_invalid_chunk_size_tests.sh
       - name: Reproduce implicit processing requests
         run: ./scripts/run_processing_privacy_tests.sh e2d9fb1af85a59d9f0b4189e10f45474a3d918f3
-      - name: Verify processing request boundaries
+      - name: Reproduce direct generated-output logging
+        run: ./scripts/run_processing_privacy_tests.sh b33131bbcf499cd05040759007db69e01c990def --expect-legacy-output-logs
+      - name: Verify processing request boundaries and output logging
         run: ./scripts/run_processing_privacy_tests.sh
       - name: Build unmodified Release sources
         run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribe -configuration Release -destination 'platform=macOS' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build

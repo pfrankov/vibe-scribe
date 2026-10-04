@@ -14,10 +14,31 @@ struct AppLanguage {
 }
 enum LogCategory { case llm, transcription, security }
 struct Logger {
-    static func info(_ message: String, category: LogCategory) {}
-    static func debug(_ message: String, category: LogCategory) {}
-    static func warning(_ message: String, category: LogCategory) {}
-    static func error(_ message: String, error: Error? = nil, category: LogCategory) {}
+    private static let lock = NSLock()
+    private static var captured: [String] = []
+
+    static func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        captured.removeAll()
+    }
+    static func messages() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return captured
+    }
+    private static func record(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        captured.append(message)
+    }
+    static func info(_ message: String, category: LogCategory) { record(message) }
+    static func debug(_ message: String, category: LogCategory) { record(message) }
+    static func warning(_ message: String, category: LogCategory) { record(message) }
+    static func error(_ message: String, error: Error? = nil, category: LogCategory) {
+        let description = error?.localizedDescription ?? ""
+        record(description.isEmpty ? message : "\(message) - \(description)")
+    }
 }
 struct UITestMockPipeline {
     static var isEnabled = false
@@ -28,14 +49,59 @@ struct UITestMockPipeline {
         return "SYNTHETIC_MOCK_SUMMARY"
     }
 }
-final class ModelContext { func save() throws {} }
+final class ModelContext {
+    private(set) var saveCount = 0
+    func save() throws { saveCount += 1 }
+}
 final class Record { var name = "SYNTHETIC_RECORD" }
+
+// No FluidAudio model download or recognition occurs. The complete production
+// manager still runs its preparation, result handling, formatting call, and logs.
+enum SyntheticASR {
+    static let content = "SYNTHETIC_LOCAL_CONTENT_SECRET"
+}
+enum AsrModelVersion { case v3 }
+enum ASRSource { case system }
+struct ASRTokenTiming {
+    let token: String
+    let startTime: Double
+    let endTime: Double
+}
+struct ASRResult {
+    let text: String
+    let tokenTimings: [ASRTokenTiming]?
+}
+struct AsrModels {
+    static func downloadAndLoad(version: AsrModelVersion) async throws -> AsrModels { AsrModels() }
+}
+struct AsrManager {
+    func initialize(models: AsrModels) async throws {}
+    func transcribe(_ url: URL, source: ASRSource) async throws -> ASRResult {
+        ASRResult(text: SyntheticASR.content, tokenTimings: [])
+    }
+}
+struct TranscriptToken {
+    let token: String
+    let startTime: Double
+    let endTime: Double
+}
+enum TranscriptFormatter {
+    static func formattedText(rawText: String, tokens: [TranscriptToken]) -> String { rawText }
+}
 
 // Fail closed: the original URL never reaches URLSession. The custom scheme
 // cannot use the built-in HTTP transport even if protocol registration fails.
 final class SinkProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var handled = 0
+    private static var statusCode = 401
+    private static var responseBody = Data("SYNTHETIC_UNAUTHORIZED".utf8)
+    static func respond(statusCode: Int, body: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        Self.statusCode = statusCode
+        responseBody = body
+    }
     static func count() -> Int {
         lock.lock()
         defer { lock.unlock() }
@@ -49,11 +115,13 @@ final class SinkProtocol: URLProtocol {
         precondition(request.url?.scheme == "vibescribe-audit")
         Self.lock.lock()
         Self.handled += 1
+        let statusCode = Self.statusCode
+        let body = Self.responseBody
         Self.lock.unlock()
-        let response = HTTPURLResponse(url: request.url!, statusCode: 401,
+        let response = HTTPURLResponse(url: request.url!, statusCode: statusCode,
                                        httpVersion: "HTTP/1.1", headerFields: [:])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data("SYNTHETIC_UNAUTHORIZED".utf8))
+        client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
@@ -92,6 +160,7 @@ final class SinkProtocol: URLProtocol {
         let file = URL(fileURLWithPath: CommandLine.arguments[1])
         try audio.write(to: file)
         let legacy = CommandLine.arguments.contains("--expect-legacy-dispatch")
+        let legacyOutputLogs = legacy || CommandLine.arguments.contains("--expect-legacy-output-logs")
         let harness = Harness()
 
         try await checkUnconfiguredSummaryAndTitle(harness, legacy: legacy)
@@ -101,11 +170,12 @@ final class SinkProtocol: URLProtocol {
             try await checkInvalidConfiguration(harness)
             try await checkMockIsolation(harness)
         }
+        try await checkOutputLogging(harness, file: file, legacy: legacyOutputLogs)
         precondition(CaptureSession.totalRequests > 0, "Positive request controls must execute")
         precondition(SinkProtocol.count() == CaptureSession.totalRequests,
                      "Every dispatched request must be handled in process")
         print("PASS: \(SinkProtocol.count()) dispatches intercepted on a non-network scheme; no external destination used")
-        print("Scope: extracted request/routing code; stubbed engines/persistence; no real permission prompt or full app pipeline")
+        print("Scope: production request/routing/output-log code; stubbed engines/formatter/persistence; no real permission prompt, OSLog storage, or full app pipeline")
     }
 
     @MainActor private static func failure(_ action: () async throws -> String) async -> Error {
@@ -277,6 +347,73 @@ final class SinkProtocol: URLProtocol {
         precondition(record.name == "SYNTHETIC_RECORD", "Mock auto-title should retain the current name")
         precondition(CaptureSession.requests.isEmpty, "Mock summary/title must not dispatch")
         print("PASS: mock summary still validates configuration; mock auto-title preserves name without dispatch")
+    }
+
+    @MainActor private static func checkOutputLogging(_ harness: Harness, file: URL, legacy: Bool) async throws {
+        precondition(!UITestMockPipeline.isEnabled)
+        defer {
+            SinkProtocol.respond(statusCode: 401, body: Data("SYNTHETIC_UNAUTHORIZED".utf8))
+        }
+
+        Logger.reset()
+        CaptureSession.requests = []
+        let localTranscript = try await DefaultTranscriptionManager.shared.transcribeAudio(at: file)
+        precondition(localTranscript == SyntheticASR.content, "Removing output logs must preserve the returned transcript")
+        precondition(CaptureSession.requests.isEmpty, "Stubbed local recognition must not dispatch")
+        verifyContentLog(marker: SyntheticASR.content, legacy: legacy,
+                         retainedDiagnostic: "Finished FluidAudio transcription")
+
+        let titleMarker = "SYNTHETIC_TITLE_SECRET"
+        let settings = AppSettings()
+        settings.openAIBaseURL = "https://summary.example.invalid/v1/"
+        settings.openAIModel = "synthetic-model"
+        settings.useChunking = false
+        let successBody = try JSONSerialization.data(withJSONObject: [
+            "choices": [["message": ["content": "\"\(titleMarker)\""]]],
+        ])
+        SinkProtocol.respond(statusCode: 200, body: successBody)
+
+        Logger.reset()
+        CaptureSession.requests = []
+        let record = Record()
+        let savedCount = await harness.title(summary, record: record, settings: settings)
+        precondition(record.name == titleMarker && savedCount == 1,
+                     "A generated title must still be sanitized and saved exactly once")
+        try verifyChatRequest(url: "https://summary.example.invalid/v1/chat/completions", marker: summary, model: "synthetic-model")
+        verifyContentLog(marker: titleMarker, legacy: legacy, retainedDiagnostic: "Auto-generated title saved")
+
+        Logger.reset()
+        CaptureSession.requests = []
+        let unchangedCount = await harness.title(summary, record: record, settings: settings)
+        precondition(record.name == titleMarker && unchangedCount == 0,
+                     "An unchanged generated title must retain its existing name without saving")
+        try verifyChatRequest(url: "https://summary.example.invalid/v1/chat/completions", marker: summary, model: "synthetic-model")
+        verifyContentLog(marker: titleMarker, legacy: legacy, retainedDiagnostic: "Generated title matches existing name")
+
+        let responseMarker = "SYNTHETIC_RESPONSE_SECRET"
+        // Valid JSON with an unexpected response shape reaches the production
+        // format-error branch, unlike invalid JSON rejected by the decoder.
+        let malformedBody = try JSONSerialization.data(withJSONObject: ["unexpected": responseMarker])
+        SinkProtocol.respond(statusCode: 200, body: malformedBody)
+        Logger.reset()
+        CaptureSession.requests = []
+        let error = await failure { try await harness.summary(transcript, settings: settings) }
+        precondition(error.localizedDescription == "unexpected.response.format.from.llm.server",
+                     "Malformed response must preserve the existing error behavior")
+        precondition(record.name == titleMarker)
+        try verifyChatRequest(url: "https://summary.example.invalid/v1/chat/completions", marker: transcript, model: "synthetic-model")
+        verifyContentLog(marker: responseMarker, legacy: legacy, retainedDiagnostic: "Unexpected LLM response")
+
+        print(legacy
+              ? "REPRODUCED: transcript, saved/unchanged title, and malformed-response content appear in application log messages"
+              : "PASS: direct transcript/title/response diagnostics omit content; return, save, no-change, and error behavior retained")
+    }
+
+    private static func verifyContentLog(marker: String, legacy: Bool, retainedDiagnostic: String) {
+        let messages = Logger.messages()
+        precondition(messages.contains { $0.contains(retainedDiagnostic) }, "Retain the non-content diagnostic")
+        precondition(messages.contains(where: { $0.contains(marker) }) == legacy,
+                     legacy ? "Historical content logging was not reproduced" : "Generated content reached a log message")
     }
 
     @MainActor private static func verifyChatRequest(url: String, marker: String, model: String) throws {

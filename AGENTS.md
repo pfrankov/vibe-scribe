@@ -1,7 +1,7 @@
 # VibeScribe Agent Handbook
 
 ## App Overview
-- VibeScribe is a macOS 15+ SwiftUI app that records microphone and optional system audio, transcribes it with Whisper-compatible servers, and generates AI summaries through OpenAI-style chat APIs.  
+- VibeScribe is a macOS 26+ SwiftUI app that records microphone and optional system audio, transcribes it locally with FluidAudio (default) or Native speech recognition, or through an explicitly selected Whisper-compatible service, and generates AI summaries through OpenAI-style chat APIs.
 - Status bar integration plus a floating recording overlay keeps the workflow lightweight while SwiftData persists recordings, settings, and generated content.
 
 ## Code Layout
@@ -15,11 +15,12 @@
 ## Core Workflows
 - **Recording pipeline** – `CombinedAudioRecorderManager` orchestrates mic + system capture, merges sources via `AudioUtils`, and drives the Recording Overlay UI.  
 - **File import** – `AudioFileImportManager` handles drag-and-drop, format conversion, duration validation, SwiftData persistence, and UI notifications.  
-- **Processing pipeline** – `RecordProcessingManager` enqueues transcription (prefers SSE streaming via `WhisperTranscriptionManager`, falls back to polling) and summarization (chunking through `TextChunker`, OpenAI-compatible chat calls, optional auto-title).  
+- **Processing pipeline** – `RecordProcessingManager` enqueues local or explicitly configured service transcription (Whisper services prefer SSE streaming and fall back to a regular non-streaming request only when SSE is unsupported) and summarization (chunking through `TextChunker`, OpenAI-compatible chat calls, optional auto-title).
 - **Playback & review** – `AudioPlayerManager`, waveform caching, and `RecordDetailView` provide scrubber, speed cycling, inline rename/download, and manual retry controls.  
 - **Settings & discovery** – `SettingsView` edits `AppSettings`, tests endpoints, and fetches model lists through `ModelService`.
 
 ## Build & Run
+- Xcode 26.3 and its bundled compiler are the validated CI toolchain for the pinned dependencies.
 - Open `VibeScribe.xcodeproj` and run the **VibeScribe** scheme on macOS.  
 - CLI build: `xcodebuild -scheme VibeScribe -configuration Debug -destination 'platform=macOS' build`.  
 - UI tests live in `VibeScribeUITests/`; add unit XCTest targets under `VibeScribeTests/` when you introduce coverage.
@@ -66,7 +67,9 @@
 
 ## Security & Privacy
 - Never hardcode credentials; rely on `AppSettings` and sanitize API keys with `SecurityUtils`.  
-- Microphone and ScreenCaptureKit permissions are requested on launch—do not bypass the macOS permission dialogs.  
+- Microphone access is requested on launch; system-audio capture uses a Core Audio tap when recording starts. Native transcription separately requests Speech Recognition authorization. Do not bypass permission dialogs.
+- Native recognition failures must not silently dispatch audio to a remote service. Summaries and titles require a selected model and valid HTTP(S) endpoint; intentionally keyless local services remain supported.
+- Keep transcript and generated-output contents out of diagnostics; retain counts and status instead.
 - Respect local storage: audio lives in `~/Library/Application Support/<bundleID>/Recordings`, waveforms under `WaveformCache`.
 
 ## Helpful Utilities

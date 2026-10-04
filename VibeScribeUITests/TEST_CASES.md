@@ -629,3 +629,9 @@ The chunk-size field uses `settingsChunkSize`; its input, focus-loss, reopen, an
 1. Invalid endpoint is rejected before summary processing or dispatch.
 
 Native request-boundary regressions additionally exercise the actual provider-selection code and summary/title helpers with injected local-engine errors and an in-process intercepted transport. Native permission denial or unavailable recognizer must propagate without any remote fallback. Explicit remote transcription and configured keyless local summary/title calls must retain their selected destinations. These fixtures do not request macOS permissions or send audio/transcript data externally. Mock UI flows deliberately skip automatic titles; the real title request helper is covered by the native intercepted tests.
+
+
+## Generated-content logging contract (native synthetic regression)
+- Preconditions: isolated transcription engine returns a unique synthetic transcript; an intercepted summary service returns a unique generated title or malformed JSON response. No real recording, model download, or external request is used.
+- Steps: complete transcription; generate a new title; repeat with that title already stored; process a response with missing required fields; capture application Logger messages.
+- Expected result: returned transcript, saved title, unchanged-title handling, and response errors retain their existing behavior. Logs contain status/count diagnostics without the transcript, generated title, or response-body markers. This changes diagnostics only; existing UI behavior/tests remain unchanged.
