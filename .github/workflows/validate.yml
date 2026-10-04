@@ -52,3 +52,24 @@ jobs:
         run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribe -configuration Release -destination 'platform=macOS' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build
       - name: Test settings and isolated processing UI
         run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribeUITests -configuration Debug -destination 'platform=macOS' -disableAutomaticPackageResolution -only-testing:VibeScribeUITests/ChunkSizeValidationTests -only-testing:VibeScribeUITests/SummaryConfigurationTests -only-testing:VibeScribeUITests/MockPipelineFlowTests/testMockFlow_NoSpeakers_EndToEndFromFirstLaunchToManualSummaryEdit -only-testing:VibeScribeUITests/MockPipelineFlowTests/testMockFlow_ProviderMatrix_TranscriptionReflectsSelectedProvider -only-testing:VibeScribeUITests/MockPipelineFlowTests/testMockFlow_AutoSummaryError_ManualRetryWithAnotherModelSucceeds CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual test
+
+  package:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Package and verify universal release candidate
+        run: ./scripts/package_release.sh "$RUNNER_TEMP/vibescribe-release" 1.4.1 4
+      - name: Upload verified release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: VibeScribe-release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/vibescribe-release/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
