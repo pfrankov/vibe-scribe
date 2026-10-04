@@ -7,6 +7,8 @@ persistence are stubbed. The production summary helpers, provider-selection
 block, regular-request construction, and multipart builder remain unchanged.
 Only transport dispatch and the Combine-to-async bridge are adapted. Every
 request is captured and rewritten to a non-network scheme by the Swift probe.
+DefaultTranscriptionManager is compiled in full after one checked FluidAudio
+import removal; inert engine/formatter types replace that external dependency.
 This does not exercise real speech engines, permission prompts, or SwiftData.
 """
 import hashlib
@@ -47,6 +49,7 @@ def main():
         "VibeScribe/Utils/TextChunker.swift",
         "VibeScribe/Utils/URLBuilder.swift",
         "VibeScribe/Utils/SecurityUtils.swift",
+        "VibeScribe/Managers/DefaultTranscriptionManager.swift",
     ]
     sources = {}
     for path in paths:
@@ -55,6 +58,7 @@ def main():
 
     model = replace_once(sources[paths[0]], "import SwiftData\n", "")
     model = replace_once(model, "@Model\n", "")
+    default_transcription = replace_once(sources[paths[6]], "import FluidAudio\n", "")
     manager, whisper = sources[paths[1]], sources[paths[2]]
     snapshot = section(manager, "    struct SettingsSnapshot: Equatable {", "    private enum Operation")
     errors = section(manager, "    private enum RecordProcessingError: LocalizedError {", "    // MARK: - Singleton")
@@ -80,6 +84,7 @@ def main():
     (output / "SourceParts.swift").write_text(IMPORTS + "\n".join([
         model, sources[paths[3]], sources[paths[4]], sources[paths[5]], transcription_errors,
     ]))
+    (output / "DefaultTranscriptionManager.swift").write_text(default_transcription)
     (output / "PipelineParts.swift").write_text(IMPORTS + snapshot + errors + """
 struct ProcessingJob { let settings: SettingsSnapshot; let modelContext = ModelContext() }
 @MainActor final class Harness {
@@ -89,8 +94,11 @@ struct ProcessingJob { let settings: SettingsSnapshot; let modelContext = ModelC
     func summary(_ text: String, settings: AppSettings) async throws -> String {
         try await generateSummary(for: text, job: ProcessingJob(settings: SettingsSnapshot(settings: settings)))
     }
-    func title(_ text: String, record: Record, settings: AppSettings) async {
-        await maybeGenerateTitle(for: record, summary: text, job: ProcessingJob(settings: SettingsSnapshot(settings: settings)))
+    @discardableResult
+    func title(_ text: String, record: Record, settings: AppSettings) async -> Int {
+        let job = ProcessingJob(settings: SettingsSnapshot(settings: settings))
+        await maybeGenerateTitle(for: record, summary: text, job: job)
+        return job.modelContext.saveCount
     }
     func route(settings: AppSettings, fileURL: URL, preferStreaming: Bool = false) async throws -> String {
         let job = ProcessingJob(settings: SettingsSnapshot(settings: settings))

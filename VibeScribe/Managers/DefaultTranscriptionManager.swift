@@ -45,7 +45,6 @@ actor DefaultTranscriptionManager {
                 "Finished FluidAudio transcription for \(fileName) in \(formatElapsed(elapsed)); tokens: \(tokenCount); characters: \(trimmed.count)",
                 category: .transcription
             )
-            Logger.info("FluidAudio transcript for \(fileName): \(trimmed)", category: .transcription)
 
             return trimmed
         } catch let error as TranscriptionError {
