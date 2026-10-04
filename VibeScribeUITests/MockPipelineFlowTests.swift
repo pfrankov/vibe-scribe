@@ -1380,22 +1380,22 @@ final class MockPipelineFlowTests: VibeScribeUITestCase {
 
     private func focusTextEditor(identifier: String, timeout: TimeInterval) -> XCUIElement {
         let editor = waitFor(identifier, timeout: timeout)
-        for _ in 0..<4 {
+        let scrollView = app.scrollViews.containing(.any, identifier: identifier).firstMatch
+        for _ in 0..<8 {
             _ = dismissInterferingDialogsIfNeeded()
             app.activate()
             let target = actualTextInput(for: editor)
-            if target.exists {
-                if target.isHittable {
-                    target.click()
-                    return target
-                }
-                let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                center.click()
+            if target.exists && target.isHittable {
+                target.click()
                 return target
             }
-            _ = editor.waitForExistence(timeout: 0.2)
+            guard scrollView.exists else { break }
+            // Reveal the editor through the outer gutter; its offscreen center
+            // can lie outside the app window and cannot acquire keyboard focus.
+            scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5))
+                .scroll(byDeltaX: 0, deltaY: -250)
         }
-        XCTFail("Editor '\(identifier)' should exist and accept focus")
+        XCTFail("Editor '\(identifier)' should be visible and accept focus")
         return actualTextInput(for: editor)
     }
 

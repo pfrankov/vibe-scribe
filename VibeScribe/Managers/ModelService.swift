@@ -26,6 +26,12 @@ class ModelService: ObservableObject {
     // MARK: - Public Methods
     
     func loadWhisperModels(baseURL: String, apiKey: String) {
+        if UITestMockPipeline.isEnabled {
+            whisperModels = UITestMockPipeline.mockWhisperModels
+            whisperModelsError = nil
+            isLoadingWhisperModels = false
+            return
+        }
         loadModels(
             baseURL: baseURL,
             apiKey: apiKey,
@@ -36,6 +42,12 @@ class ModelService: ObservableObject {
     }
     
     func loadOpenAIModels(baseURL: String, apiKey: String) {
+        if UITestMockPipeline.isEnabled {
+            openAIModels = UITestMockPipeline.mockSummaryModels
+            openAIModelsError = nil
+            isLoadingOpenAIModels = false
+            return
+        }
         loadModels(
             baseURL: baseURL,
             apiKey: apiKey,

@@ -347,6 +347,12 @@ struct VibeScribeApp: App {
             settings.openAIBaseURL = "http://127.0.0.1:9/v1/"
             settings.whisperBaseURL = "http://127.0.0.1:9/v1/"
         }
+        if let model = UITestMockPipeline.summaryModelOverride {
+            settings.openAIModel = model
+        }
+        if let baseURL = UITestMockPipeline.summaryBaseURLOverride {
+            settings.openAIBaseURL = baseURL
+        }
         context.insert(settings)
 
         let tag1 = Tag(name: "meeting")

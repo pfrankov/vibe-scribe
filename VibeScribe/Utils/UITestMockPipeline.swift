@@ -123,7 +123,18 @@ enum UITestMockPipeline {
     }
 
     static var defaultSummaryModel: String? {
-        currentConfig?.defaultSummaryModel
+        if summaryModelOverride != nil { return nil }
+        return currentConfig?.defaultSummaryModel
+    }
+
+    static var summaryModelOverride: String? {
+        guard isEnabled else { return nil }
+        return ProcessInfo.processInfo.environment["VIBESCRIBE_UI_SUMMARY_MODEL"]
+    }
+
+    static var summaryBaseURLOverride: String? {
+        guard isEnabled else { return nil }
+        return ProcessInfo.processInfo.environment["VIBESCRIBE_UI_SUMMARY_BASE_URL"]
     }
 
     static var minimumRecordingDuration: TimeInterval {

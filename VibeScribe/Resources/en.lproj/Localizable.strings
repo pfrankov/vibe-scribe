@@ -238,3 +238,5 @@
 "enter.value.ellipsis" = "Enter value...";
 
 "chunk.size.must.be.greater.than.zero.update.it.in.settings" = "Chunk size must be greater than zero. Update it in Settings.";
+
+"choose.a.summary.model.and.a.valid.http.or.https.endpoint.in.settings" = "Choose a summary model and a valid HTTP or HTTPS endpoint in Settings.";

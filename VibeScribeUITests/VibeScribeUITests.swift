@@ -61,6 +61,7 @@ private enum AID {
     static let settingsTitleToggle = "settingsTitleToggle"
     static let settingsChunkToggle = "settingsChunkToggle"
     static let settingsChunkSize = "settingsChunkSize"
+    static let transcriptionEditor = "transcriptionEditor"
     static let summaryEditor = "summaryEditor"
     static let uiTestAppRootRefreshStatus = "uiTestAppRootRefreshStatus"
     static let uiTestLaunchPermissionStatus = "uiTestLaunchPermissionStatus"
@@ -1901,5 +1902,64 @@ final class ChunkSizeValidationTests: VibeScribeUITestCase {
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: editor)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 10), .completed)
+    }
+}
+
+final class SummaryConfigurationTests: VibeScribeUITestCase {
+    private let configurationError = "Choose a summary model and a valid HTTP or HTTPS endpoint in Settings."
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        app.launchEnvironment["VIBESCRIBE_UI_USE_MOCK_PIPELINE"] = "1"
+        app.launchEnvironment["VIBESCRIBE_UI_LANGUAGE_CODE"] = "en"
+        app.launchEnvironment["VIBESCRIBE_UI_SUMMARY_BASE_URL"] = "http://127.0.0.1:9/v1/"
+    }
+
+    func testSummaryConfiguration_MissingModelPreservesContentAndRecovers() {
+        for model in ["", " \t "] {
+            app.launchEnvironment["VIBESCRIBE_UI_SUMMARY_MODEL"] = model
+            launchApp()
+            let original = requestSummaryAndExpectConfigurationError()
+            let picker = waitFor(AID.summaryModelPicker, timeout: 5)
+            picker.click()
+            let modelItem = app.menuItems["mock-summary-v2"]
+            XCTAssertTrue(modelItem.waitForExistence(timeout: 3))
+            modelItem.click()
+            waitFor(AID.summarizeButton, timeout: 5).click()
+            let editor = waitFor(AID.summaryEditor, timeout: 5)
+            let changed = NSPredicate { _, _ in
+                let text = self.textValue(of: editor)
+                return text != original && text.contains("mock-summary-v2")
+            }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: changed, object: editor)], timeout: 10), .completed)
+            XCTAssertFalse(configurationErrorElement.exists)
+        }
+    }
+
+    func testSummaryConfiguration_InvalidEndpointPreservesContent() {
+        app.launchEnvironment["VIBESCRIBE_UI_SUMMARY_MODEL"] = "mock-summary-v2"
+        app.launchEnvironment["VIBESCRIBE_UI_SUMMARY_BASE_URL"] = "not-an-endpoint"
+        launchApp()
+        _ = requestSummaryAndExpectConfigurationError()
+    }
+
+    private func requestSummaryAndExpectConfigurationError() -> String {
+        selectRecord(named: "Team Standup")
+        switchDetailTab(to: 0)
+        let transcription = textValue(of: waitFor(AID.transcriptionEditor, timeout: 5))
+        switchDetailTab(to: 1)
+        let editor = waitFor(AID.summaryEditor, timeout: 5)
+        let original = textValue(of: editor)
+        waitFor(AID.summarizeButton, timeout: 5).click()
+        XCTAssertTrue(configurationErrorElement.waitForExistence(timeout: 5))
+        XCTAssertEqual(textValue(of: editor), original)
+        switchDetailTab(to: 0)
+        XCTAssertEqual(textValue(of: waitFor(AID.transcriptionEditor, timeout: 5)), transcription)
+        switchDetailTab(to: 1)
+        return original
+    }
+
+    private var configurationErrorElement: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", configurationError)).firstMatch
     }
 }

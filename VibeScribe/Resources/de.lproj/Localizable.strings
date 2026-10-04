@@ -239,3 +239,5 @@
 "enter.value.ellipsis" = "Wert eingeben...";
 
 "chunk.size.must.be.greater.than.zero.update.it.in.settings" = "Die Blockgröße muss größer als null sein. Bitte in den Einstellungen ändern.";
+
+"choose.a.summary.model.and.a.valid.http.or.https.endpoint.in.settings" = "Wählen Sie in den Einstellungen ein Zusammenfassungsmodell und einen gültigen HTTP- oder HTTPS-Endpunkt.";
