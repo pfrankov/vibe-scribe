@@ -239,3 +239,5 @@
 "enter.value.ellipsis" = "Введите значение...";
 
 "chunk.size.must.be.greater.than.zero.update.it.in.settings" = "Размер фрагмента должен быть больше нуля. Измените его в настройках.";
+
+"choose.a.summary.model.and.a.valid.http.or.https.endpoint.in.settings" = "Выберите модель для резюме и корректный адрес HTTP или HTTPS в настройках.";

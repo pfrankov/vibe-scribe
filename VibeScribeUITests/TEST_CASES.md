@@ -1,6 +1,6 @@
 # VibeScribe UI Test Cases
 
-> **37 automated UI tests** across 9 test classes.
+> **39 automated UI tests** across 10 test classes.
 > Platform: macOS (XCUITest).
 > Modes: seeded library (`--uitesting`) + empty onboarding + mock end-to-end pipeline (`--uitesting --empty-state` + mock env).
 >
@@ -8,7 +8,7 @@
 > If it diverges from UI test sources or attached `AccessibilityID` controls, fix both in the same commit.
 >
 > **Sync rule**: every `func test*` in `VibeScribeUITests/*.swift` must have a case below.
-> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **37**.
+> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **39**.
 > Validation command: `./scripts/validate_ui_test_cases.sh`.
 
 ## Test Class Matrix
@@ -22,6 +22,7 @@
 | `DemoScreenshotTests` | Per-test launch | Executive demo screenshot state (`--uitesting` + screenshot env) | 1 |
 | `DeleteFlowTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `StateTransitionTests` | Per-test launch | Seeded data (destructive) | 1 |
+| `SummaryConfigurationTests` | Per-test launch | In-memory settings + isolated mock services | 2 |
 | `ChunkSizeValidationTests` | Per-test launch | In-memory settings + mock summary | 3 |
 | `MockPipelineFlowTests` | Per-test launch | First-run empty state + mocked recording/transcription/summary/diarization | 18 |
 
@@ -316,8 +317,8 @@ Elements intentionally out of fast UI automation scope:
 10. Verify playback controls: play/pause, skip state, speed button.
 11. Scrub recorded waveform and verify current time changes.
 12. Verify record title remains visible in detail view.
-13. Edit transcription, switch summary model, run summarize, verify summary changed for selected model.
-14. Edit summary text and verify persisted value remains after tab switch.
+13. Scroll the detail pane until the transcription editor is hittable, edit transcription, switch summary model, run summarize, verify summary changed for selected model.
+14. Reveal the summary editor before editing and verify persisted value remains after tab switch.
 - Expected result:
 1. Full user journey from first launch to edited summary passes end-to-end on mocked pipeline, including audio playback/scrubbing.
 
@@ -600,3 +601,31 @@ Initial native reproduction uses `VibeScribeTests/InvalidChunkSizeProbe.swift` a
 - Expected result: summary succeeds without the chunk-size error; the unused stored limit does not change
 
 The chunk-size field uses `settingsChunkSize`; its input, focus-loss, reopen, and recovery paths are covered by `ChunkSizeValidationTests`.
+
+
+## SummaryConfigurationTests — 2 cases
+
+### VS-CONFIG-001 — Missing Summary Model Fails Locally and Recovers
+- Method: `testSummaryConfiguration_MissingModelPreservesContentAndRecovers`
+- Preconditions:
+1. In-memory seeded transcript and existing summary; summary model is empty or whitespace; valid loopback endpoint, empty API key.
+2. Mock model discovery, transcription, summary, and automatic title paths cannot contact external services.
+- Steps:
+1. Open the seeded record and request a summary for each invalid model.
+2. Check the actionable configuration error and unchanged existing summary and transcript.
+3. Select a configured mock summary model and retry.
+- Expected result:
+1. Missing model fails before dispatch and preserves content; selecting a model permits the existing keyless summary flow.
+
+### VS-CONFIG-002 — Invalid Summary Endpoint Fails Locally
+- Method: `testSummaryConfiguration_InvalidEndpointPreservesContent`
+- Preconditions:
+1. In-memory seeded transcript and existing summary; nonblank summary model and invalid endpoint.
+2. All mock services are isolated from external transmission.
+- Steps:
+1. Request a summary and inspect the visible configuration error.
+2. Verify the existing summary and transcript are unchanged.
+- Expected result:
+1. Invalid endpoint is rejected before summary processing or dispatch.
+
+Native request-boundary regressions additionally exercise the actual provider-selection code and summary/title helpers with injected local-engine errors and an in-process intercepted transport. Native permission denial or unavailable recognizer must propagate without any remote fallback. Explicit remote transcription and configured keyless local summary/title calls must retain their selected destinations. These fixtures do not request macOS permissions or send audio/transcript data externally. Mock UI flows deliberately skip automatic titles; the real title request helper is covered by the native intercepted tests.

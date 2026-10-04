@@ -239,3 +239,5 @@
 "enter.value.ellipsis" = "输入值...";
 
 "chunk.size.must.be.greater.than.zero.update.it.in.settings" = "分块大小必须大于零。请在设置中修改。";
+
+"choose.a.summary.model.and.a.valid.http.or.https.endpoint.in.settings" = "请在设置中选择摘要模型并填写有效的 HTTP 或 HTTPS 端点。";

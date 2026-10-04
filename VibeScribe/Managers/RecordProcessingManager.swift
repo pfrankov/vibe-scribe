@@ -130,8 +130,8 @@ final class RecordProcessingManager: ObservableObject {
         case missingAudioFile
         case emptyCleanText
         case invalidChunkSize
+        case summaryNotConfigured
         case summaryEmpty
-        case invalidURL
         case invalidResponse
         case openAIHTTPError(Int)
         case chunkFailed(Int, String)
@@ -146,10 +146,10 @@ final class RecordProcessingManager: ObservableObject {
                 return AppLanguage.localized("transcription.text.is.empty.after.processing")
             case .invalidChunkSize:
                 return AppLanguage.localized("chunk.size.must.be.greater.than.zero.update.it.in.settings")
+            case .summaryNotConfigured:
+                return AppLanguage.localized("choose.a.summary.model.and.a.valid.http.or.https.endpoint.in.settings")
             case .summaryEmpty:
                 return AppLanguage.localized("summary.is.empty")
-            case .invalidURL:
-                return AppLanguage.localized("invalid.api.url.2")
             case .invalidResponse:
                 return AppLanguage.localized("unexpected.response.format.from.llm.server")
             case .openAIHTTPError(let code):
@@ -335,16 +335,8 @@ final class RecordProcessingManager: ObservableObject {
             if job.settings.usesDefaultProvider {
                 transcriptionText = try await performDefaultTranscription(fileURL: fileURL)
             } else if job.settings.usesSpeechAnalyzer {
-                do {
-                    let localeOverride = job.settings.selectedSpeechAnalyzerLocale
-                    transcriptionText = try await performSpeechAnalyzerTranscription(fileURL: fileURL, locale: localeOverride)
-                } catch let error as TranscriptionError {
-                    Logger.warning("Native transcription failed: \(error.localizedDescription). Falling back to configured service.", category: .transcription)
-                    transcriptionText = try await performRegularTranscription(job: job, fileURL: fileURL)
-                } catch {
-                    Logger.warning("Native transcription failed with unexpected error: \(error.localizedDescription). Falling back to configured service.", category: .transcription)
-                    transcriptionText = try await performRegularTranscription(job: job, fileURL: fileURL)
-                }
+                let localeOverride = job.settings.selectedSpeechAnalyzerLocale
+                transcriptionText = try await performSpeechAnalyzerTranscription(fileURL: fileURL, locale: localeOverride)
             } else if preferStreaming {
                 do {
                     transcriptionText = try await attemptStreamingTranscription(job: job, fileURL: fileURL)
@@ -646,6 +638,7 @@ final class RecordProcessingManager: ObservableObject {
         if job.settings.useChunking && job.settings.chunkSize <= 0 {
             throw RecordProcessingError.invalidChunkSize
         }
+        _ = try validatedSummaryURL(settings: job.settings)
 
         if UITestMockPipeline.isEnabled {
             try await UITestMockPipeline.sleepForProcessingStep()
@@ -684,6 +677,8 @@ final class RecordProcessingManager: ObservableObject {
     }
     
     private func maybeGenerateTitle(for record: Record, summary: String, job: ProcessingJob) async {
+        // Mock pipeline tests preserve fixture names and must never dispatch real title requests.
+        guard !UITestMockPipeline.isEnabled else { return }
         let prompt = job.settings.summaryTitlePrompt.replacingOccurrences(of: "{summary}", with: summary)
         
         do {
@@ -710,10 +705,21 @@ final class RecordProcessingManager: ObservableObject {
     
     // MARK: - OpenAI Compatible Calls
     
-    private func callOpenAIAPI(prompt: String, settings: SettingsSnapshot) async throws -> String {
-        guard let url = APIURLBuilder.buildURL(baseURL: settings.openAIBaseURL, endpoint: "chat/completions") else {
-            throw RecordProcessingError.invalidURL
+    private func validatedSummaryURL(settings: SettingsSnapshot) throws -> URL {
+        let baseURL = settings.openAIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let base = URL(string: baseURL),
+              let scheme = base.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = base.host, !host.isEmpty,
+              let url = APIURLBuilder.buildURL(baseURL: baseURL, endpoint: "chat/completions") else {
+            throw RecordProcessingError.summaryNotConfigured
         }
+        return url
+    }
+
+    private func callOpenAIAPI(prompt: String, settings: SettingsSnapshot) async throws -> String {
+        let url = try validatedSummaryURL(settings: settings)
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
