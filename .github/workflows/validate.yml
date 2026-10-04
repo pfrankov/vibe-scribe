@@ -42,7 +42,11 @@ jobs:
         run: ./scripts/run_invalid_chunk_size_tests.sh 7f2b2d578fa86bf2712a3e334b812036019d9e7b
       - name: Verify invalid chunk sizes are rejected
         run: ./scripts/run_invalid_chunk_size_tests.sh
+      - name: Reproduce implicit processing requests
+        run: ./scripts/run_processing_privacy_tests.sh e2d9fb1af85a59d9f0b4189e10f45474a3d918f3
+      - name: Verify processing request boundaries
+        run: ./scripts/run_processing_privacy_tests.sh
       - name: Build unmodified Release sources
         run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribe -configuration Release -destination 'platform=macOS' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO build
-      - name: Test chunk-size settings and recovery UI
-        run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribeUITests -configuration Debug -destination 'platform=macOS' -disableAutomaticPackageResolution -only-testing:VibeScribeUITests/ChunkSizeValidationTests CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual test
+      - name: Test settings and isolated processing UI
+        run: xcodebuild -project VibeScribe.xcodeproj -scheme VibeScribeUITests -configuration Debug -destination 'platform=macOS' -disableAutomaticPackageResolution -only-testing:VibeScribeUITests/ChunkSizeValidationTests -only-testing:VibeScribeUITests/SummaryConfigurationTests -only-testing:VibeScribeUITests/MockPipelineFlowTests/testMockFlow_NoSpeakers_EndToEndFromFirstLaunchToManualSummaryEdit -only-testing:VibeScribeUITests/MockPipelineFlowTests/testMockFlow_ProviderMatrix_TranscriptionReflectsSelectedProvider -only-testing:VibeScribeUITests/MockPipelineFlowTests/testMockFlow_AutoSummaryError_ManualRetryWithAnotherModelSucceeds CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual test
