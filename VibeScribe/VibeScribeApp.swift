@@ -339,6 +339,14 @@ struct VibeScribeApp: App {
     @MainActor
     private static func seedStandardTestData(in context: ModelContext) {
         let settings = AppSettings()
+        if UITestMockPipeline.isEnabled,
+           let rawSize = ProcessInfo.processInfo.environment["VIBESCRIBE_UI_CHUNK_SIZE"],
+           let chunkSize = Int(rawSize) {
+            settings.chunkSize = chunkSize
+            settings.autoGenerateTitleFromSummary = false
+            settings.openAIBaseURL = "http://127.0.0.1:9/v1/"
+            settings.whisperBaseURL = "http://127.0.0.1:9/v1/"
+        }
         context.insert(settings)
 
         let tag1 = Tag(name: "meeting")

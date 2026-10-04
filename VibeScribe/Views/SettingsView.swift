@@ -248,6 +248,12 @@ struct SettingsView: View {
             loadModelsIfNeeded()
             AppLanguage.applyPreferredLanguagesIfNeeded(code: appLanguageCode)
         }
+        .onChange(of: focusedField) { oldValue, newValue in
+            // Keep observing when a tab change removes the chunk-size field.
+            if oldValue == .chunkSizeField && newValue != .chunkSizeField && !chunkSizeText.isEmpty {
+                saveChunkSize()
+            }
+        }
         .onChange(of: settings.whisperBaseURL) { _, _ in
             loadWhisperModelsIfURLValid()
         }
@@ -699,6 +705,7 @@ struct SettingsView: View {
                     .font(.system(size: UIConstants.fontSize))
                 
                 TextField("25000", text: $chunkSizeText)
+                    .accessibilityIdentifier(AccessibilityID.settingsChunkSize)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 100)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -707,12 +714,6 @@ struct SettingsView: View {
                         // Save when user presses Enter
                         saveChunkSize()
                         focusedField = nil
-                    }
-                    .onChange(of: focusedField) { _, newValue in
-                        // Save when focus is lost
-                        if newValue != .chunkSizeField && !chunkSizeText.isEmpty {
-                            saveChunkSize()
-                        }
                     }
                 
                 captionText(LocalizedStringKey("maximum.size.for.each.text.chunk.in.characters.text.is.split.intelligently.by.paragraphs.first.then.sentences.then.words"))
@@ -910,8 +911,8 @@ struct SettingsView: View {
     }
 
     private func saveChunkSize() {
-        // Convert text to Int, allow any number (including 0 or negative)
-        if let chunkSize = Int(chunkSizeText) {
+        // Keep the previous setting when the input is not a positive integer.
+        if let chunkSize = Int(chunkSizeText), chunkSize > 0 {
             settings.chunkSize = chunkSize
             trySave()
         } else {

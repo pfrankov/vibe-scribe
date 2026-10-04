@@ -1,6 +1,6 @@
 # VibeScribe UI Test Cases
 
-> **34 automated UI tests** across 8 test classes.
+> **37 automated UI tests** across 9 test classes.
 > Platform: macOS (XCUITest).
 > Modes: seeded library (`--uitesting`) + empty onboarding + mock end-to-end pipeline (`--uitesting --empty-state` + mock env).
 >
@@ -8,7 +8,7 @@
 > If it diverges from UI test sources or attached `AccessibilityID` controls, fix both in the same commit.
 >
 > **Sync rule**: every `func test*` in `VibeScribeUITests/*.swift` must have a case below.
-> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **34**.
+> Check before commit: `grep -Rho 'func test[A-Za-z0-9_]*' VibeScribeUITests/*.swift | wc -l` must equal **37**.
 > Validation command: `./scripts/validate_ui_test_cases.sh`.
 
 ## Test Class Matrix
@@ -22,6 +22,7 @@
 | `DemoScreenshotTests` | Per-test launch | Executive demo screenshot state (`--uitesting` + screenshot env) | 1 |
 | `DeleteFlowTests` | Per-test launch | Seeded data (destructive) | 1 |
 | `StateTransitionTests` | Per-test launch | Seeded data (destructive) | 1 |
+| `ChunkSizeValidationTests` | Per-test launch | In-memory settings + mock summary | 3 |
 | `MockPipelineFlowTests` | Per-test launch | First-run empty state + mocked recording/transcription/summary/diarization | 18 |
 
 ## Optimized Run Profiles (Coverage per Launch)
@@ -575,3 +576,27 @@ The integration harness makes only two explicit substitutions in a temporary cop
 - Regression coverage: `VibeScribeTests/TextChunkerRegression.swift`, run by `scripts/run_text_chunker_tests.sh`; this directly exercises the production Foundation chunker without an AI service or UI mock
 
 The native regression runs unchanged `TextChunker` source against both a historical commit and the candidate. Single-space sentence fixtures allow exact reconstruction by joining chunks, including a transcript larger than the default 25,000-character limit. ASCII and BMP text are unchanged controls. Non-positive chunk-size behavior is outside this change.
+
+## Chunk-size validation regression contract
+
+### VS-CHUNK-001 — Reject nonpositive chunk limits
+- Method: `testChunkSizeInput_RejectsNonpositiveValuesAndPersistsPositiveValue`
+- Preconditions: chunking enabled; an existing positive character limit
+- User steps: enter zero or a negative number in the chunk-size field and submit or leave the field
+- Expected result: retain the previous setting and restore the field, matching the existing invalid-input behavior
+
+### VS-CHUNK-002 — Recover from a previously stored invalid limit
+- Method: `testLegacyChunkSize_ShowsLocalErrorAndRecoversAfterCorrection`
+- Preconditions: an existing record with transcription and a stored zero or negative chunk size
+- User steps: request a summary
+- Expected result: show an actionable local error directing the user to Settings; keep the app responsive and make no AI request
+
+Initial native reproduction uses `VibeScribeTests/InvalidChunkSizeProbe.swift` and `scripts/run_invalid_chunk_size_tests.sh`. Each synthetic subprocess has a one-second wall-time limit and cannot produce core dumps. The historical zero-size path must positively reproduce nontermination after entering the chunker; the negative-size path must produce the specific Swift index-bounds failure. The candidate must return no chunks promptly for both invalid sizes. UI checks use in-memory records, mock summaries, and disabled automatic title generation; no recording device or real AI service is used.
+
+### VS-CHUNK-003 — Disabled chunking ignores an unused invalid limit
+- Method: `testDisabledChunking_IgnoresStoredZeroLimit`
+- Preconditions: a stored zero chunk size, a seeded transcript, and mock AI
+- User steps: turn chunking off in Settings, then request a summary
+- Expected result: summary succeeds without the chunk-size error; the unused stored limit does not change
+
+The chunk-size field uses `settingsChunkSize`; its input, focus-loss, reopen, and recovery paths are covered by `ChunkSizeValidationTests`.
