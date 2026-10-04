@@ -19,13 +19,19 @@ fi
 
 BUMP_PART=""
 BUILD_NUMBER=""
+BUILD_EXPLICIT=false
 DO_TAG=false
 DO_PUSH=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --build)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing build number after --build"
+        exit 1
+      fi
       BUILD_NUMBER="$2"
+      BUILD_EXPLICIT=true
       shift 2
       ;;
     --tag)
@@ -60,6 +66,10 @@ fi
 
 if [[ ! "$BUMP_PART" =~ ^(major|minor|patch)$ ]]; then
   echo "Invalid bump part: $BUMP_PART. Use major, minor, or patch."
+  exit 1
+fi
+if [[ "$BUILD_EXPLICIT" == true && ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+  echo "Build number must be a nonnegative integer"
   exit 1
 fi
 
@@ -112,35 +122,55 @@ case "$BUMP_PART" in
 esac
 
 NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+# Resolve and validate the effective build before changing either version source.
+PROJECT_BUILDS=$(grep -Eo 'CURRENT_PROJECT_VERSION = [0-9]+;' "$PBXPROJ_PATH" | sed -E 's/.*= ([0-9]+);/\1/' || true)
+if [[ -z "$PROJECT_BUILDS" ]]; then
+  echo "No numeric CURRENT_PROJECT_VERSION found in project"
+  exit 1
+fi
+if [[ "$BUILD_EXPLICIT" == true ]]; then
+  NEXT_BUILD="$BUILD_NUMBER"
+else
+  CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH" 2>/dev/null || echo "")
+  if [[ "$CURRENT_BUILD" == '$(CURRENT_PROJECT_VERSION)' ]]; then
+    CURRENT_BUILD=0
+    while IFS= read -r build; do
+      if (( 10#$build > CURRENT_BUILD )); then
+        CURRENT_BUILD=$((10#$build))
+      fi
+    done <<< "$PROJECT_BUILDS"
+  elif [[ "$CURRENT_BUILD" =~ ^[0-9]+$ ]]; then
+    CURRENT_BUILD=$((10#$CURRENT_BUILD))
+  else
+    echo "CFBundleVersion must be numeric or \$(CURRENT_PROJECT_VERSION)"
+    exit 1
+  fi
+  NEXT_BUILD=$((CURRENT_BUILD + 1))
+  if (( NEXT_BUILD <= CURRENT_BUILD )); then
+    echo "Build number cannot be incremented safely"
+    exit 1
+  fi
+fi
+
 echo "Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
 
 # Update MARKETING_VERSION in project.pbxproj (all occurrences)
 echo "Updating MARKETING_VERSION in project to $NEW_VERSION"
 LC_ALL=C sed -i '' -E "s/(MARKETING_VERSION = )[0-9]+\.[0-9]+\.[0-9]+;/\\1$NEW_VERSION;/g" "$PBXPROJ_PATH"
+echo "Updating CURRENT_PROJECT_VERSION in project to $NEXT_BUILD"
+LC_ALL=C sed -i '' -E "s/(CURRENT_PROJECT_VERSION = )[0-9]+;/\\1$NEXT_BUILD;/g" "$PBXPROJ_PATH"
 
 # Ensure Info.plist uses $(MARKETING_VERSION) as CFBundleShortVersionString
 PLIST_SHORT_VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH" 2>/dev/null || echo "")
 if [ "$PLIST_SHORT_VER" != '$(MARKETING_VERSION)' ]; then
-  echo "Setting Info.plist CFBundleShortVersionString to $(MARKETING_VERSION)"
+  echo 'Setting Info.plist CFBundleShortVersionString to $(MARKETING_VERSION)'
   /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString $(MARKETING_VERSION)' "$PLIST_PATH"
 fi
 
-if [ -n "$BUILD_NUMBER" ]; then
-  echo "Setting build number to $BUILD_NUMBER"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST_PATH"
-else
-  # If no build number passed, increment current numeric build (if integer), else set to 1
-  CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH" 2>/dev/null || echo "")
-  if [[ "$CURRENT_BUILD" =~ ^[0-9]+$ ]]; then
-    NEXT_BUILD=$((CURRENT_BUILD + 1))
-  else
-    NEXT_BUILD=1
-  fi
-  echo "Auto bumping build number: $CURRENT_BUILD -> $NEXT_BUILD"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEXT_BUILD" "$PLIST_PATH"
-fi
+/usr/libexec/PlistBuddy -c 'Set :CFBundleVersion $(CURRENT_PROJECT_VERSION)' "$PLIST_PATH"
 
-git -C "$REPO_ROOT" add "$PLIST_PATH"
+git -C "$REPO_ROOT" add "$PLIST_PATH" "$PBXPROJ_PATH"
 echo "Review and commit the updated project files (Info.plist and project.pbxproj) manually."
 
 # Tagging (tags are created on current HEAD; ensure you've committed changes before tagging)
