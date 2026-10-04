@@ -635,3 +635,14 @@ Native request-boundary regressions additionally exercise the actual provider-se
 - Preconditions: isolated transcription engine returns a unique synthetic transcript; an intercepted summary service returns a unique generated title or malformed JSON response. No real recording, model download, or external request is used.
 - Steps: complete transcription; generate a new title; repeat with that title already stored; process a response with missing required fields; capture application Logger messages.
 - Expected result: returned transcript, saved title, unchanged-title handling, and response errors retain their existing behavior. Logs contain status/count diagnostics without the transcript, generated title, or response-body markers. This changes diagnostics only; existing UI behavior/tests remain unchanged.
+
+
+## Packaged release validation contract
+- Preconditions: the reviewed Release source builds a universal macOS app with the project's existing manual ad-hoc signing and entitlements.
+- Steps: verify version/build, minimum OS, both executable architectures, signature and exact expected entitlements; create the release ZIP; extract into an isolated temporary directory and repeat bundle checks; launch that extracted app with in-memory UI-testing and mock-pipeline flags, verify it remains running, then terminate only that fixture process group.
+- Expected result: the packaged app passes integrity/metadata checks and the synthetic launch smoke without recording, real API calls, or permission/security changes. This does not test Gatekeeper quarantine, notarization, real speech engines, or recording devices. Existing functional UI tests remain the UI behavior gate.
+
+## Version-bump helper contract (isolated macOS fixtures)
+- Preconditions: a temporary Git repository contains copies of the app plist, Xcode project and version-bump helper; it has no remotes.
+- Steps: bump patch versions with a build-setting token, select an explicit build, migrate a legacy numeric plist build, and try invalid build inputs or a token with no numeric project build setting. Never request tagging or pushing.
+- Expected result: automatic bumps increment the effective build, explicit builds update project settings, and the plist retains the build-setting substitution. Invalid input fails before changing files. This is developer tooling only and has no app UI change.
